@@ -254,9 +254,11 @@
     <string name="perm_denied">Bluetooth olmadan Mnemo kolyeyi duyamaz. Uygulama ayarlarından izin verin.</string>
     <string name="perm_text">Kolyeyi duymak için Bluetooth. Android\'in kaydı arka planda durdurmaması için bildirimler.</string>
     <string name="perm_title">İki izin</string>
+    <string name="photo_ai">Yapay zekâ ile fotoğraf seçimi</string>
+    <string name="photo_ai_sub">Açıklamalar ve ekran görüntüsü ayıklama, fotoğraf başına yaklaşık $0.0003. Kapatırsanız fotoğraflar olaylara yalnızca zaman ve yere göre, ücretsiz eşlenir</string>
     <string name="photo_style">Fotoğraf stili</string>
     <string name="photo_styling">Yapay zekâ ile fotoğraf stili</string>
-    <string name="photo_styling_sub">Görsel başına yaklaşık $0.08, yalnızca seçilen fotoğraflar</string>
+    <string name="photo_styling_sub">Görsel başına yaklaşık $0.08, yalnızca günün hikâyesine seçilen fotoğraflar. Kapalıyken orijinaller gösterilir</string>
     <string name="photos_from_phone">Telefondan günün fotoğrafları</string>
     <string name="photos_from_phone_sub">Bugünün kamera çekimleri günlük adayı olur</string>
     <string name="photos_per_day">Günlük fotoğraf</string>

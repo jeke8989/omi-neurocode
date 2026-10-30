@@ -37,7 +37,7 @@ STYLES = {
 STYLE_SUFFIX = (" Keep the composition, people, places and objects recognizable. Do not add any text, letters,"
                 " watermarks or logos.")
 
-DEFAULTS = {"feature.diary": "1", "feature.photo_style": "1", "diary.style": "watercolor",
+DEFAULTS = {"feature.diary": "1", "feature.photo_ai": "1", "feature.photo_style": "1", "diary.style": "watercolor",
             "diary.photos_per_day": "3"}
 
 
@@ -165,6 +165,19 @@ ANALYZE_PROMPT = """Это фото с телефона владельца. Ре
 "score": число 0–10 — насколько это интересный момент дня (люди, места, еда, события выше; случайные кадры ниже)}"""
 
 
+def accept_photo_without_ai(conn, photo: dict):
+    """Режим без ИИ: фото не отправляется модели (0 токенов). Уменьшаем, берём время и место из EXIF,
+    дальше оно привязывается к событиям дня только по времени и месту."""
+    jpeg, meta = _prepare_image(photo["path"])
+    Path(photo["path"]).write_bytes(jpeg)
+    conn.execute(
+        """UPDATE photos SET caption = NULL, status = 'analyzed', error = NULL,
+               taken_at = coalesce(%s, taken_at), lat = coalesce(lat, %s), lon = coalesce(lon, %s)
+           WHERE id = %s""",
+        (meta.get("taken_at"), meta.get("lat"), meta.get("lon"), photo["id"]),
+    )
+
+
 def analyze_photo(conn, photo: dict):
     jpeg, meta = _prepare_image(photo["path"])
     Path(photo["path"]).write_bytes(jpeg)  # храним уже уменьшенную копию
@@ -273,7 +286,7 @@ def material_text(m: dict, max_photos: int) -> str:
     linked = [p for p in m["photos"] if p["event"]]
     if linked:
         lines.append(f"Фото (можно прикрепить к хайлайтам не больше {max_photos}, только к своему событию):")
-        lines += [f"- photo_id={p['id']} {_t(p['taken_at'])} [{p['event']}] {p['caption']}" for p in linked]
+        lines += [f"- photo_id={p['id']} {_t(p['taken_at'])} [{p['event']}] {p['caption'] or '(фото без подписи)'}" for p in linked]
     return "\n".join(lines)
 
 
@@ -345,10 +358,15 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
 def tick(conn):
     if not enabled(conn, "feature.diary"):
         return
-    # 1) анализ новых фото (дёшево) — по 3 за проход
-    for p in conn.execute("SELECT * FROM photos WHERE status = 'pending' ORDER BY id LIMIT 3").fetchall():
+    # 1) новые фото: с ИИ — подпись и отбор (дёшево), без ИИ — только время и место (бесплатно)
+    use_ai = enabled(conn, "feature.photo_ai")
+    for p in conn.execute("SELECT * FROM photos WHERE status = 'pending' ORDER BY id LIMIT %s",
+                          (3 if use_ai else 20,)).fetchall():
         try:
-            analyze_photo(conn, p)
+            if use_ai:
+                analyze_photo(conn, p)
+            else:
+                accept_photo_without_ai(conn, p)
         except Exception as exc:  # noqa: BLE001
             log.warning("photo %s analyze failed: %s", p["id"], exc)
             conn.execute("UPDATE photos SET status = 'failed', error = %s WHERE id = %s", (str(exc)[:300], p["id"]))

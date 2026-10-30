@@ -254,9 +254,11 @@
     <string name="perm_denied">Sin Bluetooth, Mnemo no puede oír el colgante. Permite el acceso en los ajustes de la app.</string>
     <string name="perm_text">Bluetooth para oír el colgante. Notificaciones para que Android no detenga la grabación en segundo plano.</string>
     <string name="perm_title">Dos permisos</string>
+    <string name="photo_ai">Selección de fotos con IA</string>
+    <string name="photo_ai_sub">Pies de foto y filtrado de capturas, unos $0.0003 por foto. Si lo desactivas, las fotos se asocian a los momentos solo por hora y lugar, gratis</string>
     <string name="photo_style">Estilo de foto</string>
     <string name="photo_styling">Estilizado con IA</string>
-    <string name="photo_styling_sub">Unos $0.08 por imagen, solo las fotos elegidas</string>
+    <string name="photo_styling_sub">Unos $0.08 por imagen, solo las fotos elegidas para la historia del día. Desactivado: se muestran los originales</string>
     <string name="photos_from_phone">Fotos del día del teléfono</string>
     <string name="photos_from_phone_sub">Las fotos de hoy como candidatas para el diario</string>
     <string name="photos_per_day">Fotos por día</string>

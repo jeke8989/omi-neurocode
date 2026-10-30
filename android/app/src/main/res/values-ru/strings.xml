@@ -254,9 +254,11 @@
     <string name="perm_denied">Без Bluetooth Mnemo не услышит кулон. Разрешите доступ в настройках приложения.</string>
     <string name="perm_text">Bluetooth, чтобы слышать кулон. Уведомления, чтобы Android не останавливал запись в фоне.</string>
     <string name="perm_title">Два разрешения</string>
+    <string name="photo_ai">Подбор фото с ИИ</string>
+    <string name="photo_ai_sub">Подписи и отсев скриншотов, около $0.0003 за фото. Выключите, и фото будут подбираться к событиям только по времени и месту, бесплатно</string>
     <string name="photo_style">Стиль фото</string>
     <string name="photo_styling">ИИ-обработка фото</string>
-    <string name="photo_styling_sub">Около $0.08 за кадр, только выбранные фото</string>
+    <string name="photo_styling_sub">Около $0.08 за кадр, только фото, выбранные в историю дня. Выключено — показываются оригиналы</string>
     <string name="photos_from_phone">Фото дня с телефона</string>
     <string name="photos_from_phone_sub">Снимки камеры за сегодня как кандидаты в дневник</string>
     <string name="photos_per_day">Фото в день</string>

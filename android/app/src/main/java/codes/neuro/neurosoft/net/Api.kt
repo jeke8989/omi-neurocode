@@ -104,7 +104,7 @@ data class Extension(
     val taskSync: String?, val enabled: Boolean, val ready: Boolean, val installed: Boolean, val verified: Boolean,
 )
 
-data class Features(val diary: Boolean, val photoStyle: Boolean, val style: String, val photosPerDay: Int,
+data class Features(val diary: Boolean, val photoStyle: Boolean, val photoAi: Boolean = true, val style: String, val photosPerDay: Int,
                     val styles: List<Pair<String, String>>, val language: String = "ru",
                     val sttLanguage: String = "app")
 
@@ -344,6 +344,7 @@ object Api {
 
     private fun features(o: JSONObject) = Features(
         diary = o.optBoolean("diary", true), photoStyle = o.optBoolean("photo_style", true),
+        photoAi = o.optBoolean("photo_ai", true),
         style = o.optString("style"), photosPerDay = o.optInt("photos_per_day", 3),
         styles = o.optJSONArray("styles").map { it.optString("key") to it.optString("title") },
         language = o.optString("language", "ru"), sttLanguage = o.optString("stt_language", "app"),

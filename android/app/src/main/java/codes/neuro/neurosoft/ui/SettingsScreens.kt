@@ -331,6 +331,8 @@ fun DiarySettingsScreen() {
                     }
                 }, icon = Icons.Photo, subtitle = stringResource(R.string.photos_from_phone_sub))
             }
+            item { ToggleRow(stringResource(R.string.photo_ai), f?.photoAi ?: true, { set(mapOf("photo_ai" to it)) },
+                icon = Icons.Sparkle, subtitle = stringResource(R.string.photo_ai_sub), enabled = f != null) }
             item { ToggleRow(stringResource(R.string.photo_styling), f?.photoStyle ?: true,
                 { set(mapOf("photo_style" to it)) }, icon = Icons.Palette,
                 subtitle = stringResource(R.string.photo_styling_sub), enabled = f != null) }

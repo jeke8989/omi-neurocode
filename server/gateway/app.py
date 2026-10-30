@@ -864,7 +864,7 @@ async def api_extension(request: Request):
 # ---------------------------------------------------------------------------
 # Дневник жизни: лента дня, фото, настройки функций
 # ---------------------------------------------------------------------------
-FEATURE_KEYS = {"diary": "feature.diary", "photo_style": "feature.photo_style", "style": "diary.style",
+FEATURE_KEYS = {"diary": "feature.diary", "photo_ai": "feature.photo_ai", "photo_style": "feature.photo_style", "style": "diary.style",
                 "photos_per_day": "diary.photos_per_day"}
 
 
@@ -901,7 +901,7 @@ async def api_features(request: Request):
                 if name not in body:
                     continue
                 v = body[name]
-                if name in ("diary", "photo_style"):
+                if name in ("diary", "photo_ai", "photo_style"):
                     v = "1" if v else "0"
                 elif name == "style":
                     if v not in diary.STYLES:
@@ -914,6 +914,7 @@ async def api_features(request: Request):
         st = await _settings_map(conn)
     return Json({
         "diary": st["feature.diary"] == "1",
+        "photo_ai": st["feature.photo_ai"] == "1",
         "photo_style": st["feature.photo_style"] == "1",
         "style": st["diary.style"],
         "photos_per_day": int(st["diary.photos_per_day"] or 3),

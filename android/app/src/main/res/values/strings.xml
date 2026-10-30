@@ -255,9 +255,11 @@
     <string name="perm_denied">Without Bluetooth, Mnemo can\'t hear the pendant. Allow access in app settings.</string>
     <string name="perm_text">Bluetooth to hear the pendant. Notifications so Android doesn\'t stop recording in the background.</string>
     <string name="perm_title">Two permissions</string>
+    <string name="photo_ai">AI photo picking</string>
+    <string name="photo_ai_sub">Captions and screenshot filtering, about $0.0003 per photo. Turn it off and photos are matched to events by time and place only, for free</string>
     <string name="photo_style">Photo style</string>
     <string name="photo_styling">AI photo styling</string>
-    <string name="photo_styling_sub">About $0.08 per image, selected photos only</string>
+    <string name="photo_styling_sub">About $0.08 per image, only photos picked for the day\'s story. Off: originals are shown</string>
     <string name="photos_from_phone">Today\'s photos from the phone</string>
     <string name="photos_from_phone_sub">Today\'s camera shots as diary candidates</string>
     <string name="photos_per_day">Photos per day</string>

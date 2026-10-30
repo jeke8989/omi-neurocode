@@ -224,3 +224,29 @@ def test_task_feed_goes_to_integrations(conn, monkeypatch):  # noqa: F811
     assert github[0][2]["title"] == "Починить синхронизацию"
     refs = {r["ext_id"]: r["ref"] for r in conn.execute("SELECT ext_id, ref FROM task_exports WHERE ok").fetchall()}
     assert refs["github"].endswith("/issues/7")
+
+
+def test_photos_without_ai_cost_nothing(conn, monkeypatch, tmp_path):  # noqa: F811
+    """Режим «без ИИ»: фото не уходят в модель, только время и место из EXIF."""
+    from neuro import diary, llm
+    monkeypatch.setattr(diary, "PHOTO_DIR", tmp_path)
+    for t in ("photos", "diary_days"):
+        conn.execute(f"DELETE FROM {t}")
+    conn.execute("INSERT INTO settings (key, value) VALUES ('feature.photo_ai', '0') "
+                 "ON CONFLICT (key) DO UPDATE SET value = '0'")
+    conn.execute("INSERT INTO settings (key, value) VALUES ('feature.photo_style', '0') "
+                 "ON CONFLICT (key) DO UPDATE SET value = '0'")
+    taken = datetime(2026, 10, 29, 9, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(diary, "_prepare_image", lambda path: (b"small", {"taken_at": taken, "lat": 41.03, "lon": 28.97}))
+
+    def no_llm(*a, **k):
+        raise AssertionError("в режиме без ИИ модель не вызывается")
+
+    monkeypatch.setattr(llm, "chat", no_llm)
+    monkeypatch.setattr(llm, "chat_json", no_llm)
+    monkeypatch.setattr(diary, "_safe_generate", lambda *a, **k: None)
+    pid = diary.save_photo(conn, b"\xff\xd8\xff" + b"9" * 50, None, None, None)["id"]
+    diary.tick(conn)
+    p = conn.execute("SELECT status, caption, lat FROM photos WHERE id = %s", (pid,)).fetchone()
+    assert p["status"] == "analyzed" and p["caption"] is None and abs(p["lat"] - 41.03) < 1e-6
+    conn.execute("DELETE FROM settings WHERE key IN ('feature.photo_ai', 'feature.photo_style')")
