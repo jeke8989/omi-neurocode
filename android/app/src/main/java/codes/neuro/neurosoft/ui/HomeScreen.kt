@@ -34,6 +34,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -134,14 +136,26 @@ private fun DevicePill() {
 @Composable
 private fun TextTabs(titles: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     val c = Mn.c
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        titles.forEachIndexed { i, t ->
-            val color by animateColorAsState(if (i == selected) c.ink else c.faint, label = "tab")
-            Txt(t, T.display, color, maxLines = 1, modifier = Modifier.quietTap { onSelect(i) })
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val available = constraints.maxWidth - with(density) { 40.dp.toPx() }
+        // как у Omi — крупно, но все вкладки целиком: на узком экране и длинных словах шрифт чуть меньше
+        val scale = remember(titles, available) {
+            val words = titles.sumOf { measurer.measure(it, T.display).size.width }
+            val gaps = with(density) { 20.dp.toPx() } * (titles.size - 1)
+            (available / (words + gaps)).coerceIn(0.68f, 1f)
+        }
+        val style = T.display.copy(fontSize = T.display.fontSize * scale, lineHeight = T.display.lineHeight * scale)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp * scale),
+        ) {
+            titles.forEachIndexed { i, t ->
+                val color by animateColorAsState(if (i == selected) c.ink else c.faint, label = "tab")
+                Txt(t, style, color, maxLines = 1, modifier = Modifier.quietTap { onSelect(i) })
+            }
         }
     }
 }
@@ -293,14 +307,14 @@ fun HomeTab() {
 
 /** Строка внутри карточки-группы в ленивом списке: скругления сверху у первой и снизу у последней. */
 @Composable
-fun Grouped(index: Int, count: Int, content: @Composable () -> Unit) {
+fun Grouped(index: Int, count: Int, inset: androidx.compose.ui.unit.Dp = 74.dp, content: @Composable () -> Unit) {
     val r = 20.dp
     val shape: Shape = RoundedCornerShape(
         topStart = if (index == 0) r else 0.dp, topEnd = if (index == 0) r else 0.dp,
         bottomStart = if (index == count - 1) r else 0.dp, bottomEnd = if (index == count - 1) r else 0.dp,
     )
     Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(shape).background(Mn.c.paper)) {
-        if (index > 0) HorizontalDivider(Modifier.padding(start = 76.dp), thickness = 0.6.dp, color = Mn.c.line)
+        if (index > 0) HorizontalDivider(Modifier.padding(start = inset), thickness = 0.6.dp, color = Mn.c.line)
         content()
     }
 }

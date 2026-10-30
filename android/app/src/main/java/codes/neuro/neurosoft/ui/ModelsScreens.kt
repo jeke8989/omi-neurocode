@@ -48,7 +48,7 @@ fun ModelsScreen() {
             info == null && state.error != null -> ErrorBlock(state.error, { reload() })
             info == null -> LoadingBlock()
             else -> {
-                Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TileRow(Modifier.padding(top = 12.dp)) {
                     StatTile(stringResource(R.string.spend_30d), fmt.price(info.spendTotal), Modifier.weight(1f))
                     StatTile(stringResource(R.string.provider), if (info.provider == "openrouter") "OpenRouter"
                     else stringResource(R.string.provider_custom), Modifier.weight(1f))
@@ -74,7 +74,7 @@ fun ModelsScreen() {
                         listOfNotNull(opt?.name ?: t.model, priceLine(opt, fmt),
                             spent?.let { stringResource(R.string.spent_30d, fmt.price(it)) }).joinToString(", ")
                     }
-                    Group(stringResource(title)) {
+                    Group(stringResource(title), inset = 22.dp) {
                         rows.forEachIndexed { i, (t, _, _) ->
                             item { ListRow(t.title, subtitle = subtitles[i], chevron = true,
                                 onClick = { Nav.push(Route.ModelPicker(t)) }) }
@@ -126,7 +126,7 @@ fun ModelPickerScreen(task: ModelTask) {
                 val recommended = info.catalog.filter { it.kind == task.kind }
                 val prices = recommended.map { priceLine(it, fmt) }
                 val defaultLabel = stringResource(R.string.default_model)
-                Group(stringResource(R.string.recommended)) {
+                Group(stringResource(R.string.recommended), inset = 22.dp) {
                     recommended.forEachIndexed { i, m ->
                         item {
                             ListRow(m.name, subtitle = listOfNotNull(
@@ -161,7 +161,7 @@ fun ModelPickerScreen(task: ModelTask) {
                         q.isEmpty() || q in it.id.lowercase(Locale.ROOT) || q in it.name.lowercase(Locale.ROOT)
                     }.take(40)
                     val foundPrices = found.map { priceLine(it, fmt) }
-                    Group {
+                    Group(inset = 22.dp) {
                         found.forEachIndexed { i, m ->
                             item {
                                 ListRow(m.name, subtitle = m.id + "\n" + foundPrices[i], onClick = { choose(m.id) }) {

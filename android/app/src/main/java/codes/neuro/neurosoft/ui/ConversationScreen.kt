@@ -126,7 +126,7 @@ fun ConversationScreen(id: Long) {
                     SectionTitle(stringResource(R.string.tab_tasks))
                     d.tasks.forEachIndexed { i, t ->
                         var task by remember(t.id) { mutableStateOf(t) }
-                        Grouped(i, d.tasks.size) {
+                        Grouped(i, d.tasks.size, inset = 50.dp) {
                             TaskRow(task, {
                                 val before = task
                                 val next = if (task.status == "done") "open" else "done"

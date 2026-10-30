@@ -318,7 +318,7 @@ fun DayScreen(day: String) {
                     Txt(d.title ?: stringResource(R.string.day_untitled), T.display)
                 }
                 // цифры дня — как «42 · 2ч 46м · 8» у Omi, но с подписями
-                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TileRow() {
                     StatTile(stringResource(R.string.stat_conversations), "${d.stats["conversations"] ?: 0}",
                         Modifier.weight(1f))
                     StatTile(stringResource(R.string.stat_time), fmt.duration((d.stats["minutes"] ?: 0) * 60L),

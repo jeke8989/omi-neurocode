@@ -99,7 +99,7 @@ fun ExtensionsScreen() {
                         else -> plural(R.plurals.tools, e.tools.size)
                     }
                 }
-                Group(stringResource(R.string.connected), footer = if (mine.isEmpty()) stringResource(R.string.connected_empty)
+                Group(stringResource(R.string.connected), inset = 22.dp, footer = if (mine.isEmpty()) stringResource(R.string.connected_empty)
                 else stringResource(R.string.connected_footer)) {
                     mine.forEachIndexed { i, e ->
                         item {
@@ -132,7 +132,7 @@ fun ExtensionsScreen() {
                         }
                     }
                 }
-                Group(stringResource(R.string.own_extension), footer = stringResource(R.string.own_extension_footer)) {
+                Group(stringResource(R.string.own_extension), inset = 22.dp, footer = stringResource(R.string.own_extension_footer)) {
                     item { FieldRow(stringResource(R.string.manifest_link), manifestUrl, { manifestUrl = it },
                         "https://…/manifest.json", keyboard = KeyboardType.Uri) }
                     item { ListRow(stringResource(R.string.install_by_link), icon = Icons.Link, accent = true,
@@ -197,7 +197,7 @@ fun ExtensionScreen(id: String) {
                 if (e.settings.isNotEmpty()) {
                     val savedPlaceholder = stringResource(R.string.saved_secret)
                     val required = stringResource(R.string.required)
-                    Group(stringResource(R.string.ext_settings), footer = e.settings.mapNotNull { s ->
+                    Group(stringResource(R.string.ext_settings), inset = 22.dp, footer = e.settings.mapNotNull { s ->
                         s.hint?.let { "${s.title}: $it" } }.joinToString("\n").ifBlank { null }) {
                         e.settings.forEach { s ->
                             item {

@@ -94,7 +94,7 @@ fun DeviceScreen() {
         }
 
         // ---------------------------------------------------------- плитки
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        TileRow() {
             StatTile(stringResource(R.string.battery), device.battery?.let { "$it%" } ?: "—", Modifier.weight(1f),
                 note = if (device.charging == true) stringResource(R.string.charging) else null,
                 valueColor = if ((device.battery ?: 100) < 15) c.red else c.ink)
@@ -197,7 +197,7 @@ fun DeviceScreen() {
         }
 
         // ---------------------------------------------------------- диагностика
-        Group(stringResource(R.string.diagnostics), trailing = {
+        Group(stringResource(R.string.diagnostics), inset = 22.dp, trailing = {
             Icon(if (diagnostics) Icons.ChevronDown else Icons.Chevron, null, tint = c.graphite,
                 modifier = Modifier.size(20.dp).quietTap { diagnostics = !diagnostics })
         }) {

@@ -122,7 +122,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
 ) {
     if (hits.isEmpty()) return
     item { SectionTitle(stringResource(title)) }
-    itemsIndexed(hits) { i, h -> Grouped(i, hits.size) { row(h) } }
+    itemsIndexed(hits) { i, h -> Grouped(i, hits.size, inset = 68.dp) { row(h) } }
 }
 
 @Composable

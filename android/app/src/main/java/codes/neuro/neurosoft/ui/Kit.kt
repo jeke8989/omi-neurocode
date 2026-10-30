@@ -176,6 +176,7 @@ fun Group(
     header: String? = null,
     footer: String? = null,
     modifier: Modifier = Modifier,
+    inset: Dp = 56.dp,
     trailing: (@Composable () -> Unit)? = null,
     build: GroupScope.() -> Unit,
 ) {
@@ -194,7 +195,7 @@ fun Group(
         if (scope.items.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.paper)) {
                 scope.items.forEachIndexed { i, row ->
-                    if (i > 0) HorizontalDivider(Modifier.padding(start = 56.dp), thickness = 0.6.dp, color = c.line)
+                    if (i > 0) HorizontalDivider(Modifier.padding(start = inset), thickness = 0.6.dp, color = c.line)
                     row()
                 }
             }
@@ -284,9 +285,10 @@ fun Card(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, padding: 
 @Composable
 fun StatTile(label: String, value: String, modifier: Modifier = Modifier, note: String? = null,
              valueColor: Color = Mn.c.ink) {
-    Column(modifier.clip(RoundedCornerShape(20.dp)).background(Mn.c.paper).padding(16.dp)) {
+    Column(modifier.fillMaxHeight().clip(RoundedCornerShape(20.dp)).background(Mn.c.paper).padding(16.dp)) {
         Txt(label, T.caption, Mn.c.graphite, maxLines = 2)
-        Spacer(Modifier.height(6.dp))
+        // плитки в ряду одной высоты: цифры прижаты к низу, даже если подпись в две строки
+        Spacer(Modifier.height(6.dp).weight(1f))
         FitText(value, T.number, valueColor)
         if (note != null) Txt(note, T.caption, Mn.c.graphite, Modifier.padding(top = 2.dp), maxLines = 1)
     }
@@ -305,6 +307,13 @@ fun FitText(text: String, style: TextStyle, color: Color, minSize: Float = 14f) 
         },
         modifier = Modifier.drawWithContent { if (ready) drawContent() },
     )
+}
+
+/** Ряд плиток одинаковой высоты. */
+@Composable
+fun TileRow(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 16.dp).height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), content = content)
 }
 
 @Composable

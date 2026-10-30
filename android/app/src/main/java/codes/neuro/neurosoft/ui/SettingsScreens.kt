@@ -370,7 +370,7 @@ fun LanguageScreen() {
     val current = Core.prefs.language
     val options = listOf("" to stringResource(R.string.lang_system)) + Lang.supported
     SettingsPage(stringResource(R.string.app_language)) {
-        Group(footer = stringResource(R.string.language_footer)) {
+        Group(footer = stringResource(R.string.language_footer), inset = 22.dp) {
             options.forEach { (code, name) ->
                 item {
                     ListRow(name, onClick = {
@@ -396,7 +396,7 @@ fun SttLanguageScreen() {
     val current = res.data?.sttLanguage ?: "app"
     SettingsPage(stringResource(R.string.speech_language)) {
         error?.let { StaleNote(it) }
-        Group(footer = stringResource(R.string.speech_language_footer)) {
+        Group(footer = stringResource(R.string.speech_language_footer), inset = 22.dp) {
             (listOf("app", "auto") + Lang.supported.map { it.first }).forEach { code ->
                 item {
                     ListRow(sttChoiceTitle(code), subtitle = if (code == "auto") stringResource(R.string.stt_auto_sub) else null,

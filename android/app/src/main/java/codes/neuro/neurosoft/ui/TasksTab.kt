@@ -73,7 +73,7 @@ fun TasksTab() {
                         }
                     }
                     itemsIndexed(open, key = { _, t -> t.id }) { i, t ->
-                        Grouped(i, open.size) { TaskRow(t, { toggle(t) }) }
+                        Grouped(i, open.size, inset = 50.dp) { TaskRow(t, { toggle(t) }) }
                     }
                     if (done.isNotEmpty()) {
                         item {
@@ -86,7 +86,7 @@ fun TasksTab() {
                         if (showDone) {
                             val shown = done.take(50)
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
-                                Grouped(i, shown.size) { TaskRow(t, { toggle(t) }) }
+                                Grouped(i, shown.size, inset = 50.dp) { TaskRow(t, { toggle(t) }) }
                             }
                         }
                     }
