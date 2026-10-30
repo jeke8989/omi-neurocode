@@ -212,6 +212,24 @@ def pcm_to_wav(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
     return buf.getvalue()
 
 
+def speech_ms(pcm: bytes, min_rms: float = 180.0, ratio: float = 2.5) -> int:
+    """Сколько миллисекунд в куске похоже на речь.
+
+    Кадры по 20 мс; фон — 10-й перцентиль громкости куска, речь — кадры громче фона в ratio раз
+    и не тише min_rms. Ровный шум (машина, кондиционер, тишина) речью не считается.
+    """
+    import numpy as np
+
+    frame = 20 * SAMPLE_RATE // 1000  # отсчётов в 20 мс
+    n = len(pcm) // 2 // frame
+    if n == 0:
+        return 0
+    a = np.frombuffer(pcm[: n * frame * 2], dtype=np.int16).astype(np.float64).reshape(n, frame)
+    rms = np.sqrt((a * a).mean(axis=1))
+    noise = float(np.percentile(rms, 10))
+    return int((rms > max(noise * ratio, min_rms)).sum()) * 20
+
+
 def pcm_rms(pcm: bytes) -> float:
     import numpy as np
 

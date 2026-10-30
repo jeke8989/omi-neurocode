@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -286,11 +287,24 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier, note: 
     Column(modifier.clip(RoundedCornerShape(20.dp)).background(Mn.c.paper).padding(16.dp)) {
         Txt(label, T.caption, Mn.c.graphite, maxLines = 2)
         Spacer(Modifier.height(6.dp))
-        // длинные значения («2 ч 14 мин») мельче, чтобы три плитки помещались в ряд
-        Txt(value, if (value.length > 6) T.section.copy(fontSize = 20.sp, lineHeight = 32.sp) else T.number, valueColor,
-            maxLines = 1)
+        FitText(value, T.number, valueColor)
         if (note != null) Txt(note, T.caption, Mn.c.graphite, Modifier.padding(top = 2.dp), maxLines = 1)
     }
+}
+
+/** Одна строка, которая уменьшает шрифт, пока не поместится («2 ч 14 мин» в узкой плитке), а не обрезается. */
+@Composable
+fun FitText(text: String, style: TextStyle, color: Color, minSize: Float = 14f) {
+    var size by remember(text, style) { mutableStateOf(style.fontSize.value) }
+    var ready by remember(text, style) { mutableStateOf(false) }
+    Text(
+        text, color = color, maxLines = 1, softWrap = false,
+        style = style.copy(fontSize = size.sp, lineHeight = (size * 1.15f).sp),
+        onTextLayout = { r ->
+            if (r.didOverflowWidth && size > minSize) size = (size * 0.9f).coerceAtLeast(minSize) else ready = true
+        },
+        modifier = Modifier.drawWithContent { if (ready) drawContent() },
+    )
 }
 
 @Composable

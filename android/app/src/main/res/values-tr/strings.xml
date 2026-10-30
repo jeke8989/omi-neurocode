@@ -220,7 +220,7 @@
     <string name="now_catching_up">Yetişiyor</string>
     <string name="now_catching_up_text">Biriken kayıtlar sunucuya gönderiliyor</string>
     <string name="now_live">Canlı</string>
-    <string name="now_live_text">Ses doğrudan sunucunuza gider</string>
+    <string name="now_live_text">Ses sunucunuza gider. Sessizlik ve sabit gürültü konuşmaya dönüşmez</string>
     <string name="now_no_pendant">Kolye bağlı değil</string>
     <string name="now_off">Kayıt kapalı</string>
     <string name="now_off_text">Kontrol bölümünden açın</string>
@@ -337,6 +337,7 @@
     <string name="state_connecting">Kolye aranıyor</string>
     <string name="state_disconnected">Bağlı değil</string>
     <string name="state_listening">Dinliyor, bağlı</string>
+    <string name="state_listening_offline">Dinliyor, telefona kaydediyor</string>
     <string name="state_not_paired">Kurulmadı</string>
     <string name="state_paused">Duraklatıldı, bağlı</string>
     <string name="state_recording_off">Kayıt kapalı</string>

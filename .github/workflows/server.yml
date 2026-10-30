@@ -47,7 +47,7 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^API_TOKEN=.*/API_TOKEN=e2e-token/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=e2epass/' .env
-          sed -i 's/^STT_PROVIDER=.*/STT_PROVIDER=fake/; s/^CONVERSATION_IDLE_SEC=.*/CONVERSATION_IDLE_SEC=5/' .env
+          sed -i 's/^STT_PROVIDER=.*/STT_PROVIDER=fake/; s/^CONVERSATION_IDLE_SEC=.*/CONVERSATION_IDLE_SEC=5/; s/^SPEECH_MIN_MS=.*/SPEECH_MIN_MS=0/' .env
           docker compose up -d --build
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && break; sleep 2; done
       - name: E2E over WebSocket

@@ -53,6 +53,9 @@ STT_PROVIDER = (env("STT_PROVIDER", "openrouter" if OPENROUTER_API_KEY else "whi
 # Язык расшифровки: пусто — как язык приложения (меняется в приложении), "auto" — определять самому
 STT_LANGUAGE = env("STT_LANGUAGE", "")
 SILENCE_RMS = env_int("SILENCE_RMS", 0)  # 0 = не пропускать тишину; иначе порог громкости
+# Кусок без речи (тишина, ровный шум в машине) не отправляем в распознавание: дешевле и без «галлюцинаций»
+# Whisper вроде «Продолжение следует…». Меньше SPEECH_MIN_MS мс речи — пропускаем. 0 — выключить.
+SPEECH_MIN_MS = env_int("SPEECH_MIN_MS", 0 if STT_PROVIDER == "fake" else 300)
 DEEPGRAM_API_KEY = env("DEEPGRAM_API_KEY", "")
 DEEPGRAM_MODEL = env("DEEPGRAM_MODEL", "nova-2")
 # Куда слать /audio/transcriptions (и для записи при STT_PROVIDER=openrouter/openai, и для вопросов с кнопки)

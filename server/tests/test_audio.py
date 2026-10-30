@@ -77,3 +77,27 @@ def test_chunk_writer_time_jump_back():
         c = w.finalize()
         assert c.start_ms == 1_000_000 and c.duration_ms == 1000
         assert BYTES_PER_MS == 32
+
+
+def test_speech_detection_and_hallucinations():
+    import numpy as np
+    from neuro.audio import SAMPLE_RATE, speech_ms
+    from stt.worker import is_hallucination
+
+    rng = np.random.default_rng(1)
+    sec = SAMPLE_RATE
+    silence = np.zeros(10 * sec, dtype=np.int16)
+    car = (rng.normal(0, 300, 10 * sec)).astype(np.int16)  # ровный шум дороги
+    talk = car.copy()
+    for start in range(0, 10, 2):  # пять фраз по секунде на фоне шума
+        t = np.arange(sec) / SAMPLE_RATE
+        talk[start * sec:(start + 1) * sec] += (3000 * np.sin(2 * np.pi * 220 * t) * np.sin(np.pi * t)).astype(np.int16)
+    assert speech_ms(silence.tobytes()) == 0
+    assert speech_ms(car.tobytes()) < 300
+    assert speech_ms(talk.tobytes()) > 2000
+
+    assert is_hallucination("Продолжение следует...")
+    assert is_hallucination(" Субтитры сделал DimaTorzok")
+    assert is_hallucination("Thank you for watching!")
+    assert not is_hallucination("Нужно подготовить отчёт к пятнице, продолжение следует обсудить завтра с командой")
+    assert not is_hallucination("Встречаемся в три")

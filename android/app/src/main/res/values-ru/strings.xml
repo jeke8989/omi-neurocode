@@ -220,7 +220,7 @@
     <string name="now_catching_up">Догоняет</string>
     <string name="now_catching_up_text">Отправляю накопленные записи на сервер</string>
     <string name="now_live">В эфире</string>
-    <string name="now_live_text">Звук сразу уходит на ваш сервер</string>
+    <string name="now_live_text">Звук уходит на ваш сервер. Тишина и ровный шум в разговоры не попадают</string>
     <string name="now_no_pendant">Кулон не на связи</string>
     <string name="now_off">Запись выключена</string>
     <string name="now_off_text">Включите в разделе «Управление»</string>
@@ -337,6 +337,7 @@
     <string name="state_connecting">Ищу кулон</string>
     <string name="state_disconnected">Не на связи</string>
     <string name="state_listening">Слушает, подключён</string>
+    <string name="state_listening_offline">Слушает, пишет в телефон</string>
     <string name="state_not_paired">Не подключён</string>
     <string name="state_paused">Пауза, подключён</string>
     <string name="state_recording_off">Запись выключена</string>

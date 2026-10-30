@@ -99,7 +99,7 @@ fun DeviceScreen() {
                 note = if (device.charging == true) stringResource(R.string.charging) else null,
                 valueColor = if ((device.battery ?: 100) < 15) c.red else c.ink)
             StatTile(stringResource(R.string.heard_today), fmt.duration(device.heardTodayMs / 1000), Modifier.weight(1f))
-            StatTile(stringResource(R.string.on_phone), if (upload.pendingFiles <= 1) "0" else fmt.bytes(upload.pendingBytes),
+            StatTile(stringResource(R.string.on_phone), fmt.duration((upload.pendingFiles - 1).coerceAtLeast(0).toLong()),
                 Modifier.weight(1f))
         }
 

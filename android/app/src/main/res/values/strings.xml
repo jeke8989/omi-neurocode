@@ -221,7 +221,7 @@
     <string name="now_catching_up">Catching up</string>
     <string name="now_catching_up_text">Uploading saved recordings to the server</string>
     <string name="now_live">Live</string>
-    <string name="now_live_text">Audio goes straight to your server</string>
+    <string name="now_live_text">Audio goes to your server. Silence and steady noise don\'t become conversations</string>
     <string name="now_no_pendant">Pendant not connected</string>
     <string name="now_off">Recording is off</string>
     <string name="now_off_text">Turn it on under Controls</string>
@@ -338,6 +338,7 @@
     <string name="state_connecting">Looking for the pendant</string>
     <string name="state_disconnected">Not connected</string>
     <string name="state_listening">Listening, connected</string>
+    <string name="state_listening_offline">Listening, saving on the phone</string>
     <string name="state_not_paired">Not set up</string>
     <string name="state_paused">Paused, connected</string>
     <string name="state_recording_off">Recording off</string>

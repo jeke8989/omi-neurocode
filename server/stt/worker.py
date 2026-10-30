@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 
 from neuro import config, db, i18n, llm
-from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav
+from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, speech_ms
 
 log = logging.getLogger("neuro.stt")
 MAX_ATTEMPTS = 5
@@ -63,6 +63,22 @@ class DeepgramSTT:
         return [Seg(0.0, len(pcm) / 2 / SAMPLE_RATE, None, text)] if text.strip() else []
 
 
+# Фразы, которые Whisper «слышит» в тишине и шуме: из субтитров, на которых его учили.
+HALLUCINATIONS = (
+    "продолжение следует", "субтитры сделал", "субтитры создавал", "субтитры подогнал", "редактор субтитров",
+    "корректор а.", "спасибо за просмотр", "подписывайтесь на канал", "dimatorzok", "игорь негода",
+    "thank you for watching", "thanks for watching", "subtitles by", "amara.org", "please subscribe",
+    "izlediğiniz için teşekkürler", "altyazı", "gracias por ver", "subtítulos realizados por", "suscríbete",
+)
+
+
+def is_hallucination(text: str) -> bool:
+    t = " ".join(text.lower().split()).strip(" .,!?…-—«»\"'")
+    if not t:
+        return True
+    return any(p in t and len(t) <= len(p) + 20 for p in HALLUCINATIONS)
+
+
 class RemoteSTT:
     """OpenAI-совместимый /audio/transcriptions: OpenRouter (Whisper Large v3 и др.), OpenAI, Groq…
     Модель выбирается в приложении (задача «Расшифровка записи»)."""
@@ -75,8 +91,11 @@ class RemoteSTT:
 
     def transcribe(self, pcm: bytes, conn=None) -> list[Seg]:
         j = llm.transcribe(conn, "transcribe", pcm, verbose=True, timeout=180)
-        segs = j.get("segments") or []
-        if segs:
+        # сегменты, где модель сама считает, что речи нет (критерий OpenAI): пропускаем
+        segs = [s for s in j.get("segments") or []
+                if not (float(s.get("no_speech_prob") or 0) > 0.6 and float(s.get("avg_logprob") or 0) < -1.0)
+                and float(s.get("compression_ratio") or 0) < 2.4]
+        if j.get("segments"):
             return [Seg(float(s["start"]), float(s["end"]), s.get("speaker") if isinstance(s.get("speaker"), int)
                         else None, (s.get("text") or "").strip()) for s in segs]
         text = (j.get("text") or "").strip()
@@ -217,8 +236,12 @@ def process(conn, stt, chunk: dict):
         mark(conn, chunk["id"], "empty")
         log.info("chunk %s: silence", chunk["id"])
         return
+    if config.SPEECH_MIN_MS > 0 and speech_ms(pcm) < config.SPEECH_MIN_MS:
+        mark(conn, chunk["id"], "empty")
+        log.info("chunk %s: no speech (%.0fs of quiet or steady noise), skipped", chunk["id"], len(pcm) / 2 / SAMPLE_RATE)
+        return
     t0 = time.monotonic()
-    segs = [s for s in stt.transcribe(pcm, conn) if s.text and s.text.strip()]
+    segs = [s for s in stt.transcribe(pcm, conn) if s.text and s.text.strip() and not is_hallucination(s.text)]
     took = time.monotonic() - t0
     if not segs:
         mark(conn, chunk["id"], "empty")

@@ -180,6 +180,7 @@ object Core {
     fun setLanguage(code: String) {
         prefs.language = code
         voice.applyLanguage()
+        createNotificationChannel() // название канала уведомлений — тоже на новом языке
         lastNotificationText = null
         updateNotification()
         syncedLanguage = null

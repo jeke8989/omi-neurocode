@@ -220,7 +220,7 @@
     <string name="now_catching_up">Poniéndose al día</string>
     <string name="now_catching_up_text">Subiendo las grabaciones guardadas al servidor</string>
     <string name="now_live">En directo</string>
-    <string name="now_live_text">El audio va directo a tu servidor</string>
+    <string name="now_live_text">El audio va a tu servidor. El silencio y el ruido constante no se convierten en conversaciones</string>
     <string name="now_no_pendant">Colgante sin conexión</string>
     <string name="now_off">Grabación apagada</string>
     <string name="now_off_text">Actívala en Control</string>
@@ -337,6 +337,7 @@
     <string name="state_connecting">Buscando el colgante</string>
     <string name="state_disconnected">Sin conexión</string>
     <string name="state_listening">Escuchando, conectado</string>
+    <string name="state_listening_offline">Escuchando, guardando en el teléfono</string>
     <string name="state_not_paired">Sin configurar</string>
     <string name="state_paused">En pausa, conectado</string>
     <string name="state_recording_off">Grabación apagada</string>

@@ -53,6 +53,7 @@ fun deviceStatusText(): String {
     val device by Core.device.collectAsState()
     val running by Core.serviceRunning.collectAsState()
     val paused by Core.paused.collectAsState()
+    val upload by Core.upload.collectAsState()
     return stringResource(when {
         device.address == null -> R.string.state_not_paired
         !running -> R.string.state_recording_off
@@ -61,6 +62,7 @@ fun deviceStatusText(): String {
         device.state == ConnState.SETTING_UP -> R.string.state_setting_up
         device.state != ConnState.CONNECTED -> R.string.state_disconnected
         paused -> R.string.state_paused
+        !upload.connected -> R.string.state_listening_offline
         else -> R.string.state_listening
     })
 }
