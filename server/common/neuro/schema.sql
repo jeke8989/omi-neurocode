@@ -244,3 +244,6 @@ CREATE TABLE IF NOT EXISTS task_exports (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (task_id, ext_id)
 );
+
+-- Эмодзи разговора для ленты (выбирает агент)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS emoji TEXT;

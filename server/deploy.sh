@@ -15,15 +15,25 @@ if ! docker compose version >/dev/null 2>&1; then
   echo "Нужен плагин docker compose v2 (apt install docker-compose-plugin)"; exit 1
 fi
 
-# 2. .env с паролем и токеном
+# 2. .env с паролем и токеном. Токен берём из ../neurosoft.properties — тот же зашит в приложение.
+PROPS=../neurosoft.properties
+prop() { [ -f "$PROPS" ] && grep -E "^$1=" "$PROPS" | head -1 | cut -d= -f2- | tr -d '\r'; }
 if [ ! -f .env ]; then
   say "Создаю .env"
   cp .env.example .env
-  token=$(openssl rand -hex 24)
+  token=$(prop api.token)
+  [ -n "$token" ] || token=$(openssl rand -hex 24)
+  url_port=$(prop server.url | sed -nE 's#.*:([0-9]+)/?$#\1#p')
+  [ -n "$url_port" ] && sed -i "s/^GATEWAY_PORT=.*/GATEWAY_PORT=${url_port}/" .env
   dbpass=$(openssl rand -hex 16)
   sed -i "s/^API_TOKEN=.*/API_TOKEN=${token}/" .env
   sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${dbpass}/" .env
   chmod 600 .env
+fi
+# если токен в neurosoft.properties сменился — обновляем .env, иначе приложение не подключится
+ptoken=$(prop api.token)
+if [ -n "$ptoken" ] && ! grep -q "^API_TOKEN=${ptoken}$" .env; then
+  sed -i "s/^API_TOKEN=.*/API_TOKEN=${ptoken}/" .env
 fi
 set -a; . ./.env; set +a
 PORT="${GATEWAY_PORT:-8090}"
@@ -70,9 +80,8 @@ fi
 
 IP=$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
 say "Готово"
-echo "В приложении NeuroSoft укажите:"
-echo "  Сервер: http://${IP}:${PORT}"
-echo "  Токен:  ${API_TOKEN}"
+echo "Сервер работает: http://${IP}:${PORT}"
+echo "Приложение подключится само — адрес и ключ уже зашиты в APK (neurosoft.properties)."
 echo
 echo "Логи:      docker compose logs -f --tail 50"
 echo "Остановить: docker compose down   (данные сохранятся)"

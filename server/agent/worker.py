@@ -22,6 +22,7 @@ SUMMARY_SYSTEM = f"""Ты — ассистент NeuroSoft. Тебе дают р
 Расшифровка автоматическая и может содержать ошибки распознавания.
 Верни строго JSON-объект без пояснений и без markdown:
 {{"title": "название разговора, до 8 слов",
+ "emoji": "одно эмодзи, которое лучше всего передаёт тему разговора",
  "summary": "о чём говорили и к чему пришли, 2–6 предложений",
  "tasks": [{TASK_SCHEMA}],
  "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"]}}
@@ -90,12 +91,14 @@ def summarize_one(conn, conv_id: int):
     tasks: list[dict] = []
     memories: list[str] = []
     summary = None
+    emoji = "💬"
     text_len = sum(len(s["text"]) for s in segs)
     if not segs:
         title = "Без содержания"
     elif llm.configured() and text_len >= 40:
         result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM, transcript_text(segs))
         title = str(result.get("title") or first_words(segs))[:200]
+        emoji = str(result.get("emoji") or "💬").strip()[:8] or "💬"
         summary = str(result.get("summary") or "").strip() or None
         tasks = clean_tasks(result.get("tasks"))
         memories = clean_list(result.get("memories"))
@@ -113,10 +116,10 @@ def summarize_one(conn, conv_id: int):
         insert_memories(conn, conv_id, memories, "conversation")
         # Если пока мы думали, пришли новые фразы, STT вернул статус 'open' — тогда разговор пересчитаем позже.
         conn.execute(
-            """UPDATE conversations SET title = %s, summary = %s, error = NULL, updated_at = now(),
+            """UPDATE conversations SET title = %s, summary = %s, emoji = %s, error = NULL, updated_at = now(),
                    status = CASE WHEN status = 'processing' THEN 'done' ELSE status END
                WHERE id = %s""",
-            (title, summary, conv_id),
+            (title, summary, emoji, conv_id),
         )
     log.info("conversation %s: '%s', %d tasks, %d memories", conv_id, title, len(tasks), len(memories))
 

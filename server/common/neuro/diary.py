@@ -279,6 +279,7 @@ def material_text(m: dict, max_photos: int) -> str:
 DIARY_SYSTEM = """Ты ведёшь личный дневник владельца кулона NeuroSoft. По данным его дня собери красивую ленту.
 Верни строго JSON:
 {"title": "заголовок дня, до 6 слов",
+ "emoji": "одно эмодзи — символ дня",
  "mood": "настроение дня: эмодзи и одно слово",
  "summary": "тёплый короткий рассказ о дне на «ты», 3–6 предложений",
  "quote": "яркая фраза дня дословно из данных или пустая строка",
@@ -315,7 +316,8 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
                            "kind": str(h.get("kind") or ""), "photo_id": pid})
     places = [{"name": v["name"], "from": _t(v["start"]), "to": _t(v["end"]), "lat": round(v["lat"], 5),
                "lon": round(v["lon"], 5)} for v in m["visits"]]
-    stats = {"conversations": len(m["conversations"]), "questions": len(m["questions"]),
+    minutes = int(sum((c["last_activity"] - c["started_at"]).total_seconds() for c in m["conversations"]) // 60)
+    stats = {"conversations": len(m["conversations"]), "minutes": minutes, "questions": len(m["questions"]),
              "tasks": len(m["tasks"]), "places": len(m["visits"]), "photos": len(used)}
     conn.execute(
         """INSERT INTO diary_days (day, title, summary, mood, quote, highlights, places, stats, cover_photo_id,
@@ -326,7 +328,8 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
                stats = EXCLUDED.stats, cover_photo_id = EXCLUDED.cover_photo_id, status = 'done',
                content_hash = EXCLUDED.content_hash, generated_at = now(), error = NULL""",
         (day, str(result.get("title") or "")[:120], str(result.get("summary") or "")[:3000],
-         str(result.get("mood") or "")[:40], str(result.get("quote") or "")[:300],
+         (str(result.get("emoji") or "").strip()[:8] + " " + str(result.get("mood") or "")).strip()[:40],
+         str(result.get("quote") or "")[:300],
          json.dumps(highlights, ensure_ascii=False), json.dumps(places, ensure_ascii=False),
          json.dumps(stats), used[0] if used else None, content_hash),
     )

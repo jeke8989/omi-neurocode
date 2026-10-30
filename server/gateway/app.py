@@ -319,21 +319,70 @@ async def api_status(request: Request):
 async def api_conversations(request: Request):
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
-    limit = _clamp(request.query_params.get("limit"), 50, 1, 200)
+    limit = _clamp(request.query_params.get("limit"), 50, 1, 300)
     offset = _clamp(request.query_params.get("offset"), 0, 0, 1_000_000)
+    day = request.query_params.get("day") or None  # YYYY-MM-DD в часовом поясе владельца
+    if day:
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            return Json({"error": "day: YYYY-MM-DD"}, status_code=400)
     async with await aconnect() as conn:
         rows = await (await conn.execute(
             """SELECT c.id, c.device_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary,
+                      c.emoji, greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
                       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id) AS tasks_count,
                       (SELECT left(string_agg(x.text, ' '), 240) FROM
                           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id
                            ORDER BY s.started_at LIMIT 6) x) AS preview
                FROM conversations c
+               WHERE (%s::date IS NULL OR (c.started_at AT TIME ZONE %s)::date = %s::date)
                ORDER BY c.started_at DESC
                LIMIT %s OFFSET %s""",
-            (limit, offset),
+            (day, config.TZ, day, limit, offset),
         )).fetchall()
     return Json({"items": rows})
+
+
+async def api_days(request: Request):
+    """Дни с записями за последние недели: для ленты дней на главной."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    async with await aconnect() as conn:
+        rows = await (await conn.execute(
+            """SELECT (c.started_at AT TIME ZONE %s)::date AS day, count(*) AS conversations,
+                      coalesce(sum(greatest(0, extract(epoch FROM c.last_activity - c.started_at))), 0)::int
+                          AS seconds
+               FROM conversations c
+               WHERE c.started_at > now() - interval '60 days'
+               GROUP BY 1 ORDER BY 1 DESC""", (config.TZ,))).fetchall()
+    return Json({"items": rows})
+
+
+async def api_search(request: Request):
+    """Поиск по разговорам, фразам, задачам и памяти."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    q = (request.query_params.get("q") or "").strip()
+    if len(q) < 2:
+        return Json({"conversations": [], "segments": [], "tasks": [], "memories": []})
+    like = f"%{q}%"
+    async with await aconnect() as conn:
+        conversations = await (await conn.execute(
+            """SELECT id, started_at, title, summary, emoji FROM conversations
+               WHERE title ILIKE %s OR summary ILIKE %s ORDER BY started_at DESC LIMIT 20""",
+            (like, like))).fetchall()
+        segments = await (await conn.execute(
+            """SELECT s.conversation_id, s.started_at, s.text, c.title, c.emoji FROM segments s
+               LEFT JOIN conversations c ON c.id = s.conversation_id
+               WHERE s.text ILIKE %s ORDER BY s.started_at DESC LIMIT 30""", (like,))).fetchall()
+        tasks = await (await conn.execute(
+            "SELECT id, text, status, due FROM tasks WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 20",
+            (like,))).fetchall()
+        memories = await (await conn.execute(
+            "SELECT id, text, created_at FROM memories WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 20",
+            (like,))).fetchall()
+    return Json({"conversations": conversations, "segments": segments, "tasks": tasks, "memories": memories})
 
 
 async def api_conversation(request: Request):
@@ -345,7 +394,8 @@ async def api_conversation(request: Request):
             res = await conn.execute("DELETE FROM conversations WHERE id = %s", (cid,))
             return Json({"deleted": res.rowcount})
         conv = await (await conn.execute(
-            """SELECT id, device_id, started_at, last_activity AS ended_at, status, title, summary, error
+            """SELECT id, device_id, started_at, last_activity AS ended_at, status, title, summary, error, emoji,
+                      greatest(0, extract(epoch FROM last_activity - started_at))::int AS duration_sec
                FROM conversations WHERE id = %s""", (cid,)
         )).fetchone()
         if conv is None:
@@ -963,6 +1013,8 @@ app = Starlette(
         Route("/health", health),
         Route("/api/status", api_status),
         Route("/api/conversations", api_conversations),
+        Route("/api/days", api_days),
+        Route("/api/search", api_search),
         Route("/api/conversations/{id:int}", api_conversation, methods=["GET", "DELETE"]),
         Route("/api/conversations/{id:int}/reprocess", api_conversation_reprocess, methods=["POST"]),
         Route("/api/tasks", api_tasks),
