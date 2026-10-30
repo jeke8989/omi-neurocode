@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    paths: ["android/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "neurosoft.properties", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 permissions:
@@ -46,20 +46,20 @@ jobs:
           PY
 
       - name: Name APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "NeuroSoft-0.1.${{ github.run_number }}.apk"
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Mnemo-0.2.${{ github.run_number }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NeuroSoft-apk
-          path: NeuroSoft-*.apk
+          name: Mnemo-apk
+          path: Mnemo-*.apk
 
       - name: Publish release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: NeuroSoft 0.1.${{ github.run_number }}
-          files: NeuroSoft-*.apk
+          name: Mnemo 0.2.${{ github.run_number }}
+          files: Mnemo-*.apk
           make_latest: true
           body: |
             Установите APK на телефон (разрешите установку из этого источника). Новые версии ставятся поверх старых.
