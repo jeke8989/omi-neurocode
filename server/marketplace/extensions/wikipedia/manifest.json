@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "wikipedia",
+  "name": "Википедия",
+  "icon": "📚",
+  "version": "1.0.0",
+  "author": "Neuro Codes",
+  "description": "Поиск по русской Википедии и краткие справки.",
+  "permissions": {"hosts": ["ru.wikipedia.org"]},
+  "tools": [
+    {
+      "name": "search",
+      "title": "Ищу в Википедии",
+      "description": "Найти статьи по запросу. Возвращает названия и фрагменты.",
+      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+      "http": {"method": "GET", "url": "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&srlimit=5&format=json&utf8=1"}
+    },
+    {
+      "name": "summary",
+      "title": "Читаю статью",
+      "description": "Краткое содержание статьи по точному названию (из search).",
+      "parameters": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+      "http": {"method": "GET", "url": "https://ru.wikipedia.org/api/rest_v1/page/summary/{title}"}
+    }
+  ]
+}

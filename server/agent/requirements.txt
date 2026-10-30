@@ -1,0 +1,5 @@
+psycopg[binary]>=3.2,<4
+requests>=2.31
+numpy>=1.26
+tzdata
+Pillow>=10

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "id": "notion",
+  "name": "Notion",
+  "icon": "🗒",
+  "version": "1.0.0",
+  "author": "Neuro Codes",
+  "description": "Новые задачи из ленты автоматически появляются в вашей базе Notion. Агент может создавать там заметки.",
+  "permissions": {"hosts": ["api.notion.com"]},
+  "settings": [
+    {"key": "token", "title": "Токен интеграции", "secret": true, "required": true,
+     "hint": "notion.so/my-integrations → New integration, затем подключите её к базе (••• → Connections)"},
+    {"key": "database_id", "title": "ID базы задач", "secret": false, "required": true,
+     "hint": "32 символа из ссылки на базу"},
+    {"key": "title_property", "title": "Колонка заголовка", "secret": false, "required": true,
+     "hint": "Обычно Name или Название"}
+  ],
+  "on_task": {
+    "title": "Отправлять новые задачи в Notion",
+    "http": {
+      "method": "POST",
+      "url": "https://api.notion.com/v1/pages",
+      "headers": {"Authorization": "Bearer {settings.token}", "Notion-Version": "2022-06-28"},
+      "body": {
+        "parent": {"database_id": "{settings.database_id}"},
+        "properties": {"{settings.title_property}": {"title": [{"text": {"content": "{text}"}}]}},
+        "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [
+          {"type": "text", "text": {"content": "Срок: {due} · {source} · {conversation} — NeuroSoft"}}]}}]
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "create_note",
+      "title": "Создаю заметку в Notion",
+      "description": "Создать страницу-заметку в базе Notion владельца (заголовок и текст).",
+      "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "text": {"type": "string"}}, "required": ["title", "text"]},
+      "http": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "headers": {"Authorization": "Bearer {settings.token}", "Notion-Version": "2022-06-28"},
+        "body": {
+          "parent": {"database_id": "{settings.database_id}"},
+          "properties": {"{settings.title_property}": {"title": [{"text": {"content": "{title}"}}]}},
+          "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "{text}"}}]}}]
+        }
+      }
+    }
+  ]
+}

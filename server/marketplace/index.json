@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "name": "NeuroSoft Marketplace",
+  "extensions": [
+    {
+      "id": "notion",
+      "name": "Notion",
+      "icon": "🗒",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "задачи",
+        "заметки"
+      ],
+      "description": "Лента задач → ваша база Notion автоматически. Агент создаёт заметки.",
+      "manifest": "extensions/notion/manifest.json"
+    },
+    {
+      "id": "github",
+      "name": "GitHub Issues",
+      "icon": "🐙",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "задачи",
+        "разработка"
+      ],
+      "description": "Задачи на разработку из разговоров → issues в репозитории.",
+      "manifest": "extensions/github/manifest.json"
+    },
+    {
+      "id": "weather",
+      "name": "Погода",
+      "icon": "☀️",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "погода",
+        "open-meteo"
+      ],
+      "description": "Текущая погода и прогноз на 3 дня по названию города. Без ключей.",
+      "manifest": "extensions/weather/manifest.json"
+    },
+    {
+      "id": "currency",
+      "name": "Курсы валют",
+      "icon": "💱",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "финансы"
+      ],
+      "description": "Актуальные курсы валют и пересчёт сумм. Без ключей.",
+      "manifest": "extensions/currency/manifest.json"
+    },
+    {
+      "id": "wikipedia",
+      "name": "Википедия",
+      "icon": "📚",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "знания"
+      ],
+      "description": "Поиск статей и краткие справки из русской Википедии.",
+      "manifest": "extensions/wikipedia/manifest.json"
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "icon": "✈️",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "сообщения"
+      ],
+      "description": "Агент отправляет сообщения в ваш Telegram через своего бота: «пришли мне итоги в телеграм».",
+      "manifest": "extensions/telegram/manifest.json"
+    }
+  ]
+}

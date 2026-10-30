@@ -1,0 +1,167 @@
+"""Ассистент: общие помощники для задач/памяти и голосовой вопрос по кнопке."""
+from __future__ import annotations
+
+import logging
+import time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from . import config, llm
+from .audio import BYTES_PER_MS, pcm_rms
+
+log = logging.getLogger("neuro.assistant")
+TZ = ZoneInfo(config.TZ)
+
+TASK_SCHEMA = (
+    '{"text": "конкретное действие", "due": "срок, если назван, иначе null", '
+    '"assignee": "кто делает, если ясно, иначе null", '
+    '"target": "github, если это задача на разработку программы, иначе notion"}'
+)
+
+WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+
+# ---------------------------------------------------------------- общие помощники
+def fmt_time(dt: datetime) -> str:
+    return dt.astimezone(TZ).strftime("%H:%M:%S")
+
+
+def transcript_text(segs: list[dict], limit: int | None = None) -> str:
+    lines = []
+    for s in segs:
+        who = f"Спикер {s['speaker'] + 1}" if s.get("speaker") is not None else "Голос"
+        lines.append(f"[{fmt_time(s['started_at'])}] {who}: {s['text']}")
+    text = "\n".join(lines)
+    limit = limit or config.LLM_MAX_CHARS
+    if len(text) > limit:
+        half = limit // 2
+        text = text[:half] + "\n…(середина пропущена)…\n" + text[-half:]
+    return text
+
+
+def clean_tasks(raw) -> list[dict]:
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for t in raw:
+        if isinstance(t, str):
+            t = {"text": t}
+        if not isinstance(t, dict) or not str(t.get("text") or "").strip():
+            continue
+
+        def opt(key, t=t):
+            v = t.get(key)
+            return str(v).strip() if v not in (None, "", "null") else None
+
+        out.append({
+            "text": str(t["text"]).strip()[:1000],
+            "due": opt("due"),
+            "assignee": opt("assignee"),
+            "target": "github" if str(t.get("target") or "").lower() == "github" else "notion",
+        })
+    return out
+
+
+def clean_list(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip()[:2000] for x in raw if str(x or "").strip()]
+
+
+def insert_tasks(conn, conv_id, tasks: list[dict], source: str):
+    for t in tasks:
+        conn.execute(
+            """INSERT INTO tasks (conversation_id, text, due, assignee, target, source)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (conv_id, t["text"], t["due"], t["assignee"], t["target"], source),
+        )
+
+
+def insert_memories(conn, conv_id, memories: list[str], source: str):
+    for m in memories:
+        conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s)", (conv_id, m, source))
+
+
+# ---------------------------------------------------------------- конец вопроса по паузе
+class Endpointer:
+    """Определяет, что человек договорил: была речь, затем тишина ASK_END_SILENCE_MS.
+
+    Порог громкости подстраивается под шум (быстро вниз, медленно вверх), так что работает
+    и в тихой комнате, и на улице. Если речь не распознана как речь — вопрос всё равно
+    закончится по максимальной длине или повторному нажатию, а решит распознавание.
+    """
+
+    FRAME = 20 * BYTES_PER_MS  # 20 мс
+
+    def __init__(self, end_silence_ms: int | None = None, min_rms: float = 180.0):
+        self.end_silence_ms = end_silence_ms or config.ASK_END_SILENCE_MS
+        self.min_rms = min_rms
+        self.noise: float | None = None
+        self.speech_ms = 0
+        self.silence_ms = 0
+        self.started = False
+        self._rest = b""
+
+    def feed(self, pcm: bytes) -> bool:
+        data = self._rest + pcm
+        n = len(data) - len(data) % self.FRAME
+        self._rest = data[n:]
+        for i in range(0, n, self.FRAME):
+            rms = pcm_rms(data[i:i + self.FRAME])
+            if self.noise is None:
+                self.noise = rms
+            speech = rms > max(self.noise * 3.0, self.min_rms)
+            # уровень шума: сразу вниз, вверх — медленно и только в паузах (иначе догонит голос)
+            if rms < self.noise:
+                self.noise = rms
+            elif not speech:
+                self.noise = self.noise * 0.98 + rms * 0.02
+            if speech:
+                self.speech_ms += 20
+                self.silence_ms = 0
+                if self.speech_ms >= 200:
+                    self.started = True
+            elif self.started:
+                self.silence_ms += 20
+                if self.silence_ms >= self.end_silence_ms:
+                    return True
+        return False
+
+
+# ---------------------------------------------------------------- голосовой вопрос
+def build_context(conn, device_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    local = now.astimezone(TZ)
+    parts = [f"Сейчас {WEEKDAYS[local.weekday()]}, {local.strftime('%d.%m.%Y %H:%M')}."]
+    segs = conn.execute(
+        """SELECT started_at, speaker, text FROM segments
+           WHERE device_id = %s AND started_at > %s ORDER BY started_at""",
+        (device_id, now - timedelta(minutes=config.ASK_CONTEXT_MIN)),
+    ).fetchall()
+    if segs:
+        parts.append("Недавний разговор (расшифровка с кулона):\n" + transcript_text(segs, limit=8000))
+    tasks = conn.execute(
+        "SELECT text, due FROM tasks WHERE status = 'open' ORDER BY created_at DESC LIMIT 15"
+    ).fetchall()
+    if tasks:
+        parts.append("Открытые задачи:\n" + "\n".join(
+            f"- {t['text']}" + (f" (срок: {t['due']})" if t["due"] else "") for t in tasks))
+    mems = conn.execute("SELECT text FROM memories ORDER BY created_at DESC LIMIT 15").fetchall()
+    if mems:
+        parts.append("Запомненное:\n" + "\n".join(f"- {m['text']}" for m in mems))
+    return "\n\n".join(parts)
+
+
+def transcribe_question(conn, pcm: bytes) -> str:
+    """Распознать вопрос, заданный кнопкой. Пустая строка — речи нет."""
+    data = llm.transcribe(conn, "ask_stt", pcm, timeout=config.ASK_TIMEOUT_SEC)
+    text = (data.get("text") or "").strip()
+    return text if len(text) >= 2 else ""
+
+
+def record_question(conn, device_id: str, client_id: str | None, question: str, answer: str, model: str | None,
+                    latency_ms: int, via: str = "voice", error: str | None = None):
+    conn.execute(
+        """INSERT INTO questions (device_id, client_id, question, answer, model, latency_ms, via, error)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (device_id, client_id, question, answer, model, latency_ms, via, error),
+    )

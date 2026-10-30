@@ -1,0 +1,78 @@
+# NeuroSoft: 3 сервиса (gateway, stt, agent) + Postgres.
+# Отдельный проект docker compose — не трогает Jarvis и другие контейнеры на сервере.
+name: neurosoft
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://neuro:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/neuro
+  AUDIO_DIR: /data/audio
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: neuro
+      POSTGRES_USER: neuro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neuro -d neuro"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment: *app-env
+    ports:
+      - "${GATEWAY_PORT:-8090}:8000"
+    volumes:
+      - audio:/data/audio
+      - photos:/data/photos
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  stt:
+    build:
+      context: .
+      dockerfile: stt/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment: *app-env
+    volumes:
+      - audio:/data/audio
+      - whisper-models:/models
+    depends_on:
+      db:
+        condition: service_healthy
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment: *app-env
+    volumes:
+      - audio:/data/audio
+      - photos:/data/photos
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  audio:
+  photos:
+  whisper-models:

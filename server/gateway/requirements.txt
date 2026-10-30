@@ -1,0 +1,6 @@
+starlette>=0.40,<2
+uvicorn[standard]>=0.30
+psycopg[binary]>=3.2,<4
+numpy>=1.26
+tzdata
+requests>=2.31

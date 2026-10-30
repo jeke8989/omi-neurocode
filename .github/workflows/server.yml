@@ -1,0 +1,64 @@
+name: Server
+
+on:
+  push:
+    paths: ["server/**", ".github/workflows/server.yml"]
+  pull_request:
+    paths: ["server/**"]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neuro_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libopus0
+      - run: pip install -r server/gateway/requirements.txt requests pytest
+      - name: Unit + pipeline tests
+        working-directory: server
+        env:
+          PYTHONPATH: common:.
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py
+
+  docker-e2e:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libopus0
+      - name: Start stack (fake STT)
+        working-directory: server
+        run: |
+          cp .env.example .env
+          sed -i 's/^API_TOKEN=.*/API_TOKEN=e2e-token/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=e2epass/' .env
+          sed -i 's/^STT_PROVIDER=.*/STT_PROVIDER=fake/; s/^CONVERSATION_IDLE_SEC=.*/CONVERSATION_IDLE_SEC=5/' .env
+          docker compose up -d --build
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && break; sleep 2; done
+      - name: E2E over WebSocket
+        working-directory: server
+        env:
+          E2E_URL: http://127.0.0.1:8090
+          E2E_TOKEN: e2e-token
+        run: |
+          pip install "websockets>=14" requests numpy
+          python tests/e2e_ws.py
+      - name: Logs
+        if: always()
+        working-directory: server
+        run: docker compose logs --tail 200

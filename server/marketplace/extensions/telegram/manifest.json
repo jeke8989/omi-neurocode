@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "telegram",
+  "name": "Telegram",
+  "icon": "✈️",
+  "version": "1.0.0",
+  "author": "Neuro Codes",
+  "description": "Отправка сообщений в ваш Telegram через вашего бота.",
+  "permissions": {"hosts": ["api.telegram.org"]},
+  "settings": [
+    {"key": "bot_token", "title": "Токен бота", "secret": true, "required": true, "hint": "Создайте бота у @BotFather"},
+    {"key": "chat_id", "title": "Ваш chat_id", "secret": false, "required": true, "hint": "Напишите боту и узнайте id у @userinfobot"}
+  ],
+  "tools": [
+    {
+      "name": "send_message",
+      "title": "Отправляю в Telegram",
+      "description": "Отправить владельцу сообщение в Telegram. Используй, когда он просит прислать, переслать или напомнить в телеграм.",
+      "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "текст сообщения"}}, "required": ["text"]},
+      "http": {"method": "POST", "url": "https://api.telegram.org/bot{settings.bot_token}/sendMessage",
+               "body": {"chat_id": "{settings.chat_id}", "text": "{text}"}}
+    }
+  ]
+}

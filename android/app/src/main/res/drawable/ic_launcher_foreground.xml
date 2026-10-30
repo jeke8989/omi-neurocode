@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Кулон: кольцо и звуковая волна внутри -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M54,31 A23,23 0 1,1 53.99,31 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M41,50h4v8h-4z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M47,45h4v18h-4z" />
+    <path android:fillColor="#9FA8FF" android:pathData="M53,40h4v28h-4z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M59,45h4v18h-4z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M65,50h4v8h-4z" />
+</vector>
