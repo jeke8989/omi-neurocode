@@ -12,7 +12,10 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-class ApiException(message: String) : Exception(message)
+/** Ошибка API. kind — для понятного текста на языке приложения, detail — подробности. */
+class ApiException(val kind: Kind, val detail: String? = null) : Exception(detail ?: kind.name) {
+    enum class Kind { NOT_CONFIGURED, NETWORK, AUTH, NOT_FOUND, SERVER, DIARY_OFF }
+}
 
 data class ConversationItem(
     val id: Long,
@@ -23,7 +26,19 @@ data class ConversationItem(
     val summary: String?,
     val tasksCount: Int,
     val preview: String?,
+    val emoji: String? = null,
+    val durationSec: Int = 0,
 )
+
+/** День с записями: для ленты дней и календаря. */
+data class DayInfo(val day: String, val conversations: Int, val seconds: Int)
+
+data class SearchHit(val kind: String, val id: Long?, val conversationId: Long?, val title: String, val text: String?,
+                     val at: String?, val emoji: String?, val done: Boolean = false)
+data class SearchResults(val conversations: List<SearchHit>, val segments: List<SearchHit>, val tasks: List<SearchHit>,
+                         val memories: List<SearchHit>) {
+    val isEmpty get() = conversations.isEmpty() && segments.isEmpty() && tasks.isEmpty() && memories.isEmpty()
+}
 
 data class Segment(val startedAt: String, val speaker: Int?, val text: String)
 
@@ -90,11 +105,12 @@ data class Extension(
 )
 
 data class Features(val diary: Boolean, val photoStyle: Boolean, val style: String, val photosPerDay: Int,
-                    val styles: List<Pair<String, String>>)
+                    val styles: List<Pair<String, String>>, val language: String = "ru",
+                    val sttLanguage: String = "app")
 
 data class Highlight(val time: String, val emoji: String, val title: String, val text: String, val kind: String,
                      val photoId: Long?)
-data class Place(val name: String?, val from: String, val to: String)
+data class Place(val name: String?, val from: String, val to: String, val lat: Double? = null, val lon: Double? = null)
 data class DiaryDay(
     val day: String, val title: String?, val summary: String?, val mood: String?, val quote: String?,
     val highlights: List<Highlight>, val places: List<Place>, val coverPhotoId: Long?, val status: String,
@@ -111,7 +127,7 @@ data class ServerStatus(
     val chunksPending: Int,
 )
 
-/** REST API сервера NeuroSoft (gateway). */
+/** REST API своего сервера (gateway). */
 object Api {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -122,9 +138,7 @@ object Api {
     private suspend fun call(method: String, path: String, body: JSONObject? = null): String =
         withContext(Dispatchers.IO) {
             val prefs = Core.prefs
-            if (prefs.serverUrl.isBlank() || prefs.token.isBlank()) {
-                throw ApiException("Укажите адрес сервера и токен на вкладке «Кулон»")
-            }
+            if (!prefs.serverConfigured) throw ApiException(ApiException.Kind.NOT_CONFIGURED)
             val request = try {
                 Request.Builder()
                     .url(prefs.serverUrl + path)
@@ -132,20 +146,21 @@ object Api {
                     .method(method, body?.toString()?.toRequestBody(json))
                     .build()
             } catch (e: IllegalArgumentException) {
-                throw ApiException("Неверный адрес сервера")
+                throw ApiException(ApiException.Kind.NOT_CONFIGURED, e.message)
             }
             try {
                 client.newCall(request).execute().use { r ->
                     val text = r.body?.string().orEmpty()
                     when {
-                        r.code == 401 -> throw ApiException("Сервер не принял токен")
-                        r.code == 404 -> throw ApiException("Не найдено")
-                        !r.isSuccessful -> throw ApiException("Ошибка сервера ${r.code}")
+                        r.code == 401 || r.code == 403 -> throw ApiException(ApiException.Kind.AUTH)
+                        r.code == 404 -> throw ApiException(ApiException.Kind.NOT_FOUND)
+                        r.code == 409 -> throw ApiException(ApiException.Kind.DIARY_OFF)
+                        !r.isSuccessful -> throw ApiException(ApiException.Kind.SERVER, "${r.code}")
                     }
                     text
                 }
             } catch (e: IOException) {
-                throw ApiException("Нет связи с сервером: ${e.message ?: e.javaClass.simpleName}")
+                throw ApiException(ApiException.Kind.NETWORK, e.message ?: e.javaClass.simpleName)
             }
         }
 
@@ -162,8 +177,35 @@ object Api {
         )
     }
 
-    suspend fun conversations(limit: Int = 100): List<ConversationItem> =
-        JSONObject(call("GET", "/api/conversations?limit=$limit")).getJSONArray("items").map { conversation(it) }
+    suspend fun conversations(limit: Int = 100, day: String? = null): List<ConversationItem> =
+        JSONObject(call("GET", "/api/conversations?limit=$limit" + (day?.let { "&day=$it" } ?: "")))
+            .getJSONArray("items").map { conversation(it) }
+
+    suspend fun days(): List<DayInfo> =
+        JSONObject(call("GET", "/api/days")).getJSONArray("items").map {
+            DayInfo(it.optString("day").take(10), it.optInt("conversations"), it.optInt("seconds"))
+        }
+
+    suspend fun search(q: String): SearchResults {
+        val o = JSONObject(call("GET", "/api/search?q=" + java.net.URLEncoder.encode(q, "UTF-8")))
+        return SearchResults(
+            conversations = o.optJSONArray("conversations").map {
+                SearchHit("conversation", it.getLong("id"), it.getLong("id"), it.str("title") ?: "", it.str("summary"),
+                    it.str("started_at"), it.str("emoji"))
+            },
+            segments = o.optJSONArray("segments").map {
+                val cid = if (it.isNull("conversation_id")) null else it.optLong("conversation_id")
+                SearchHit("segment", null, cid, it.str("title") ?: "", it.str("text"), it.str("started_at"), it.str("emoji"))
+            },
+            tasks = o.optJSONArray("tasks").map {
+                SearchHit("task", it.getLong("id"), null, it.optString("text"), it.str("due"), null, null,
+                    done = it.optString("status") == "done")
+            },
+            memories = o.optJSONArray("memories").map {
+                SearchHit("memory", it.getLong("id"), null, it.optString("text"), null, it.str("created_at"), null)
+            },
+        )
+    }
 
     suspend fun conversation(id: Long): ConversationDetail {
         val o = JSONObject(call("GET", "/api/conversations/$id"))
@@ -304,6 +346,7 @@ object Api {
         diary = o.optBoolean("diary", true), photoStyle = o.optBoolean("photo_style", true),
         style = o.optString("style"), photosPerDay = o.optInt("photos_per_day", 3),
         styles = o.optJSONArray("styles").map { it.optString("key") to it.optString("title") },
+        language = o.optString("language", "ru"), sttLanguage = o.optString("stt_language", "app"),
     )
 
     suspend fun diary(): DiaryInfo {
@@ -320,7 +363,9 @@ object Api {
                             it.optString("text"), it.optString("kind"),
                             if (it.isNull("photo_id")) null else it.optLong("photo_id"))
                     },
-                    places = d.optJSONArray("places").map { Place(it.str("name"), it.optString("from"), it.optString("to")) },
+                    places = d.optJSONArray("places").map {
+                        Place(it.str("name"), it.optString("from"), it.optString("to"), it.dbl("lat"), it.dbl("lon"))
+                    },
                     coverPhotoId = if (d.isNull("cover_photo_id")) null else d.optLong("cover_photo_id"),
                     status = d.optString("status"), error = d.str("error"),
                     stats = stats.keys().asSequence().associateWith { stats.optInt(it) },
@@ -352,11 +397,15 @@ object Api {
                 .header("Authorization", "Bearer ${prefs.token}")
                 .post(jpeg.toRequestBody("image/jpeg".toMediaType()))
                 .build()
-            client.newCall(request).execute().use { r ->
-                val text = r.body?.string().orEmpty()
-                if (r.code == 409) throw ApiException("Дневник выключен в настройках")
-                if (!r.isSuccessful) throw ApiException("Ошибка загрузки фото ${r.code}")
-                JSONObject(text).optLong("id")
+            try {
+                client.newCall(request).execute().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    if (r.code == 409) throw ApiException(ApiException.Kind.DIARY_OFF)
+                    if (!r.isSuccessful) throw ApiException(ApiException.Kind.SERVER, "${r.code}")
+                    JSONObject(text).optLong("id")
+                }
+            } catch (e: IOException) {
+                throw ApiException(ApiException.Kind.NETWORK, e.message)
             }
         }
 
@@ -370,6 +419,8 @@ object Api {
         summary = o.str("summary"),
         tasksCount = o.optInt("tasks_count"),
         preview = o.str("preview"),
+        emoji = o.str("emoji"),
+        durationSec = o.optInt("duration_sec"),
     )
 
     private fun task(o: JSONObject) = TaskItem(

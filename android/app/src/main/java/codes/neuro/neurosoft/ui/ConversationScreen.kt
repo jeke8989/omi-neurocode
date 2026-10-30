@@ -1,0 +1,204 @@
+package codes.neuro.neurosoft.ui
+
+import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import codes.neuro.neurosoft.R
+import codes.neuro.neurosoft.net.Api
+import codes.neuro.neurosoft.net.ConversationDetail
+import kotlinx.coroutines.launch
+
+@Composable
+fun ConversationScreen(id: Long) {
+    val context = LocalContext.current
+    var state by remember(id) { mutableStateOf<Res<ConversationDetail>>(Res(loading = true)) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val fmt = rememberFmt()
+    val c = Mn.c
+    val reprocessed = stringResource(R.string.reprocess_started)
+    val speakerLabel = stringResource(R.string.speaker)
+
+    fun reload() {
+        scope.launch {
+            state = try {
+                Res(Api.conversation(id))
+            } catch (e: Exception) {
+                state.copy(loading = false, error = e)
+            }
+        }
+    }
+    LaunchedEffect(id) { reload() }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = c.paper,
+            title = { Text(stringResource(R.string.delete_conversation_q), style = T.section, color = c.ink) },
+            text = { Text(stringResource(R.string.delete_conversation_text), style = T.body, color = c.graphite) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    scope.launch {
+                        try {
+                            Api.deleteConversation(id)
+                            Repo.days.refresh()
+                            Nav.pop()
+                        } catch (e: Exception) {
+                            state = state.copy(error = e)
+                        }
+                    }
+                }) { Text(stringResource(R.string.delete), color = c.red, style = T.bodyStrong) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text(stringResource(R.string.cancel), color = c.ink, style = T.bodyStrong)
+                }
+            },
+        )
+    }
+
+    val d = state.data
+    Column(Modifier.fillMaxSize()) {
+        TopBar(null, { Nav.pop() }) {
+            if (d != null) {
+                IconCircle(Icons.Share, stringResource(R.string.share), {
+                    val text = buildString {
+                        append(d.item.title ?: "").append("\n")
+                        append(fmt.dayShortTitle(fmt.dayOf(d.item.startedAt))).append(", ").append(fmt.time(d.item.startedAt))
+                        append("\n\n")
+                        d.item.summary?.let { append(it).append("\n\n") }
+                        d.segments.forEach { s ->
+                            append(fmt.time(s.startedAt)).append("  ")
+                            s.speaker?.let { append("$speakerLabel ${it + 1}: ") }
+                            append(s.text).append("\n")
+                        }
+                    }
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+                    context.startActivity(Intent.createChooser(send, null))
+                }, size = 40.dp)
+            }
+        }
+        when {
+            d == null && state.error != null -> ErrorBlock(state.error, { reload() })
+            d == null -> LoadingBlock()
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()
+                .padding(bottom = 24.dp)) {
+                Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    EmojiTile(d.item.emoji, 60.dp)
+                }
+                Txt(d.item.title ?: d.item.preview ?: stringResource(R.string.untitled), T.title,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MetaPill(Icons.Calendar, fmt.dayShortTitle(fmt.dayOf(d.item.startedAt)))
+                    MetaPill(Icons.Clock, fmt.time(d.item.startedAt) + "–" + fmt.time(d.item.endedAt))
+                    if (d.item.durationSec > 0) MetaPill(Icons.Wave, fmt.duration(d.item.durationSec.toLong()))
+                }
+                when (d.item.status) {
+                    "open", "processing" -> Txt(stringResource(R.string.status_processing), T.caption, c.graphite,
+                        Modifier.padding(horizontal = 22.dp, vertical = 10.dp))
+                    "failed" -> Txt(stringResource(R.string.status_failed), T.caption, c.red,
+                        Modifier.padding(horizontal = 22.dp, vertical = 10.dp))
+                }
+                note?.let { Txt(it, T.caption, c.graphite, Modifier.padding(horizontal = 22.dp, vertical = 6.dp)) }
+                StaleNote(state.error)
+
+                d.item.summary?.let { summary ->
+                    SectionTitle(stringResource(R.string.summary))
+                    Card(Modifier.padding(horizontal = 16.dp)) { Txt(summary, T.body) }
+                }
+                if (d.tasks.isNotEmpty()) {
+                    SectionTitle(stringResource(R.string.tab_tasks))
+                    d.tasks.forEachIndexed { i, t ->
+                        var task by remember(t.id) { mutableStateOf(t) }
+                        Grouped(i, d.tasks.size) {
+                            TaskRow(task, {
+                                val before = task
+                                val next = if (task.status == "done") "open" else "done"
+                                task = task.copy(status = next)
+                                scope.launch {
+                                    try {
+                                        Api.setTaskStatus(t.id, next)
+                                        Repo.tasks.edit { l -> l.map { if (it.id == t.id) it.copy(status = next) else it } }
+                                    } catch (e: Exception) {
+                                        task = before
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }
+                if (d.memories.isNotEmpty()) {
+                    Group(stringResource(R.string.remembered)) {
+                        d.memories.forEach { m -> item { ListRow(m.text, icon = Icons.Bookmark) } }
+                    }
+                }
+                SectionTitle(stringResource(R.string.transcript))
+                if (d.segments.isEmpty()) {
+                    Txt(stringResource(R.string.transcript_empty), T.small, c.graphite, Modifier.padding(horizontal = 22.dp))
+                }
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    var lastSpeaker: Int? = -1
+                    d.segments.forEach { s ->
+                        val other = (s.speaker ?: 0) % 2 == 1
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (other) Alignment.End else Alignment.Start) {
+                            if (s.speaker != lastSpeaker) {
+                                Txt(listOfNotNull(s.speaker?.let { "$speakerLabel ${it + 1}" }, fmt.time(s.startedAt))
+                                    .joinToString(", "), T.tiny, c.graphite,
+                                    Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                            }
+                            Txt(s.text, T.body, c.ink,
+                                Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(18.dp))
+                                    .background(if (other) c.raised else c.paper)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp))
+                        }
+                        lastSpeaker = s.speaker
+                    }
+                }
+                Group {
+                    item {
+                        ListRow(stringResource(R.string.reprocess), icon = Icons.Sparkle, onClick = {
+                            scope.launch {
+                                note = try {
+                                    Api.reprocessConversation(id)
+                                    reprocessed
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                        })
+                    }
+                    item { ListRow(stringResource(R.string.delete_conversation), icon = Icons.Trash, danger = true,
+                        onClick = { confirmDelete = true }) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetaPill(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(
+        Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(Mn.c.paper).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Mn.c.graphite, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(6.dp))
+        Txt(text, T.caption, Mn.c.ink, maxLines = 1)
+    }
+}

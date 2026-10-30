@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Значок уведомления: кольцо кулона и огонёк -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <path android:fillColor="#FFFFFF" android:pathData="M4,10h2v4h-2z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M8,7h2v10h-2z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M12,4h2v16h-2z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M16,7h2v10h-2z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M20,10h2v4h-2z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M12,2.5 a9.5,9.5 0 1,1 0,19 a9.5,9.5 0 1,1 0,-19 z M12,4.6 a7.4,7.4 0 1,0 0,14.8 a7.4,7.4 0 1,0 0,-14.8 z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,9.6 a2.4,2.4 0 1,1 0,4.8 a2.4,2.4 0 1,1 0,-4.8 z" />
 </vector>

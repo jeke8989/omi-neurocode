@@ -1,11 +1,24 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+
 // Номер сборки GitHub Actions -> versionCode, чтобы новые APK ставились поверх старых
 val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
+// Адрес сервера и ключ доступа зашиваются в APK из neurosoft.properties в корне репозитория:
+// в приложении их не нужно вводить. Переменные окружения (секреты CI) имеют приоритет.
+val serverProps = Properties().apply {
+    val f = rootProject.file("../neurosoft.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun serverProp(env: String, key: String): String =
+    (System.getenv(env)?.takeIf { it.isNotBlank() } ?: serverProps.getProperty(key, "")).trim()
+fun quoted(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "codes.neuro.neurosoft"
@@ -16,7 +29,9 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "0.1.$buildNumber"
+        versionName = "0.2.$buildNumber"
+        buildConfigField("String", "SERVER_URL", quoted(serverProp("MNEMO_SERVER_URL", "server.url").trimEnd('/')))
+        buildConfigField("String", "API_TOKEN", quoted(serverProp("MNEMO_API_TOKEN", "api.token")))
     }
 
     signingConfigs {

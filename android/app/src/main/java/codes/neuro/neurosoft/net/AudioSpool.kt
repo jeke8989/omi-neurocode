@@ -18,6 +18,9 @@ class AudioSpool(private val dir: File) {
 
         fun ackId(file: File): String = file.name.substringBefore('.')
         private fun order(file: File): Long = file.name.substringBefore('_').toLongOrNull() ?: 0L
+
+        /** Время записи файла очереди (мс), по имени. */
+        fun timeOf(file: File): Long = order(file)
     }
 
     private var lastId = 0L

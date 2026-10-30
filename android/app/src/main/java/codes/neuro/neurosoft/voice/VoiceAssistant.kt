@@ -10,7 +10,9 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import codes.neuro.neurosoft.Lang
 import codes.neuro.neurosoft.Prefs
+import codes.neuro.neurosoft.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
@@ -21,7 +23,6 @@ import okhttp3.WebSocketListener
 import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,6 +36,8 @@ import java.util.concurrent.TimeUnit
  */
 class VoiceAssistant(
     private val app: Context,
+    /** Контекст с языком приложения — для фраз ассистента. */
+    private val strings: () -> Context,
     private val prefs: Prefs,
     private val deviceId: () -> String?,
     private val codec: () -> Int,
@@ -77,7 +80,7 @@ class VoiceAssistant(
         tts = TextToSpeech(app) { status ->
             val ok = status == TextToSpeech.SUCCESS
             if (ok) {
-                tts?.setLanguage(Locale.forLanguageTag("ru-RU"))
+                tts?.setLanguage(Lang.locale(Lang.code(prefs)))
                 tts?.setSpeechRate(prefs.voiceRate)
                 tts?.setAudioAttributes(
                     AudioAttributes.Builder()
@@ -129,7 +132,14 @@ class VoiceAssistant(
         if (_state.value.phase == Phase.IDLE) speak(text, keepAnswer = true)
     }
 
-    fun testVoice() = speak("Привет! Я NeuroSoft. Нажмите кнопку на кулоне один раз и задайте вопрос.", keepAnswer = true)
+    fun testVoice() = speak(str(R.string.voice_test), keepAnswer = true)
+
+    /** Язык голоса следует за языком приложения. */
+    fun applyLanguage() {
+        tts?.setLanguage(Lang.locale(Lang.code(prefs)))
+    }
+
+    private fun str(id: Int): String = strings().getString(id)
 
     fun setRate(rate: Float) {
         prefs.voiceRate = rate
@@ -141,7 +151,7 @@ class VoiceAssistant(
         val server = prefs.serverUrl
         val device = deviceId()
         if (server.isBlank() || prefs.token.isBlank() || device == null) {
-            speak("Сервер не настроен. Откройте приложение NeuroSoft.")
+            speak(str(R.string.voice_no_server))
             return
         }
         session++
@@ -156,7 +166,7 @@ class VoiceAssistant(
         val request = try {
             Request.Builder().url(url).header("Authorization", "Bearer ${prefs.token}").build()
         } catch (e: IllegalArgumentException) {
-            fail("Неверный адрес сервера.", offline = false)
+            fail(str(R.string.voice_bad_url), offline = false)
             return
         }
         ws = client.newWebSocket(request, Listener(my))
@@ -172,7 +182,8 @@ class VoiceAssistant(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             synchronized(this@VoiceAssistant) {
                 if (my != session) return
-                webSocket.send(JSONObject().put("type", "start").put("id", "q_$tapTs").put("codec", codec()).toString())
+                webSocket.send(JSONObject().put("type", "start").put("id", "q_$tapTs").put("codec", codec())
+                    .put("lang", Lang.code(prefs)).toString())
                 pre.forEach { webSocket.send(it.toByteString()) }
                 pre.clear()
                 open = true
@@ -194,7 +205,7 @@ class VoiceAssistant(
                     }
                     "answer" -> {
                         main.removeCallbacks(watchdog)
-                        val answer = msg.optString("answer").ifBlank { "Не получилось ответить." }
+                        val answer = msg.optString("answer").ifBlank { str(R.string.voice_no_answer) }
                         update {
                             it.copy(
                                 question = msg.optString("question").ifBlank { null },
@@ -207,7 +218,7 @@ class VoiceAssistant(
                         ws = null
                         speak(answer, keepAnswer = true)
                     }
-                    "error" -> fail(msg.optString("message", "Ошибка на сервере."), offline = false)
+                    "error" -> fail(msg.optString("message").ifBlank { str(R.string.voice_server_error) }, offline = false)
                 }
             }
         }
@@ -218,8 +229,7 @@ class VoiceAssistant(
                 val phase = _state.value.phase
                 if (phase == Phase.LISTENING || phase == Phase.THINKING) {
                     val auth = response?.code == 401 || response?.code == 403
-                    fail(if (auth) "Сервер не принял токен." else "Нет связи с сервером. Отвечу позже в чате.",
-                        offline = !auth)
+                    fail(str(if (auth) R.string.voice_auth else R.string.voice_offline), offline = !auth)
                 }
             }
         }
@@ -229,7 +239,7 @@ class VoiceAssistant(
         synchronized(this) {
             val phase = _state.value.phase
             if (phase == Phase.LISTENING || phase == Phase.THINKING) {
-                fail("Сервер долго не отвечает. Ответ будет в чате.", offline = false)
+                fail(str(R.string.voice_slow), offline = false)
             }
         }
     }
@@ -268,7 +278,7 @@ class VoiceAssistant(
         try {
             tones?.startTone(type, 120)
         } catch (e: RuntimeException) {
-            Log.w("NeuroSoft.Voice", "tone failed", e)
+            Log.w("Mnemo.Voice", "tone failed", e)
         }
     }
 

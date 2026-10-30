@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.NeuroSoft" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Фон окна = «Туман», чтобы при запуске не мелькал белый экран -->
+    <style name="Theme.NeuroSoft" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fog</item>
+    </style>
 </resources>

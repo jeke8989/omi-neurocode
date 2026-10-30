@@ -28,7 +28,12 @@ data class UploadStatus(
     val pendingFiles: Int = 0,
     val pendingBytes: Long = 0,
     val lastAckAt: Long = 0,
+    /** Код ошибки: bad_url, auth, not_found, server:<код>, closed:<код> или текст исключения. */
     val error: String? = null,
+    /** Время самого старого неотправленного файла (0 — очередь пуста). */
+    val oldestAt: Long = 0,
+    /** Всего отправлено байт за время работы (для скорости сети). */
+    val sentBytes: Long = 0,
 )
 
 /**
@@ -51,6 +56,7 @@ class Uploader(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private val inflight = ConcurrentHashMap<String, File>()
+    private val sentCounter = java.util.concurrent.atomic.AtomicLong()
 
     @Volatile private var ws: WebSocket? = null
     @Volatile private var open = false
@@ -90,11 +96,13 @@ class Uploader(
 
     private fun step() {
         val (files, bytes) = spool.stats()
+        val oldest = spool.pending().firstOrNull()?.let { AudioSpool.timeOf(it) } ?: 0L
         val server = prefs.serverUrl
         val token = prefs.token
         val device = deviceId()
         val configured = server.isNotBlank() && token.isNotBlank() && device != null
-        publish(status.copy(configured = configured, pendingFiles = files, pendingBytes = bytes))
+        publish(status.copy(configured = configured, pendingFiles = files, pendingBytes = bytes, oldestAt = oldest,
+            sentBytes = sentCounter.get()))
         if (!configured) return
         if (!open) {
             if (ws == null && device != null && System.currentTimeMillis() >= nextAttemptAt) {
@@ -111,7 +119,7 @@ class Uploader(
             Request.Builder().url(url).header("Authorization", "Bearer $token").build()
         } catch (e: IllegalArgumentException) {
             nextAttemptAt = System.currentTimeMillis() + 15_000
-            publish(status.copy(connecting = false, error = "Неверный адрес сервера"))
+            publish(status.copy(connecting = false, error = "bad_url"))
             return
         }
         publish(status.copy(connecting = true))
@@ -139,6 +147,7 @@ class Uploader(
                 continue // файл удалили между листингом и чтением
             }
             if (!sent) break
+            sentCounter.addAndGet(f.length())
             inflight[id] = f
         }
     }
@@ -167,7 +176,7 @@ class Uploader(
                     publish(status.copy(lastAckAt = System.currentTimeMillis()))
                     kick()
                 }
-                "error" -> publish(status.copy(error = "Сервер: " + msg.optString("error")))
+                "error" -> publish(status.copy(error = msg.optString("error")))
             }
         }
 
@@ -176,16 +185,16 @@ class Uploader(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            dropped(webSocket, "соединение закрыто ($code)")
+            dropped(webSocket, "closed:$code")
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             val code = response?.code
             val reason = when (code) {
-                401, 403 -> "Сервер не принял токен"
-                404 -> "На этом адресе нет сервера NeuroSoft"
+                401, 403 -> "auth"
+                404 -> "not_found"
                 null -> t.message ?: t.javaClass.simpleName
-                else -> "Ошибка сервера $code"
+                else -> "server:$code"
             }
             dropped(webSocket, reason)
         }
@@ -209,7 +218,7 @@ class Uploader(
     }
 
     companion object {
-        private const val TAG = "NeuroSoft.Upload"
+        private const val TAG = "Mnemo.Upload"
         private const val MAX_INFLIGHT = 32
     }
 }

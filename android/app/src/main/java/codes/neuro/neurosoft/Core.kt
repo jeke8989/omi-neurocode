@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -18,13 +19,13 @@ import codes.neuro.neurosoft.ble.FrameAssembler
 import codes.neuro.neurosoft.ble.OmiBle
 import codes.neuro.neurosoft.ble.OmiProtocol
 import codes.neuro.neurosoft.ble.OmiScanner
-import android.location.Location
 import codes.neuro.neurosoft.diary.LocationTracker
 import codes.neuro.neurosoft.diary.PhotoSync
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.AudioSpool
 import codes.neuro.neurosoft.net.UploadStatus
 import codes.neuro.neurosoft.net.Uploader
+import codes.neuro.neurosoft.voice.VoiceAssistant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,23 +34,36 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import codes.neuro.neurosoft.voice.VoiceAssistant
 import org.json.JSONObject
 import java.io.File
+import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicLong
 
 data class DeviceStatus(
     val address: String? = null,
     val name: String? = null,
     val state: ConnState = ConnState.DISCONNECTED,
     val battery: Int? = null,
+    val charging: Boolean? = null,
     val codec: Int? = null,
     val firmware: String? = null,
+    val model: String? = null,
+    val hardware: String? = null,
+    val manufacturer: String? = null,
     val mtu: Int = 23,
     val frames: Long = 0,
     val lostPackets: Long = 0,
     val lastAudioAt: Long = 0,
-    val lastButton: String? = null,
+    val lastButton: Int? = null,
     val lastButtonAt: Long = 0,
+    val ledDim: Int? = null,
+    val micGain: Int? = null,
+    val caps: Set<String> = emptySet(),
+    /** С какого момента кулон без связи (0 — на связи или запись выключена). */
+    val disconnectedSince: Long = 0,
+    val bleKbps: Double = 0.0,
+    val netKbps: Double = 0.0,
+    val heardTodayMs: Long = 0,
 )
 
 /**
@@ -57,7 +71,7 @@ data class DeviceStatus(
  * Живёт в процессе приложения; фоновую работу удерживает OmiService.
  */
 object Core {
-    private const val TAG = "NeuroSoft"
+    private const val TAG = "Mnemo"
     const val NOTIFICATION_CHANNEL = "capture"
     const val NOTIFICATION_ID = 1
 
@@ -84,11 +98,16 @@ object Core {
     val scanning: StateFlow<Boolean> = _scanning
     private val _serviceRunning = MutableStateFlow(false)
     val serviceRunning: StateFlow<Boolean> = _serviceRunning
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused
+    private val _outages = MutableStateFlow<List<Outage>>(emptyList())
+    val outages: StateFlow<List<Outage>> = _outages
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val frameLock = Any()
     private val frames = ArrayList<ByteArray>()
     private var batchStartedAt = 0L
+    private val bleBytes = AtomicLong()
 
     @Volatile private var codec = OmiProtocol.CODEC_OPUS_FS320
     private val assembler = FrameAssembler { frame -> onFrame(frame) }
@@ -103,6 +122,8 @@ object Core {
     private var lastSentLocation: Location? = null
     private var lastPhotoSync = 0L
     private var lastNotificationText: String? = null
+    private var resCode: String? = null
+    private var resContext: Context? = null
 
     @Synchronized
     fun init(context: Context) {
@@ -112,11 +133,12 @@ object Core {
         spool = AudioSpool(File(app.filesDir, "spool"))
         uploader = Uploader(spool, prefs, ::deviceId, ::helloInfo) { s ->
             _upload.value = s
+            if (s.connected) syncLanguage()
             updateNotification()
         }
         ble = OmiBle(app, bleListener)
         scanner = OmiScanner(app)
-        voice = VoiceAssistant(app, prefs, ::deviceId, { codec }) { ts ->
+        voice = VoiceAssistant(app, ::res, prefs, ::deviceId, { codec }) { ts ->
             // нет связи: вопрос записан вместе со всем звуком, агент ответит в чате, когда сеть появится
             try {
                 spool.writeEvent("button", OmiProtocol.BUTTON_SINGLE_TAP, ts)
@@ -127,7 +149,10 @@ object Core {
         }
         voice.init()
         location = LocationTracker(app) { loc -> onLocation(loc) }
-        _device.value = DeviceStatus(address = prefs.deviceAddress, name = prefs.deviceName)
+        _paused.value = prefs.paused
+        _outages.value = prefs.outages
+        _device.value = DeviceStatus(address = prefs.deviceAddress, name = prefs.deviceName,
+            heardTodayMs = prefs.heardToday(LocalDate.now().toString()))
         createNotificationChannel()
         uploader.start()
         scope.launch { batchLoop() }
@@ -135,6 +160,44 @@ object Core {
 
     /** Идентификатор кулона на сервере — его Bluetooth-адрес. */
     fun deviceId(): String? = prefs.deviceAddress?.replace(":", "-")
+
+    /** Контекст с языком приложения: для уведомления и голоса, которые живут вне экрана. */
+    @Synchronized
+    fun res(): Context {
+        val code = Lang.code(prefs)
+        val cached = resContext
+        if (cached != null && code == resCode) return cached
+        val ctx = Lang.wrap(app)
+        resCode = code
+        resContext = ctx
+        return ctx
+    }
+
+    // ------------------------------------------------------------------ язык
+    @Volatile private var syncedLanguage: String? = null
+
+    /** Сменить язык приложения: голос, уведомление и тексты сервера (итоги, дневник) переходят на него. */
+    fun setLanguage(code: String) {
+        prefs.language = code
+        voice.applyLanguage()
+        lastNotificationText = null
+        updateNotification()
+        syncedLanguage = null
+        syncLanguage()
+    }
+
+    private fun syncLanguage() {
+        val code = Lang.code(prefs)
+        if (syncedLanguage == code || !prefs.serverConfigured) return
+        syncedLanguage = code
+        scope.launch {
+            try {
+                Api.setFeatures(mapOf("language" to code))
+            } catch (e: Exception) {
+                syncedLanguage = null // попробуем при следующем подключении
+            }
+        }
+    }
 
     // ------------------------------------------------------------------ запись (сервис)
     fun startCapture(context: Context) {
@@ -157,6 +220,15 @@ object Core {
         ble.disconnect()
         location.stop()
         lastNotificationText = null
+        _device.update { it.copy(disconnectedSince = 0) }
+    }
+
+    /** Пауза: звук не сохраняется и не уходит на сервер, но кнопка-вопрос работает. */
+    fun setPaused(value: Boolean) {
+        prefs.paused = value
+        _paused.value = value
+        if (value) synchronized(frameLock) { frames.clear() }
+        updateNotification()
     }
 
     /** Включить/выключить геолокацию по настройке (дневник). */
@@ -178,6 +250,7 @@ object Core {
             track.addLast(Triple(loc.time, loc.latitude, loc.longitude))
             while (track.size > 600) track.removeFirst()
         }
+        if (_paused.value) return
         try {
             spool.writeEvent("location", null, loc.time, mapOf(
                 "lat" to loc.latitude, "lon" to loc.longitude,
@@ -199,7 +272,7 @@ object Core {
     /** Автоматически отправить новые снимки камеры за сегодня (если включено). */
     fun syncPhotosNow() {
         if (!prefs.photoAutoImport || !Permissions.granted(app, Permissions.photos())) return
-        if (prefs.serverUrl.isBlank()) return
+        if (!prefs.serverConfigured) return
         lastPhotoSync = System.currentTimeMillis()
         scope.launch {
             val items = PhotoSync.todaysCameraPhotos(app, prefs.photoSyncedUntil)
@@ -238,7 +311,7 @@ object Core {
         val changed = prefs.deviceAddress != d.address
         prefs.deviceAddress = d.address
         prefs.deviceName = d.name
-        _device.value = DeviceStatus(address = d.address, name = d.name)
+        _device.value = DeviceStatus(address = d.address, name = d.name, heardTodayMs = _device.value.heardTodayMs)
         if (changed) uploader.reconnectNow()
         if (_serviceRunning.value) ble.connect(d.address) else startCapture(context)
     }
@@ -247,15 +320,40 @@ object Core {
         stopCapture(context)
         prefs.deviceAddress = null
         prefs.deviceName = null
+        prefs.outages = emptyList()
+        _outages.value = emptyList()
         _device.value = DeviceStatus()
+    }
+
+    // ------------------------------------------------------------------ управление кулоном
+    /** «Найти»: три вибрации подряд. */
+    fun findDevice() {
+        scope.launch {
+            repeat(3) { i ->
+                ble.haptic(3)
+                if (i < 2) delay(750)
+            }
+        }
+    }
+
+    fun setLedDim(percent: Int) {
+        _device.update { it.copy(ledDim = percent) }
+        ble.setLedDim(percent)
+    }
+
+    fun setMicGain(level: Int) {
+        _device.update { it.copy(micGain = level) }
+        ble.setMicGain(level)
     }
 
     // ------------------------------------------------------------------ звук
     private fun onFrame(frame: ByteArray) {
         val now = System.currentTimeMillis()
         synchronized(frameLock) {
-            if (frames.isEmpty()) batchStartedAt = now - 20
-            frames.add(frame)
+            if (!_paused.value) {
+                if (frames.isEmpty()) batchStartedAt = now - 20
+                frames.add(frame)
+            }
             recent.addLast(now to frame)
             while (recent.size > 150) recent.removeFirst()
         }
@@ -268,6 +366,10 @@ object Core {
 
     private suspend fun batchLoop() {
         var tick = 0
+        var lastBle = 0L
+        var lastNet = 0L
+        var bleRate = 0.0
+        var netRate = 0.0
         while (true) {
             delay(1_000)
             assembler.flushStale()
@@ -279,6 +381,7 @@ object Core {
                     copy to batchStartedAt
                 }
             }
+            val today = LocalDate.now().toString()
             if (pair != null) {
                 try {
                     spool.writeAudio(codec, pair.second, pair.first)
@@ -286,12 +389,23 @@ object Core {
                 } catch (e: Exception) {
                     Log.e(TAG, "cannot store audio", e)
                 }
+                prefs.addHeard(today, pair.first.size * 20L)
             }
+            // скорость: сглаживаем, чтобы цифра внизу экрана устройства не прыгала
+            val bleNow = bleBytes.get()
+            val net = _upload.value.sentBytes
+            bleRate = bleRate * 0.7 + (bleNow - lastBle) * 8 / 1000.0 * 0.3
+            netRate = netRate * 0.7 + (if (lastNet == 0L) 0L else net - lastNet).coerceAtLeast(0) * 8 / 1000.0 * 0.3
+            lastBle = bleNow
+            lastNet = net
             _device.update {
                 it.copy(
                     frames = assembler.frames,
                     lostPackets = assembler.lostPackets,
-                    lastAudioAt = if (pair != null) System.currentTimeMillis() else it.lastAudioAt,
+                    lastAudioAt = if (System.currentTimeMillis() - lastPacketAt < 2_000) System.currentTimeMillis()
+                        else it.lastAudioAt,
+                    bleKbps = bleRate, netKbps = netRate,
+                    heardTodayMs = prefs.heardToday(today),
                 )
             }
             if (++tick % 5 == 0) updateNotification()
@@ -299,10 +413,32 @@ object Core {
         }
     }
 
+    @Volatile private var lastPacketAt = 0L
+
+    private fun onConnectionChanged(state: ConnState) {
+        val now = System.currentTimeMillis()
+        val prev = _device.value
+        val since = when {
+            state == ConnState.CONNECTED -> {
+                if (prev.disconnectedSince > 0 && now - prev.disconnectedSince > 3_000) {
+                    val list = (prefs.outages + Outage(prev.disconnectedSince, now)).takeLast(20)
+                    prefs.outages = list
+                    _outages.value = list
+                }
+                0L
+            }
+            !_serviceRunning.value -> 0L
+            prev.disconnectedSince > 0 -> prev.disconnectedSince
+            prev.state == ConnState.CONNECTED -> now
+            else -> prev.disconnectedSince
+        }
+        _device.update { it.copy(state = state, disconnectedSince = since) }
+    }
+
     private val bleListener = object : OmiBle.Listener {
         override fun onConnectionState(state: ConnState) {
             if (state != ConnState.CONNECTED) assembler.reset()
-            _device.update { it.copy(state = state) }
+            onConnectionChanged(state)
             updateNotification()
         }
 
@@ -311,13 +447,18 @@ object Core {
             _device.update { it.copy(codec = codec) }
         }
 
-        override fun onAudioPacket(packet: ByteArray) = assembler.onPacket(packet)
+        override fun onAudioPacket(packet: ByteArray) {
+            bleBytes.addAndGet(packet.size.toLong())
+            lastPacketAt = System.currentTimeMillis()
+            assembler.onPacket(packet)
+        }
 
         override fun onButton(code: Int) {
-            _device.update {
-                it.copy(lastButton = OmiProtocol.buttonName(code), lastButtonAt = System.currentTimeMillis())
-            }
             val now = System.currentTimeMillis()
+            if (code != OmiProtocol.BUTTON_PRESS && code != OmiProtocol.BUTTON_RELEASE) {
+                _device.update { it.copy(lastButton = code, lastButtonAt = now) }
+            }
+            if (!prefs.buttonActions) return
             when (code) {
                 OmiProtocol.BUTTON_PRESS -> pressedAt = now
                 OmiProtocol.BUTTON_SINGLE_TAP -> {
@@ -326,15 +467,24 @@ object Core {
                     vibrate(1)
                     voice.onTap(framesSince(from), from)
                 }
-                OmiProtocol.BUTTON_DOUBLE_TAP -> {
-                    try {
-                        spool.writeEvent("button", code, now)
-                        uploader.kick()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "cannot store button event", e)
+                OmiProtocol.BUTTON_DOUBLE_TAP -> when (prefs.doubleTap) {
+                    "pause" -> {
+                        val p = !_paused.value
+                        setPaused(p)
+                        vibrate(2)
+                        voice.confirm(res().getString(if (p) R.string.voice_paused else R.string.voice_resumed))
                     }
-                    vibrate(2)
-                    if (prefs.confirmRemember) voice.confirm("Запомнил")
+                    "off" -> Unit
+                    else -> {
+                        try {
+                            spool.writeEvent("button", code, now)
+                            uploader.kick()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "cannot store button event", e)
+                        }
+                        vibrate(2)
+                        if (prefs.confirmRemember) voice.confirm(res().getString(R.string.voice_remembered))
+                    }
                 }
             }
         }
@@ -351,6 +501,27 @@ object Core {
         override fun onMtu(mtu: Int) {
             _device.update { it.copy(mtu = mtu) }
         }
+
+        override fun onDeviceInfo(model: String?, hardware: String?, manufacturer: String?) {
+            _device.update { it.copy(model = model, hardware = hardware, manufacturer = manufacturer) }
+        }
+
+        override fun onLedDim(percent: Int) {
+            _device.update { it.copy(ledDim = percent) }
+        }
+
+        override fun onMicGain(level: Int) {
+            _device.update { it.copy(micGain = level) }
+        }
+
+        override fun onCharging(charging: Boolean) {
+            _device.update { it.copy(charging = charging) }
+            updateNotification()
+        }
+
+        override fun onCapabilities(caps: Set<String>) {
+            _device.update { it.copy(caps = caps) }
+        }
     }
 
     private fun helloInfo(): JSONObject {
@@ -363,6 +534,7 @@ object Core {
             .put("firmware", d.firmware ?: JSONObject.NULL)
             .put("battery", d.battery ?: JSONObject.NULL)
             .put("codec", d.codec ?: JSONObject.NULL)
+            .put("language", Lang.code(prefs))
     }
 
     @Suppress("DEPRECATION")
@@ -377,28 +549,28 @@ object Core {
 
     // ------------------------------------------------------------------ уведомление
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(NOTIFICATION_CHANNEL, "Запись с кулона", NotificationManager.IMPORTANCE_LOW)
-        channel.description = "Показывает, что NeuroSoft принимает звук с кулона"
+        val r = res()
+        val channel = NotificationChannel(NOTIFICATION_CHANNEL, r.getString(R.string.notif_channel),
+            NotificationManager.IMPORTANCE_LOW)
+        channel.description = r.getString(R.string.notif_channel_desc)
         app.getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
 
-    fun stateText(state: ConnState): String = when (state) {
-        ConnState.CONNECTED -> "Кулон подключён"
-        ConnState.SETTING_UP -> "Настраиваю кулон…"
-        ConnState.CONNECTING -> "Ищу кулон…"
-        ConnState.BLUETOOTH_OFF -> "Bluetooth выключен"
-        ConnState.DISCONNECTED -> "Кулон не подключён"
-    }
-
     private fun notificationText(): String {
+        val r = res()
         val d = _device.value
         val u = _upload.value
-        return buildString {
-            append(stateText(d.state))
-            d.battery?.let { append(" · батарея $it%") }
-            append(if (u.connected) " · сервер ✓" else " · сервер ✗")
-            if (u.pendingFiles > 3) append(" · в очереди ${u.pendingFiles}")
-        }
+        val parts = mutableListOf<String>()
+        parts += r.getString(when {
+            _paused.value -> R.string.notif_paused
+            d.state == ConnState.CONNECTED -> R.string.notif_recording
+            d.state == ConnState.BLUETOOTH_OFF -> R.string.state_bluetooth_off
+            else -> R.string.notif_searching
+        })
+        d.battery?.let { parts += r.getString(R.string.notif_battery, it) }
+        if (!u.connected) parts += r.getString(R.string.notif_offline)
+        else if (u.pendingFiles > 3) parts += r.getString(R.string.notif_catching_up)
+        return parts.joinToString(", ")
     }
 
     fun buildNotification(context: Context): Notification {
@@ -410,7 +582,7 @@ object Core {
         lastNotificationText = text
         return NotificationCompat.Builder(context, NOTIFICATION_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_neuro)
-            .setContentTitle("NeuroSoft")
+            .setContentTitle(res().getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

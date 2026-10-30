@@ -41,6 +41,13 @@ class OmiBle(private val context: Context, private val listener: Listener) {
         fun onBattery(level: Int)
         fun onFirmware(version: String)
         fun onMtu(mtu: Int)
+        /** Модель, ревизия железа, производитель (Device Information). */
+        fun onDeviceInfo(model: String?, hardware: String?, manufacturer: String?) {}
+        fun onLedDim(percent: Int) {}
+        fun onMicGain(level: Int) {}
+        fun onCharging(charging: Boolean) {}
+        /** Что умеет этот кулон: "haptic", "led", "gain", "charging". */
+        fun onCapabilities(caps: Set<String>) {}
     }
 
     private sealed class Op {
@@ -78,6 +85,22 @@ class OmiBle(private val context: Context, private val listener: Listener) {
         this.address = address
         attempts = 0
         open(autoConnect = false)
+    }
+
+    /** Короткая вибрация кулона (1–3). Без вибромотора ничего не делает. */
+    fun haptic(level: Int) = main.post {
+        enqueue(Op.Write(OmiProtocol.HAPTIC_SERVICE, OmiProtocol.HAPTIC, byteArrayOf(level.coerceIn(1, 3).toByte())))
+    }
+
+    fun setLedDim(percent: Int) = main.post {
+        enqueue(Op.Write(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.LED_DIM, byteArrayOf(percent.coerceIn(0, 100).toByte())))
+        enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.LED_DIM))
+    }
+
+    fun setMicGain(level: Int) = main.post {
+        enqueue(Op.Write(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN,
+            byteArrayOf(level.coerceIn(0, OmiProtocol.MIC_GAIN_MAX).toByte())))
+        enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN))
     }
 
     fun disconnect() = main.post {
@@ -142,9 +165,27 @@ class OmiBle(private val context: Context, private val listener: Listener) {
         fun has(service: UUID, ch: UUID) = g.getService(service)?.getCharacteristic(ch) != null
 
         enqueue(Op.Read(OmiProtocol.AUDIO_SERVICE, OmiProtocol.AUDIO_CODEC))
-        if (has(OmiProtocol.DEVICE_INFO_SERVICE, OmiProtocol.FIRMWARE_REVISION)) {
-            enqueue(Op.Read(OmiProtocol.DEVICE_INFO_SERVICE, OmiProtocol.FIRMWARE_REVISION))
+        info.clear()
+        for (ch in listOf(OmiProtocol.FIRMWARE_REVISION, OmiProtocol.MODEL_NUMBER, OmiProtocol.HARDWARE_REVISION,
+            OmiProtocol.MANUFACTURER)) {
+            if (has(OmiProtocol.DEVICE_INFO_SERVICE, ch)) enqueue(Op.Read(OmiProtocol.DEVICE_INFO_SERVICE, ch))
         }
+        val caps = mutableSetOf<String>()
+        if (has(OmiProtocol.HAPTIC_SERVICE, OmiProtocol.HAPTIC)) caps += "haptic"
+        if (has(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.LED_DIM)) {
+            caps += "led"
+            enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.LED_DIM))
+        }
+        if (has(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN)) {
+            caps += "gain"
+            enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN))
+        }
+        if (has(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.CHARGING)) {
+            caps += "charging"
+            enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.CHARGING))
+            enqueue(Op.Notify(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.CHARGING))
+        }
+        listener.onCapabilities(caps)
         if (has(OmiProtocol.TIME_SYNC_SERVICE, OmiProtocol.TIME_SYNC_WRITE)) {
             val epoch = (System.currentTimeMillis() / 1000).toInt()
             val bytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(epoch).array()
@@ -247,16 +288,28 @@ class OmiBle(private val context: Context, private val listener: Listener) {
             OmiProtocol.AUDIO_DATA -> listener.onAudioPacket(value)
             OmiProtocol.BUTTON_TRIGGER -> if (value.isNotEmpty()) listener.onButton(value[0].toInt() and 0xFF)
             OmiProtocol.BATTERY_LEVEL -> if (value.isNotEmpty()) listener.onBattery(value[0].toInt() and 0xFF)
+            OmiProtocol.CHARGING -> if (value.isNotEmpty()) listener.onCharging(value[0].toInt() != 0)
         }
     }
+
+    private val info = mutableMapOf<UUID, String>()
+
+    private fun text(value: ByteArray) = String(value, Charsets.UTF_8).trim { it <= ' ' || it == '\u0000' }
 
     private fun handleRead(uuid: UUID, value: ByteArray, status: Int) {
         if (status == BluetoothGatt.GATT_SUCCESS && value.isNotEmpty()) {
             when (uuid) {
                 OmiProtocol.AUDIO_CODEC -> listener.onCodec(value[0].toInt() and 0xFF)
                 OmiProtocol.BATTERY_LEVEL -> listener.onBattery(value[0].toInt() and 0xFF)
-                OmiProtocol.FIRMWARE_REVISION ->
-                    listener.onFirmware(String(value, Charsets.UTF_8).trim { it <= ' ' || it == '\u0000' })
+                OmiProtocol.FIRMWARE_REVISION -> listener.onFirmware(text(value))
+                OmiProtocol.MODEL_NUMBER, OmiProtocol.HARDWARE_REVISION, OmiProtocol.MANUFACTURER -> {
+                    info[uuid] = text(value)
+                    listener.onDeviceInfo(info[OmiProtocol.MODEL_NUMBER], info[OmiProtocol.HARDWARE_REVISION],
+                        info[OmiProtocol.MANUFACTURER])
+                }
+                OmiProtocol.LED_DIM -> listener.onLedDim(value[0].toInt() and 0xFF)
+                OmiProtocol.MIC_GAIN -> listener.onMicGain(value[0].toInt() and 0xFF)
+                OmiProtocol.CHARGING -> listener.onCharging(value[0].toInt() != 0)
             }
         }
         opDone()
@@ -342,7 +395,7 @@ class OmiBle(private val context: Context, private val listener: Listener) {
     @Suppress("DEPRECATION")
     private fun legacyValue(ch: BluetoothGattCharacteristic): ByteArray = ch.value?.copyOf() ?: ByteArray(0)
 
-    private fun log(msg: String) = Log.i("NeuroSoft.BLE", msg)
+    private fun log(msg: String) = Log.i("Mnemo.BLE", msg)
 }
 
 /** Поиск кулонов Omi поблизости. */

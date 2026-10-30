@@ -5,17 +5,19 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** Отрезок, когда кулон был без связи (для «Недавно» на экране устройства). */
+data class Outage(val from: Long, val to: Long)
 
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("neurosoft", Context.MODE_PRIVATE)
 
-    var serverUrl: String
-        get() = sp.getString("server_url", "") ?: ""
-        set(value) = sp.edit().putString("server_url", normalizeUrl(value)).apply()
-
-    var token: String
-        get() = sp.getString("token", "") ?: ""
-        set(value) = sp.edit().putString("token", value.trim()).apply()
+    /** Сервер и ключ зашиты в сборку (neurosoft.properties) — пользователь их не вводит. */
+    val serverUrl: String get() = BuildConfig.SERVER_URL.trim().trimEnd('/')
+    val token: String get() = BuildConfig.API_TOKEN.trim()
+    val serverConfigured: Boolean get() = serverUrl.isNotBlank() && token.isNotBlank()
 
     var deviceAddress: String?
         get() = sp.getString("device_address", null)
@@ -25,10 +27,35 @@ class Prefs(context: Context) {
         get() = sp.getString("device_name", null)
         set(value) = sp.edit().putString("device_name", value).apply()
 
+    /** Первый запуск пройден (разрешения, кулон найден). */
+    var onboarded: Boolean
+        get() = sp.getBoolean("onboarded", deviceAddress != null)
+        set(value) = sp.edit().putBoolean("onboarded", value).apply()
+
+    /** Язык интерфейса: "" — как в системе, иначе ru / en / tr / es. */
+    var language: String
+        get() = sp.getString("language", "") ?: ""
+        set(value) = sp.edit().putString("language", value).apply()
+
     /** Включать запись автоматически после перезагрузки телефона. */
     var autoStart: Boolean
         get() = sp.getBoolean("auto_start", true)
         set(value) = sp.edit().putBoolean("auto_start", value).apply()
+
+    /** Пауза записи: звук не сохраняется, но кнопка-вопрос работает. */
+    var paused: Boolean
+        get() = sp.getBoolean("paused", false)
+        set(value) = sp.edit().putBoolean("paused", value).apply()
+
+    /** Реагировать на кнопку кулона. */
+    var buttonActions: Boolean
+        get() = sp.getBoolean("button_actions", true)
+        set(value) = sp.edit().putBoolean("button_actions", value).apply()
+
+    /** Двойное нажатие: remember — «запомни это», pause — пауза/продолжить запись, off — ничего. */
+    var doubleTap: String
+        get() = sp.getString("double_tap", "remember") ?: "remember"
+        set(value) = sp.edit().putString("double_tap", value).apply()
 
     /** Звуковые сигналы кнопки («слушаю», «принял»). */
     var earcons: Boolean
@@ -49,7 +76,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("location", false)
         set(value) = sp.edit().putBoolean("location", value).apply()
 
-    /** Дневник: автоматически отправлять фото дня с телефона (кандидаты; в ленту попадут только подходящие). */
+    /** Дневник: автоматически отправлять фото дня с телефона (в ленту попадут только подходящие). */
     var photoAutoImport: Boolean
         get() = sp.getBoolean("photo_auto", false)
         set(value) = sp.edit().putBoolean("photo_auto", value).apply()
@@ -58,13 +85,27 @@ class Prefs(context: Context) {
         get() = sp.getLong("photo_synced_until", 0L)
         set(value) = sp.edit().putLong("photo_synced_until", value).apply()
 
-    companion object {
-        fun normalizeUrl(value: String): String {
-            var s = value.trim().trimEnd('/')
-            if (s.isNotEmpty() && !s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
-            return s
-        }
+    /** Сколько миллисекунд звука принято сегодня (день — по часам телефона). */
+    fun heardToday(today: String): Long =
+        if (sp.getString("heard_day", "") == today) sp.getLong("heard_ms", 0L) else 0L
+
+    fun addHeard(today: String, ms: Long) {
+        val base = heardToday(today)
+        sp.edit().putString("heard_day", today).putLong("heard_ms", base + ms).apply()
     }
+
+    var outages: List<Outage>
+        get() = try {
+            val a = JSONArray(sp.getString("outages", "[]"))
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> Outage(o.getLong("from"), o.getLong("to")) } }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        set(value) {
+            val a = JSONArray()
+            value.takeLast(20).forEach { a.put(JSONObject().put("from", it.from).put("to", it.to)) }
+            sp.edit().putString("outages", a.toString()).apply()
+        }
 }
 
 object Permissions {

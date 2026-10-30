@@ -2,206 +2,270 @@ package codes.neuro.neurosoft.ui
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ChatMessage
 import codes.neuro.neurosoft.net.ChatRun
-import codes.neuro.neurosoft.net.ChatState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val LEVELS = listOf("auto" to "Авто", "fast" to "Быстро", "tools" to "Основательно", "deep" to "Глубоко")
-private val LEVEL_TITLES = mapOf("fast" to "Быстро", "tools" to "Основательно", "deep" to "Глубоко")
+private val LEVELS = listOf("auto", "fast", "tools", "deep")
 
 @Composable
-fun ChatScreen() {
-    var state by remember { mutableStateOf<Load<ChatState>>(Load.Loading) }
-    var input by remember { mutableStateOf("") }
-    var level by remember { mutableStateOf(0) }
+private fun levelTitle(level: String): String = stringResource(when (level) {
+    "fast" -> R.string.level_fast
+    "tools" -> R.string.level_tools
+    "deep" -> R.string.level_deep
+    else -> R.string.level_auto
+})
+
+@Composable
+fun ChatScreen(prefill: String?) {
+    val res by Repo.chat.state.collectAsState()
+    var input by rememberSaveable { mutableStateOf("") }
+    var level by rememberSaveable { mutableStateOf(0) }
     var sending by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var refresh by remember { mutableStateOf(0) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
+    var prefillSent by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
+    val c = Mn.c
 
-    LaunchedEffect(refresh) {
-        while (true) {
-            val next = try {
-                Load.Ok(Api.chat())
-            } catch (e: Exception) {
-                if (state is Load.Ok) state else Load.Err(e.message ?: "Ошибка")
-            }
-            state = next
-            val running = (next as? Load.Ok)?.data?.running == true
-            delay(if (running || sending) 1_000 else 4_000)
-        }
-    }
-    val count = (state as? Load.Ok)?.data?.messages?.size ?: 0
-    LaunchedEffect(count) {
-        if (count > 0) list.animateScrollToItem(count - 1)
-    }
-
-    fun send() {
-        val text = input.trim()
-        if (text.isEmpty() || sending) return
+    fun send(text: String) {
+        val t = text.trim()
+        if (t.isEmpty() || sending) return
         sending = true
         error = null
         scope.launch {
             try {
-                Api.sendChat(text, LEVELS[level].first)
+                Api.sendChat(t, LEVELS[level])
                 input = ""
-                refresh++
+                Repo.chat.refresh()
             } catch (e: Exception) {
-                error = e.message
+                error = e
+                input = t
             }
             sending = false
         }
     }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
-        LargeTitle("Агент", subtitle = "уровни · инструменты · расширения")
-        Box(Modifier.weight(1f)) {
-            LoadContent(state, onRetry = { refresh++ }) { chat ->
-                if (chat.messages.isEmpty()) {
-                    EmptyState(NeuroIcons.Sparkles, "Спросите что угодно",
-                        "Агент ищет в интернете, помнит ваши разговоры, ставит задачи и пользуется расширениями. " +
-                            "Вопросы с кнопки кулона тоже появляются здесь.")
-                } else {
-                    LazyColumn(
-                        state = list,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(chat.messages, key = { it.id }) { m ->
-                            MessageBubble(m, m.runId?.let { chat.runs[it] })
-                        }
-                        val pendingRun = chat.runs.values.firstOrNull { r ->
-                            r.status == "running" && chat.messages.none { it.role == "assistant" && it.runId == r.id }
-                        }
-                        if (pendingRun != null) {
-                            item(key = "running") { Thinking(pendingRun) }
+    LaunchedEffect(Unit) {
+        if (prefill != null && !prefillSent) {
+            prefillSent = true
+            send(prefill)
+        }
+        while (true) {
+            Repo.chat.refresh()
+            val running = Repo.chat.state.value.data?.running == true
+            delay(if (running || sending) 1_000 else 4_000)
+        }
+    }
+    val count = res.data?.messages?.size ?: 0
+    LaunchedEffect(count) {
+        if (count > 0) list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            containerColor = c.paper,
+            title = { Text(stringResource(R.string.clear_chat_q), style = T.section, color = c.ink) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    scope.launch {
+                        try {
+                            Api.clearChat()
+                            Repo.chat.refresh()
+                        } catch (e: Exception) {
+                            error = e
                         }
                     }
+                }) { Text(stringResource(R.string.clear), color = c.red, style = T.bodyStrong) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text(stringResource(R.string.cancel), color = c.ink, style = T.bodyStrong)
+                }
+            },
+        )
+    }
+
+    Column(Modifier.fillMaxSize().imePadding()) {
+        TopBar(stringResource(R.string.assistant), { Nav.pop() }) {
+            if (count > 0) IconCircle(Icons.Trash, stringResource(R.string.clear_chat), { confirmClear = true }, size = 40.dp)
+        }
+        Box(Modifier.weight(1f)) {
+            val chat = res.data
+            when {
+                chat == null && res.error != null -> ErrorBlock(res.error, { scope.launch { Repo.chat.refresh() } })
+                chat == null -> LoadingBlock()
+                chat.messages.isEmpty() && !sending -> ChatEmpty { send(it) }
+                else -> LazyColumn(
+                    state = list,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(chat.messages, key = { it.id }) { m -> Message(m, m.runId?.let { chat.runs[it] }) }
+                    val pending = chat.runs.values.firstOrNull { r ->
+                        r.status == "running" && chat.messages.none { it.role == "assistant" && it.runId == r.id }
+                    }
+                    if (pending != null) item(key = "running") { Working(pending) }
+                    else if (sending) item(key = "sending") { Working(null) }
                 }
             }
         }
-        // ------------------------------------------------------------ ввод
-        Column(Modifier.fillMaxWidth().background(Ios.colors.bar).padding(horizontal = 12.dp, vertical = 8.dp)) {
-            SegmentedControl(LEVELS.map { it.second }, level, { level = it }, Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(20.dp)).background(Ios.colors.cell)
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                ) {
-                    if (input.isEmpty()) {
-                        Text("Сообщение агенту", color = Ios.colors.tertiary, style = MaterialTheme.typography.bodyLarge)
-                    }
-                    BasicTextField(
-                        value = input, onValueChange = { input = it },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = Ios.colors.label),
-                        cursorBrush = SolidColor(Ios.colors.tint), maxLines = 6,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier.size(38.dp).clip(CircleShape)
-                        .background(if (input.isBlank() || sending) Ios.colors.fill else Ios.colors.tint)
-                        .clickable(enabled = input.isNotBlank() && !sending) { send() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (sending) Spinner(16)
-                    else Icon(NeuroIcons.ArrowUp, "Отправить", tint = Color.White, modifier = Modifier.size(22.dp))
-                }
-            }
-            error?.let { Text(it, color = Ios.colors.red, style = MaterialTheme.typography.bodySmall) }
+        Composer(
+            input = input, onInput = { input = it }, level = level, onLevel = { level = it },
+            sending = sending, error = error, onSend = { send(input) },
+        )
+    }
+}
+
+@Composable
+private fun ChatEmpty(onPick: (String) -> Unit) {
+    val c = Mn.c
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalArrangement = Arrangement.Center) {
+        Lens(LensState.IDLE, 64.dp)
+        Spacer(Modifier.height(12.dp))
+        Txt(stringResource(R.string.chat_empty_title), T.title)
+        Spacer(Modifier.height(8.dp))
+        Txt(stringResource(R.string.chat_empty_text), T.body, c.graphite)
+        Spacer(Modifier.height(20.dp))
+        listOf(R.string.chat_hint_1, R.string.chat_hint_2, R.string.chat_hint_3).forEach { id ->
+            val text = stringResource(id)
+            Txt(text, T.body, c.ink, Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                .background(c.paper).tap({ onPick(text) }).padding(horizontal = 16.dp, vertical = 12.dp))
         }
     }
 }
 
 @Composable
-private fun MessageBubble(m: ChatMessage, run: ChatRun?) {
+private fun Message(m: ChatMessage, run: ChatRun?) {
+    val c = Mn.c
+    val fmt = rememberFmt()
     val mine = m.role == "user"
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-        if (!mine && run != null && run.steps.isNotEmpty()) StepsCard(run)
-        Box(
-            Modifier.widthIn(max = 310.dp)
-                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp,
-                    bottomStart = if (mine) 18.dp else 5.dp, bottomEnd = if (mine) 5.dp else 18.dp))
-                .background(if (mine) Ios.colors.tint else Ios.colors.bubble)
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        ) {
-            Text(m.text, color = if (mine) Color.White else Ios.colors.label, style = MaterialTheme.typography.bodyLarge)
+        if (!mine && run != null && run.steps.isNotEmpty()) Steps(run)
+        if (mine) {
+            Txt(m.text, T.body, c.onInk, Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp))
+                .background(c.ink).padding(horizontal = 16.dp, vertical = 10.dp))
+        } else {
+            Txt(m.text, T.body, c.ink, Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.paper)
+                .padding(horizontal = 16.dp, vertical = 12.dp))
         }
         val meta = listOfNotNull(
-            if (m.channel == "voice") "🎙 голосом" else null,
-            if (mine) run?.level?.let { LEVEL_TITLES[it] } else null,
-            formatShortTime(m.createdAt),
-        ).joinToString(" · ")
-        Text(meta, style = MaterialTheme.typography.labelSmall, color = Ios.colors.tertiary,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            if (m.channel == "voice") stringResource(R.string.by_voice) else null,
+            if (mine) run?.level?.let { levelTitle(it) } else null,
+            fmt.time(m.createdAt),
+        ).joinToString(", ")
+        Txt(meta, T.tiny, c.faint, Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
     }
 }
 
 @Composable
-private fun StepsCard(run: ChatRun) {
+private fun Steps(run: ChatRun) {
     var open by remember { mutableStateOf(false) }
+    val c = Mn.c
     val tools = run.steps.count { it.kind == "tool" }
     Column(
-        Modifier.widthIn(max = 310.dp).padding(bottom = 4.dp).clip(RoundedCornerShape(12.dp))
-            .background(Ios.colors.cell).clickable { open = !open }.animateContentSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.padding(bottom = 6.dp).clip(RoundedCornerShape(14.dp)).background(c.raised).tap({ open = !open })
+            .animateContentSize().padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Text(
-            (if (run.status == "failed") "⚠️ " else "✓ ") + (LEVEL_TITLES[run.level] ?: run.level) +
-                (if (tools > 0) " · шагов: $tools" else "") + (if (open) "  ▾" else "  ›"),
-            style = MaterialTheme.typography.labelMedium, color = Ios.colors.secondary,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (run.status == "failed") Icons.Info else Icons.Check, null,
+                tint = if (run.status == "failed") c.amber else c.graphite, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Txt(levelTitle(run.level) + if (tools > 0) ", " + plural(R.plurals.steps, tools) else "", T.tiny, c.graphite)
+            Spacer(Modifier.width(4.dp))
+            Icon(if (open) Icons.ChevronDown else Icons.Chevron, null, tint = c.graphite, modifier = Modifier.size(14.dp))
+        }
         if (open) {
             run.steps.forEach { s ->
-                Text(s.title, style = MaterialTheme.typography.bodySmall,
-                    color = if (s.kind == "result") Ios.colors.tertiary else Ios.colors.secondary,
-                    modifier = Modifier.padding(top = 3.dp, start = if (s.kind == "result") 10.dp else 0.dp))
+                Txt(s.title, T.caption, if (s.kind == "result") c.faint else c.graphite,
+                    Modifier.padding(top = 4.dp, start = if (s.kind == "result") 12.dp else 0.dp), maxLines = 3)
             }
         }
     }
 }
 
 @Composable
-private fun Thinking(run: ChatRun) {
+private fun Working(run: ChatRun?) {
+    val c = Mn.c
     Column(
-        Modifier.widthIn(max = 310.dp).clip(RoundedCornerShape(18.dp)).background(Ios.colors.bubble)
-            .padding(horizontal = 14.dp, vertical = 10.dp).animateContentSize(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.paper).animateContentSize()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Spinner(14)
-            Spacer(Modifier.width(8.dp))
-            Text("Работаю · ${LEVEL_TITLES[run.level] ?: run.level}", style = MaterialTheme.typography.labelLarge,
-                color = Ios.colors.label, fontWeight = FontWeight.SemiBold)
+            Lens(LensState.THINKING, 34.dp)
+            Spacer(Modifier.width(6.dp))
+            Txt(stringResource(R.string.working) + (run?.let { ", " + levelTitle(it.level).lowercase() } ?: ""),
+                T.smallStrong)
         }
-        run.steps.filter { it.kind != "result" }.takeLast(5).forEach { s ->
-            Text(s.title, style = MaterialTheme.typography.bodySmall, color = Ios.colors.secondary)
+        run?.steps?.filter { it.kind != "result" && it.kind != "level" }?.takeLast(5)?.forEach { s ->
+            Txt(s.title, T.caption, c.graphite, Modifier.padding(start = 40.dp, top = 3.dp), maxLines = 2)
+        }
+    }
+}
+
+@Composable
+private fun Composer(
+    input: String, onInput: (String) -> Unit, level: Int, onLevel: (Int) -> Unit, sending: Boolean,
+    error: Throwable?, onSend: () -> Unit,
+) {
+    val c = Mn.c
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
+        if (error != null) {
+            Txt(errorText(error), T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(LEVELS.size) { i -> Chip(levelTitle(LEVELS[i]), i == level, { onLevel(i) }) }
+        }
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
+            Box(
+                Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(c.paper)
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+            ) {
+                if (input.isEmpty()) Txt(stringResource(R.string.ask_anything), T.body, c.faint, maxLines = 1)
+                BasicTextField(
+                    value = input, onValueChange = onInput, textStyle = T.body.copy(color = c.ink),
+                    cursorBrush = SolidColor(c.lens), maxLines = 6, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            val enabled = input.isNotBlank() && !sending
+            Box(
+                Modifier.size(52.dp).clip(CircleShape).background(if (enabled) c.ink else c.line)
+                    .tap(onSend, enabled),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (sending) Spinner(18.dp, c.onInk)
+                else Icon(Icons.ArrowUp, stringResource(R.string.send), tint = if (enabled) c.onInk else c.faint,
+                    modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
