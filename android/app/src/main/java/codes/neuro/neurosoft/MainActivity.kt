@@ -27,6 +27,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        Core.setForeground(true)
+    }
+
+    override fun onStop() {
+        Core.setForeground(false)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         Core.syncPhotosNow()

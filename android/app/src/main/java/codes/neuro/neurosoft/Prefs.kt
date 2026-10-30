@@ -42,6 +42,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_start", true)
         set(value) = sp.edit().putBoolean("auto_start", value).apply()
 
+    /** Экономия батареи: когда приложение свёрнуто, записи уходят на сервер пачками. */
+    var batterySaver: Boolean
+        get() = sp.getBoolean("battery_saver", true)
+        set(value) = sp.edit().putBoolean("battery_saver", value).apply()
+
     /** Пауза записи: звук не сохраняется, но кнопка-вопрос работает. */
     var paused: Boolean
         get() = sp.getBoolean("paused", false)
@@ -56,6 +61,11 @@ class Prefs(context: Context) {
     var doubleTap: String
         get() = sp.getString("double_tap", "remember") ?: "remember"
         set(value) = sp.edit().putString("double_tap", value).apply()
+
+    /** Ответ голосом: always — всегда, headphones — только когда подключены наушники, off — не озвучивать. */
+    var voiceReply: String
+        get() = sp.getString("voice_reply", "headphones") ?: "headphones"
+        set(value) = sp.edit().putString("voice_reply", value).apply()
 
     /** Звуковые сигналы кнопки («слушаю», «принял»). */
     var earcons: Boolean

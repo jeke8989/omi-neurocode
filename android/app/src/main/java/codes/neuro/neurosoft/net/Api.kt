@@ -31,7 +31,7 @@ data class ConversationItem(
 )
 
 /** День с записями: для ленты дней и календаря. */
-data class DayInfo(val day: String, val conversations: Int, val seconds: Int)
+data class DayInfo(val day: String, val conversations: Int, val seconds: Int, val speechSeconds: Int = 0)
 
 data class SearchHit(val kind: String, val id: Long?, val conversationId: Long?, val title: String, val text: String?,
                      val at: String?, val emoji: String?, val done: Boolean = false)
@@ -183,7 +183,7 @@ object Api {
 
     suspend fun days(): List<DayInfo> =
         JSONObject(call("GET", "/api/days")).getJSONArray("items").map {
-            DayInfo(it.optString("day").take(10), it.optInt("conversations"), it.optInt("seconds"))
+            DayInfo(it.optString("day").take(10), it.optInt("conversations"), it.optInt("seconds"), it.optInt("speech_seconds"))
         }
 
     suspend fun search(q: String): SearchResults {

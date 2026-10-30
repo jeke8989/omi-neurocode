@@ -16,12 +16,16 @@
     <string name="assistant">Asistente</string>
     <string name="assistant_answer">Respuesta a tu pregunta con el botón</string>
     <string name="autostart">Grabar tras reiniciar</string>
+    <string name="avg_frame">Trama de audio media</string>
+    <string name="avg_frame_sub">En silencio las tramas son más pequeñas: el códec ahorra datos</string>
     <string name="back">Atrás</string>
     <string name="background">Segundo plano</string>
     <string name="background_footer">Sin esto, Android puede detener la grabación con la pantalla apagada.</string>
     <string name="battery">Batería</string>
     <string name="battery_allow">Permitir segundo plano</string>
     <string name="battery_allow_sub">Desactiva la optimización de batería para Mnemo</string>
+    <string name="battery_saver">Ahorro de batería</string>
+    <string name="battery_saver_sub">Con la app en segundo plano, las grabaciones se suben en lotes cada 2 minutos y la red del teléfono descansa entre medias. Las preguntas con el botón se responden al momento</string>
     <string name="battery_unrestricted">Segundo plano permitido</string>
     <string name="button_actions">Acciones del botón</string>
     <string name="button_actions_sub">Una pulsación pregunta al asistente</string>
@@ -129,7 +133,8 @@
     <string name="gain_normal">Normal, nivel %1$d</string>
     <string name="gain_quiet">Más bajo, nivel %1$d</string>
     <string name="hardware_revision">Revisión de hardware</string>
-    <string name="heard_today">Escuchado hoy</string>
+    <string name="headphones_off">Ahora no hay auriculares: la respuesta irá a la app</string>
+    <string name="headphones_on">Ahora hay auriculares conectados</string>
     <string name="hide">Ocultar</string>
     <string name="highlights">Momentos destacados</string>
     <string name="how_to_use">Cómo usarlo</string>
@@ -170,7 +175,6 @@
     <string name="live_connected_text">Esperando audio del colgante</string>
     <string name="live_disconnected">Colgante sin conexión</string>
     <string name="live_disconnected_for">Desde hace %1$s. Acércalo al teléfono o cárgalo.</string>
-    <string name="live_heard_today">Escuchado hoy: %1$s</string>
     <string name="live_listening">Escuchando…</string>
     <string name="live_no_device">Ningún colgante conectado</string>
     <string name="live_no_device_text">Enciende tu colgante y Mnemo lo encontrará</string>
@@ -182,11 +186,13 @@
     <string name="live_permissions_text">Para oír el colgante y seguir en segundo plano</string>
     <string name="live_queue">%1$s en cola; se subirá cuando vuelva la conexión</string>
     <string name="live_queue_left">Quedan %1$s</string>
+    <string name="live_quiet_note">El silencio y el ruido constante no se convierten en conversaciones</string>
     <string name="live_recording">Escuchando y grabando</string>
     <string name="live_searching_text">Buscando el colgante cerca…</string>
     <string name="live_server_offline">Servidor no disponible</string>
     <string name="live_server_offline_text">Las grabaciones se guardan en el teléfono y se subirán después</string>
     <string name="live_speaking">Respondiendo en tus auriculares</string>
+    <string name="live_talk_today">Hoy en conversaciones: %1$s</string>
     <string name="live_thinking">Pensando…</string>
     <string name="location_sub">Lugares del día en el diario</string>
     <string name="location_while_recording">Ubicación al grabar</string>
@@ -199,6 +205,7 @@
     <string name="memory_footer">El asistente usa la memoria al responder.</string>
     <string name="mic_gain">Ganancia del micrófono</string>
     <string name="mic_gain_sub">Más alto capta mejor la voz baja, pero con más ruido</string>
+    <string name="mic_on_today">Micrófono activo hoy</string>
     <string name="model_number">Modelo</string>
     <string name="model_search_hint">Buscar: claude, gemini, deepseek…</string>
     <string name="models_agent">Asistente</string>
@@ -217,6 +224,9 @@
     <string name="notif_paused">Grabación en pausa</string>
     <string name="notif_recording">Escuchando</string>
     <string name="notif_searching">Buscando el colgante</string>
+    <string name="now_batched">Ahorrando batería</string>
+    <string name="now_batched_next">Las grabaciones se guardan en el teléfono; próxima subida a las %1$s</string>
+    <string name="now_batched_text">Las grabaciones se suben en lotes</string>
     <string name="now_catching_up">Poniéndose al día</string>
     <string name="now_catching_up_text">Subiendo las grabaciones guardadas al servidor</string>
     <string name="now_live">En directo</string>
@@ -304,6 +314,7 @@
     <string name="search_title">Busca en todo lo que oyó el colgante</string>
     <string name="send">Enviar</string>
     <string name="server">Servidor</string>
+    <string name="server_batched">en lotes</string>
     <string name="server_connecting">conectando</string>
     <string name="server_not_built_in">sin configurar</string>
     <string name="server_offline">sin conexión</string>
@@ -359,6 +370,7 @@
     <string name="tab_diary">Diario</string>
     <string name="tab_home">Inicio</string>
     <string name="tab_tasks">Tareas</string>
+    <string name="talk_today">Conversaciones hoy</string>
     <string name="task_sync">Integración de tareas</string>
     <string name="tasks_all_done">Todo hecho</string>
     <string name="tasks_done_count">Hechas: %1$d</string>
@@ -383,6 +395,11 @@
     <string name="voice_offline">No hay conexión con el servidor. Responderé luego en el chat.</string>
     <string name="voice_paused">Grabación en pausa</string>
     <string name="voice_remembered">Recordado</string>
+    <string name="voice_reply">Respuesta hablada</string>
+    <string name="voice_reply_always">Siempre</string>
+    <string name="voice_reply_footer">Si la respuesta no se lee en voz alta, el colgante vibra brevemente y la respuesta aparece en la pantalla principal y en el chat.</string>
+    <string name="voice_reply_headphones">Solo con auriculares</string>
+    <string name="voice_reply_off">No hablar, solo texto</string>
     <string name="voice_resumed">Grabación reanudada</string>
     <string name="voice_server_error">Error del servidor.</string>
     <string name="voice_slow">El servidor tarda en responder. La respuesta estará en el chat.</string>

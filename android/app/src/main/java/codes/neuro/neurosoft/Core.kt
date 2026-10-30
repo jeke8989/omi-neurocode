@@ -63,6 +63,8 @@ data class DeviceStatus(
     val disconnectedSince: Long = 0,
     val bleKbps: Double = 0.0,
     val netKbps: Double = 0.0,
+    /** Средний размер кадра Opus: в тишине кадры заметно меньше (кодек с переменным битрейтом). */
+    val avgFrameBytes: Int = 0,
     val heardTodayMs: Long = 0,
 )
 
@@ -142,12 +144,17 @@ object Core {
             // нет связи: вопрос записан вместе со всем звуком, агент ответит в чате, когда сеть появится
             try {
                 spool.writeEvent("button", OmiProtocol.BUTTON_SINGLE_TAP, ts)
-                uploader.kick()
+                uploader.urgent()
             } catch (e: Exception) {
                 Log.e(TAG, "cannot queue offline question", e)
             }
         }
         voice.init()
+        voice.onSilentAnswer = {
+            ble.haptic(1) // кулон коротко вибрирует: ответ в приложении
+            vibrate(1)
+        }
+        uploader.batchMode = { prefs.batterySaver && !foreground && voice.state.value.phase == VoiceAssistant.Phase.IDLE }
         location = LocationTracker(app) { loc -> onLocation(loc) }
         _paused.value = prefs.paused
         _outages.value = prefs.outages
@@ -156,6 +163,19 @@ object Core {
         createNotificationChannel()
         uploader.start()
         scope.launch { batchLoop() }
+    }
+
+    @Volatile private var foreground = false
+
+    /** Приложение на экране: отправляем сразу, чтобы всё было свежим; свёрнуто — пачками (экономия). */
+    fun setForeground(value: Boolean) {
+        foreground = value
+        uploader.kick()
+    }
+
+    fun setBatterySaver(value: Boolean) {
+        prefs.batterySaver = value
+        uploader.kick()
     }
 
     /** Идентификатор кулона на сервере — его Bluetooth-адрес. */
@@ -348,7 +368,12 @@ object Core {
     }
 
     // ------------------------------------------------------------------ звук
+    private val frameBytes = AtomicLong()
+    private val frameCount = AtomicLong()
+
     private fun onFrame(frame: ByteArray) {
+        frameBytes.addAndGet(frame.size.toLong())
+        frameCount.incrementAndGet()
         val now = System.currentTimeMillis()
         synchronized(frameLock) {
             if (!_paused.value) {
@@ -406,6 +431,7 @@ object Core {
                     lastAudioAt = if (System.currentTimeMillis() - lastPacketAt < 2_000) System.currentTimeMillis()
                         else it.lastAudioAt,
                     bleKbps = bleRate, netKbps = netRate,
+                    avgFrameBytes = frameCount.getAndSet(0).let { n -> if (n > 0) (frameBytes.getAndSet(0) / n).toInt() else it.avgFrameBytes },
                     heardTodayMs = prefs.heardToday(today),
                 )
             }
@@ -569,7 +595,7 @@ object Core {
             else -> R.string.notif_searching
         })
         d.battery?.let { parts += r.getString(R.string.notif_battery, it) }
-        if (!u.connected) parts += r.getString(R.string.notif_offline)
+        if (!u.connected && !u.resting) parts += r.getString(R.string.notif_offline)
         else if (u.pendingFiles > 3) parts += r.getString(R.string.notif_catching_up)
         return parts.joinToString(", ")
     }

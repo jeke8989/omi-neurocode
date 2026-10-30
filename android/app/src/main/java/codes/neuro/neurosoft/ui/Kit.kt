@@ -18,7 +18,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -294,18 +301,28 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier, note: 
     }
 }
 
-/** Одна строка, которая уменьшает шрифт, пока не поместится («2 ч 14 мин» в узкой плитке), а не обрезается. */
+/**
+ * Одна строка, которая сразу подбирает размер под ширину («2 ч 14 мин» в узкой плитке): без обрезки
+ * и без «прыжков» — размер считается при отрисовке, высота строки постоянная.
+ */
 @Composable
-fun FitText(text: String, style: TextStyle, color: Color, minSize: Float = 14f) {
-    var size by remember(text, style) { mutableStateOf(style.fontSize.value) }
-    var ready by remember(text, style) { mutableStateOf(false) }
-    Text(
-        text, color = color, maxLines = 1, softWrap = false,
-        style = style.copy(fontSize = size.sp, lineHeight = (size * 1.15f).sp),
-        onTextLayout = { r ->
-            if (r.didOverflowWidth && size > minSize) size = (size * 0.9f).coerceAtLeast(minSize) else ready = true
+fun FitText(text: String, style: TextStyle, color: Color, minScale: Float = 0.5f) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val height = with(density) { style.lineHeight.toDp() }
+    Spacer(
+        Modifier.fillMaxWidth().height(height).semantics { contentDescription = text }.drawWithCache {
+            val base = style.copy(color = color)
+            var layout = measurer.measure(text, base, maxLines = 1, softWrap = false)
+            if (layout.size.width > size.width && size.width > 0f) {
+                val k = (size.width / layout.size.width).coerceAtLeast(minScale)
+                layout = measurer.measure(text, base.copy(fontSize = base.fontSize * k, lineHeight = base.lineHeight * k),
+                    maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                    constraints = Constraints(maxWidth = size.width.toInt()))
+            }
+            val top = (size.height - layout.size.height) / 2f
+            onDrawBehind { drawText(layout, topLeft = Offset(0f, top)) }
         },
-        modifier = Modifier.drawWithContent { if (ready) drawContent() },
     )
 }
 

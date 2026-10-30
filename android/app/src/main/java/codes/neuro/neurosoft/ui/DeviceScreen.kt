@@ -44,6 +44,13 @@ fun DeviceScreen() {
     val paused by Core.paused.collectAsState()
     val upload by Core.upload.collectAsState()
     val outages by Core.outages.collectAsState()
+    val days by Repo.days.state.collectAsState()
+    LaunchedEffect(Unit) {
+        while (true) {
+            Repo.days.refresh()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
     val lens = rememberLensState()
     val fmt = rememberFmt()
     val c = Mn.c
@@ -98,7 +105,10 @@ fun DeviceScreen() {
             StatTile(stringResource(R.string.battery), device.battery?.let { "$it%" } ?: "—", Modifier.weight(1f),
                 note = if (device.charging == true) stringResource(R.string.charging) else null,
                 valueColor = if ((device.battery ?: 100) < 15) c.red else c.ink)
-            StatTile(stringResource(R.string.heard_today), fmt.duration(device.heardTodayMs / 1000), Modifier.weight(1f))
+            // полезное время: речь в разговорах за сегодня (по расшифровкам на сервере), а не работа микрофона
+            val today = days.data?.firstOrNull { it.day == todayIso() }
+            StatTile(stringResource(R.string.talk_today), today?.let { fmt.duration(it.speechSeconds.toLong()) } ?: "—",
+                Modifier.weight(1f), note = today?.let { plural(R.plurals.conversations, it.conversations) })
             StatTile(stringResource(R.string.on_phone), fmt.duration((upload.pendingFiles - 1).coerceAtLeast(0).toLong()),
                 Modifier.weight(1f))
         }
@@ -112,6 +122,9 @@ fun DeviceScreen() {
                     (if (device.disconnectedSince > 0) stringResource(R.string.now_since, fmt.timeMs(device.disconnectedSince))
                     else stringResource(R.string.live_searching_text))
                 paused -> stringResource(R.string.live_paused) to stringResource(R.string.live_paused_text)
+                upload.resting -> stringResource(R.string.now_batched) to
+                    (if (upload.nextBurstAt > 0) stringResource(R.string.now_batched_next, fmt.timeMs(upload.nextBurstAt))
+                    else stringResource(R.string.now_batched_text))
                 !upload.connected -> stringResource(R.string.now_saving) to stringResource(R.string.now_saving_text)
                 upload.pendingFiles > 3 -> stringResource(R.string.now_catching_up) to
                     (if (upload.oldestAt > 0) stringResource(R.string.now_range, fmt.timeMs(upload.oldestAt), fmt.timeMs(now))
@@ -206,6 +219,9 @@ fun DeviceScreen() {
                 item { ListRow(stringResource(R.string.frames_received), value = "${device.frames}") }
                 item { ListRow(stringResource(R.string.packets_lost), value = "${device.lostPackets}") }
                 item { ListRow(stringResource(R.string.last_audio), value = fmt.ago(device.lastAudioAt)) }
+                item { ListRow(stringResource(R.string.avg_frame), subtitle = stringResource(R.string.avg_frame_sub),
+                    value = stringResource(R.string.size_b, device.avgFrameBytes.toLong())) }
+                item { ListRow(stringResource(R.string.mic_on_today), value = fmt.duration(device.heardTodayMs / 1000)) }
                 item { ListRow(stringResource(R.string.server), value = upload.error?.let { serverErrorText(it) }
                     ?: stringResource(if (upload.connected) R.string.server_online else R.string.server_offline)) }
                 item { ListRow(stringResource(R.string.last_ack), value = fmt.ago(upload.lastAckAt)) }

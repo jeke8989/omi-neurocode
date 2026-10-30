@@ -368,6 +368,8 @@ private fun LiveStrip() {
     val fmt = rememberFmt()
     val c = Mn.c
     var missing by remember { mutableStateOf(Permissions.missing(context)) }
+    val days by Repo.days.state.collectAsState()
+    val todaySpeech = days.data?.firstOrNull { it.day == todayIso() }?.speechSeconds?.takeIf { it > 0 }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         missing = Permissions.missing(context)
         if (Permissions.bluetoothGranted(context) && device.address != null) Core.startCapture(context)
@@ -394,13 +396,15 @@ private fun LiveStrip() {
             warn = true)
         paused -> Strip(stringResource(R.string.live_paused), stringResource(R.string.live_paused_text),
             stringResource(R.string.resume), { Core.setPaused(false) })
-        !upload.connected -> Strip(stringResource(R.string.live_server_offline),
+        !upload.connected && !upload.resting -> Strip(stringResource(R.string.live_server_offline),
             if (upload.pendingFiles > 1) stringResource(R.string.live_queue, fmt.bytes(upload.pendingBytes))
             else stringResource(R.string.live_server_offline_text), warn = true)
-        upload.pendingFiles > 5 -> Strip(stringResource(R.string.live_catching_up),
+        upload.connected && upload.pendingFiles > 5 -> Strip(stringResource(R.string.live_catching_up),
             stringResource(R.string.live_queue_left, fmt.bytes(upload.pendingBytes)))
         state == LensState.RECORDING -> Strip(stringResource(R.string.live_recording),
-            stringResource(R.string.live_heard_today, fmt.duration(device.heardTodayMs / 1000)))
+            // полезное время — речь в разговорах за сегодня (считает сервер), а не время работы микрофона
+            todaySpeech?.let { stringResource(R.string.live_talk_today, fmt.duration(it.toLong())) }
+                ?: stringResource(R.string.live_quiet_note))
         else -> Strip(stringResource(R.string.live_connected), stringResource(R.string.live_connected_text))
     }
     if (strip == null) return

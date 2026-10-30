@@ -34,6 +34,10 @@ data class UploadStatus(
     val oldestAt: Long = 0,
     /** Всего отправлено байт за время работы (для скорости сети). */
     val sentBytes: Long = 0,
+    /** Экономия батареи: соединение закрыто намеренно до следующей пачки (это не ошибка). */
+    val resting: Boolean = false,
+    /** Когда уйдёт следующая пачка (0 — не ждём). */
+    val nextBurstAt: Long = 0,
 )
 
 /**
@@ -63,6 +67,19 @@ class Uploader(
     @Volatile private var nextAttemptAt = 0L
     @Volatile private var failures = 0
     @Volatile private var status = UploadStatus()
+    @Volatile private var urgent = false
+
+    /**
+     * Экономия батареи: пока приложение свёрнуто, записи уходят пачками раз в [BURST_MS], а между пачками
+     * соединение закрыто — радиомодуль телефона спит. Вопросы с кнопки идут своим соединением и сразу.
+     */
+    @Volatile var batchMode: () -> Boolean = { false }
+
+    /** Отправить сразу, не дожидаясь пачки (вопрос с кнопки без связи). */
+    fun urgent() {
+        urgent = true
+        kick()
+    }
 
     fun start() {
         scope.launch {
@@ -101,16 +118,33 @@ class Uploader(
         val token = prefs.token
         val device = deviceId()
         val configured = server.isNotBlank() && token.isNotBlank() && device != null
+        val now = System.currentTimeMillis()
+        val batching = batchMode()
+        val nextBurst = if (batching && oldest > 0) oldest + BURST_MS else 0L
         publish(status.copy(configured = configured, pendingFiles = files, pendingBytes = bytes, oldestAt = oldest,
-            sentBytes = sentCounter.get()))
+            sentBytes = sentCounter.get(), nextBurstAt = if (!open) nextBurst else 0L,
+            resting = status.resting && batching && !open))
         if (!configured) return
         if (!open) {
-            if (ws == null && device != null && System.currentTimeMillis() >= nextAttemptAt) {
+            // в экономном режиме подключаемся, только когда накопилась пачка (или есть срочное)
+            val due = !batching || urgent || (oldest > 0 && now >= oldest + BURST_MS) || files >= BURST_FILES
+            if (ws == null && device != null && now >= nextAttemptAt && due) {
+                urgent = false
                 connect(server, token, device)
             }
             return
         }
         sendPending()
+        if (batching && !urgent && inflight.isEmpty() && spool.pending().isEmpty()) rest()
+    }
+
+    /** Пачка отправлена и подтверждена — закрываем соединение до следующей. */
+    private fun rest() {
+        val old = ws ?: return
+        ws = null
+        open = false
+        old.close(1000, "rest")
+        publish(status.copy(connected = false, connecting = false, resting = true, error = null))
     }
 
     private fun connect(server: String, token: String, device: String) {
@@ -159,7 +193,7 @@ class Uploader(
             failures = 0
             inflight.clear()
             webSocket.send(JSONObject().put("type", "hello").put("info", helloInfo()).toString())
-            publish(status.copy(connected = true, connecting = false, error = null))
+            publish(status.copy(connected = true, connecting = false, error = null, resting = false))
             kick()
         }
 
@@ -207,7 +241,7 @@ class Uploader(
         inflight.clear()
         failures++
         nextAttemptAt = System.currentTimeMillis() + min(60_000L, 2_000L shl min(failures, 5))
-        publish(status.copy(connected = false, connecting = false, error = reason))
+        publish(status.copy(connected = false, connecting = false, error = reason, resting = false))
         kick()
     }
 
@@ -220,5 +254,7 @@ class Uploader(
     companion object {
         private const val TAG = "Mnemo.Upload"
         private const val MAX_INFLIGHT = 32
+        const val BURST_MS = 2 * 60_000L
+        private const val BURST_FILES = 150
     }
 }

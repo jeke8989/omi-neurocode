@@ -16,12 +16,16 @@
     <string name="assistant">Ассистент</string>
     <string name="assistant_answer">Ответ на вопрос с кнопки</string>
     <string name="autostart">Включать запись после перезагрузки</string>
+    <string name="avg_frame">Средний кадр звука</string>
+    <string name="avg_frame_sub">В тишине кадры меньше: кодек экономит</string>
     <string name="back">Назад</string>
     <string name="background">Работа в фоне</string>
     <string name="background_footer">Без этого Android может остановить запись, когда экран выключен.</string>
     <string name="battery">Батарея</string>
     <string name="battery_allow">Разрешить работу в фоне</string>
     <string name="battery_allow_sub">Снять ограничение экономии батареи для Mnemo</string>
+    <string name="battery_saver">Экономия батареи</string>
+    <string name="battery_saver_sub">Когда приложение свёрнуто, записи уходят на сервер пачками раз в 2 минуты, а между ними сеть телефона спит. Вопросы с кнопки отвечаются сразу</string>
     <string name="battery_unrestricted">Работа в фоне разрешена</string>
     <string name="button_actions">Действия кнопки</string>
     <string name="button_actions_sub">Одно нажатие — вопрос ассистенту</string>
@@ -129,7 +133,8 @@
     <string name="gain_normal">Обычно, уровень %1$d</string>
     <string name="gain_quiet">Тише, уровень %1$d</string>
     <string name="hardware_revision">Ревизия оборудования</string>
-    <string name="heard_today">Услышано сегодня</string>
+    <string name="headphones_off">Сейчас наушники не подключены: ответ придёт в приложение</string>
+    <string name="headphones_on">Сейчас наушники подключены</string>
     <string name="hide">Скрыть</string>
     <string name="highlights">Основные моменты</string>
     <string name="how_to_use">Как пользоваться</string>
@@ -170,7 +175,6 @@
     <string name="live_connected_text">Жду звук с кулона</string>
     <string name="live_disconnected">Кулон не на связи</string>
     <string name="live_disconnected_for">Уже %1$s. Поднесите ближе к телефону или подзарядите.</string>
-    <string name="live_heard_today">Сегодня услышано %1$s</string>
     <string name="live_listening">Слушаю вопрос…</string>
     <string name="live_no_device">Кулон не подключён</string>
     <string name="live_no_device_text">Включите кулон, Mnemo найдёт его сам</string>
@@ -182,11 +186,13 @@
     <string name="live_permissions_text">Чтобы слышать кулон и не останавливаться в фоне</string>
     <string name="live_queue">В очереди %1$s, отправлю, когда появится связь</string>
     <string name="live_queue_left">Осталось %1$s</string>
+    <string name="live_quiet_note">Тишина и ровный шум в разговоры не попадают</string>
     <string name="live_recording">Слушаю и записываю</string>
     <string name="live_searching_text">Ищу кулон рядом…</string>
     <string name="live_server_offline">Нет связи с сервером</string>
     <string name="live_server_offline_text">Записи сохраняются в телефоне и догрузятся сами</string>
     <string name="live_speaking">Отвечаю в наушник</string>
+    <string name="live_talk_today">Сегодня в разговорах %1$s</string>
     <string name="live_thinking">Думаю…</string>
     <string name="location_sub">Места дня в дневнике</string>
     <string name="location_while_recording">Геолокация во время записи</string>
@@ -199,6 +205,7 @@
     <string name="memory_footer">Ассистент учитывает память, когда отвечает.</string>
     <string name="mic_gain">Усиление микрофона</string>
     <string name="mic_gain_sub">Громче — лучше слышно тихую речь, но больше шума</string>
+    <string name="mic_on_today">Микрофон работал сегодня</string>
     <string name="model_number">Модель</string>
     <string name="model_search_hint">Поиск: claude, gemini, deepseek…</string>
     <string name="models_agent">Ассистент</string>
@@ -217,6 +224,9 @@
     <string name="notif_paused">Запись на паузе</string>
     <string name="notif_recording">Слушаю</string>
     <string name="notif_searching">Ищу кулон</string>
+    <string name="now_batched">Экономлю батарею</string>
+    <string name="now_batched_next">Записи копятся в телефоне, следующая отправка в %1$s</string>
+    <string name="now_batched_text">Записи уходят на сервер пачками</string>
     <string name="now_catching_up">Догоняет</string>
     <string name="now_catching_up_text">Отправляю накопленные записи на сервер</string>
     <string name="now_live">В эфире</string>
@@ -304,6 +314,7 @@
     <string name="search_title">Поиск по всему, что слышал кулон</string>
     <string name="send">Отправить</string>
     <string name="server">Сервер</string>
+    <string name="server_batched">пачками</string>
     <string name="server_connecting">подключаюсь</string>
     <string name="server_not_built_in">не задан</string>
     <string name="server_offline">нет связи</string>
@@ -359,6 +370,7 @@
     <string name="tab_diary">Дневник</string>
     <string name="tab_home">Главная</string>
     <string name="tab_tasks">Задачи</string>
+    <string name="talk_today">Разговоры сегодня</string>
     <string name="task_sync">Интеграция задач</string>
     <string name="tasks_all_done">Всё сделано</string>
     <string name="tasks_done_count">Готово: %1$d</string>
@@ -383,6 +395,11 @@
     <string name="voice_offline">Нет связи с сервером. Отвечу позже в чате.</string>
     <string name="voice_paused">Запись на паузе</string>
     <string name="voice_remembered">Запомнил</string>
+    <string name="voice_reply">Ответ голосом</string>
+    <string name="voice_reply_always">Всегда</string>
+    <string name="voice_reply_footer">Когда ответ не озвучен, кулон коротко вибрирует, а ответ появляется на главном экране и в чате.</string>
+    <string name="voice_reply_headphones">Только в наушниках</string>
+    <string name="voice_reply_off">Не озвучивать, только текст</string>
     <string name="voice_resumed">Запись продолжается</string>
     <string name="voice_server_error">Ошибка на сервере.</string>
     <string name="voice_slow">Сервер долго не отвечает. Ответ будет в чате.</string>

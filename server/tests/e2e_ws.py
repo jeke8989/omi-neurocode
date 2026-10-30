@@ -56,6 +56,9 @@ def wait_conversation():
             conv = requests.get(f"{URL}/api/conversations/{items[0]['id']}", headers=H, timeout=10).json()
             print("conversation:", conv["title"], "|", conv["segments"][0]["text"])
             assert "Тестовая расшифровка" in conv["segments"][0]["text"]
+            days = requests.get(URL + "/api/days", headers=H, timeout=10).json()["items"]
+            print("days:", days)
+            assert days and days[0]["conversations"] >= 1 and days[0]["speech_seconds"] > 0
             return
         time.sleep(3)
     raise AssertionError("conversation was not processed in time: " + json.dumps(

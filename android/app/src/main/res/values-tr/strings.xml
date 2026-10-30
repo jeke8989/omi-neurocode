@@ -16,12 +16,16 @@
     <string name="assistant">Asistan</string>
     <string name="assistant_answer">Düğme sorusunun cevabı</string>
     <string name="autostart">Yeniden başlatınca kayda başla</string>
+    <string name="avg_frame">Ortalama ses çerçevesi</string>
+    <string name="avg_frame_sub">Sessizlikte çerçeveler küçülür: kodek tasarruf eder</string>
     <string name="back">Geri</string>
     <string name="background">Arka planda çalışma</string>
     <string name="background_footer">Bu olmadan Android, ekran kapalıyken kaydı durdurabilir.</string>
     <string name="battery">Pil</string>
     <string name="battery_allow">Arka planda çalışmaya izin ver</string>
     <string name="battery_allow_sub">Mnemo için pil optimizasyonunu kapatın</string>
+    <string name="battery_saver">Pil tasarrufu</string>
+    <string name="battery_saver_sub">Uygulama arka plandayken kayıtlar 2 dakikada bir toplu gönderilir, arada telefonun ağı uyur. Düğme soruları hemen cevaplanır</string>
     <string name="battery_unrestricted">Arka planda çalışmaya izin verildi</string>
     <string name="button_actions">Düğme eylemleri</string>
     <string name="button_actions_sub">Tek basış asistana soru sorar</string>
@@ -129,7 +133,8 @@
     <string name="gain_normal">Normal, seviye %1$d</string>
     <string name="gain_quiet">Daha düşük, seviye %1$d</string>
     <string name="hardware_revision">Donanım revizyonu</string>
-    <string name="heard_today">Bugün duyulan</string>
+    <string name="headphones_off">Şu an kulaklık bağlı değil: cevap uygulamaya gelir</string>
+    <string name="headphones_on">Şu an kulaklık bağlı</string>
     <string name="hide">Gizle</string>
     <string name="highlights">Öne çıkanlar</string>
     <string name="how_to_use">Nasıl kullanılır</string>
@@ -170,7 +175,6 @@
     <string name="live_connected_text">Kolyeden ses bekleniyor</string>
     <string name="live_disconnected">Kolye bağlı değil</string>
     <string name="live_disconnected_for">%1$s oldu. Telefona yaklaştırın ya da şarj edin.</string>
-    <string name="live_heard_today">Bugün duyulan: %1$s</string>
     <string name="live_listening">Dinliyorum…</string>
     <string name="live_no_device">Bağlı kolye yok</string>
     <string name="live_no_device_text">Kolyenizi açın, Mnemo onu kendisi bulur</string>
@@ -182,11 +186,13 @@
     <string name="live_permissions_text">Kolyeyi duymak ve arka planda çalışmaya devam etmek için</string>
     <string name="live_queue">%1$s sırada; bağlantı gelince yüklenecek</string>
     <string name="live_queue_left">%1$s kaldı</string>
+    <string name="live_quiet_note">Sessizlik ve sabit gürültü konuşmaya dönüşmez</string>
     <string name="live_recording">Dinliyor ve kaydediyorum</string>
     <string name="live_searching_text">Yakındaki kolye aranıyor…</string>
     <string name="live_server_offline">Sunucuya ulaşılamıyor</string>
     <string name="live_server_offline_text">Kayıtlar telefonda saklanır ve sonra yüklenir</string>
     <string name="live_speaking">Kulaklıkta cevaplıyorum</string>
+    <string name="live_talk_today">Bugün konuşma: %1$s</string>
     <string name="live_thinking">Düşünüyorum…</string>
     <string name="location_sub">Günlükte günün yerleri</string>
     <string name="location_while_recording">Kayıt sırasında konum</string>
@@ -199,6 +205,7 @@
     <string name="memory_footer">Asistan cevap verirken hafızayı kullanır.</string>
     <string name="mic_gain">Mikrofon kazancı</string>
     <string name="mic_gain_sub">Yüksek ayar sessiz konuşmayı daha iyi alır ama gürültü artar</string>
+    <string name="mic_on_today">Mikrofon bugün açıktı</string>
     <string name="model_number">Model</string>
     <string name="model_search_hint">Ara: claude, gemini, deepseek…</string>
     <string name="models_agent">Asistan</string>
@@ -217,6 +224,9 @@
     <string name="notif_paused">Kayıt duraklatıldı</string>
     <string name="notif_recording">Dinliyor</string>
     <string name="notif_searching">Kolye aranıyor</string>
+    <string name="now_batched">Pil tasarrufu</string>
+    <string name="now_batched_next">Kayıtlar telefonda birikiyor; sonraki gönderim %1$s</string>
+    <string name="now_batched_text">Kayıtlar toplu gönderiliyor</string>
     <string name="now_catching_up">Yetişiyor</string>
     <string name="now_catching_up_text">Biriken kayıtlar sunucuya gönderiliyor</string>
     <string name="now_live">Canlı</string>
@@ -304,6 +314,7 @@
     <string name="search_title">Kolyenin duyduğu her şeyde arayın</string>
     <string name="send">Gönder</string>
     <string name="server">Sunucu</string>
+    <string name="server_batched">toplu</string>
     <string name="server_connecting">bağlanıyor</string>
     <string name="server_not_built_in">ayarlanmadı</string>
     <string name="server_offline">çevrimdışı</string>
@@ -359,6 +370,7 @@
     <string name="tab_diary">Günlük</string>
     <string name="tab_home">Ana sayfa</string>
     <string name="tab_tasks">Görevler</string>
+    <string name="talk_today">Bugünkü konuşmalar</string>
     <string name="task_sync">Görev entegrasyonu</string>
     <string name="tasks_all_done">Hepsi tamam</string>
     <string name="tasks_done_count">Tamamlanan: %1$d</string>
@@ -383,6 +395,11 @@
     <string name="voice_offline">Sunucuya ulaşılamıyor. Daha sonra sohbette cevaplayacağım.</string>
     <string name="voice_paused">Kayıt duraklatıldı</string>
     <string name="voice_remembered">Hatırladım</string>
+    <string name="voice_reply">Sesli cevap</string>
+    <string name="voice_reply_always">Her zaman</string>
+    <string name="voice_reply_footer">Cevap seslendirilmediğinde kolye kısaca titrer, cevap ana ekranda ve sohbette görünür.</string>
+    <string name="voice_reply_headphones">Yalnızca kulaklıkla</string>
+    <string name="voice_reply_off">Seslendirme, yalnızca metin</string>
     <string name="voice_resumed">Kayıt devam ediyor</string>
     <string name="voice_server_error">Sunucu hatası.</string>
     <string name="voice_slow">Sunucu yavaş yanıt veriyor. Cevap sohbette olacak.</string>

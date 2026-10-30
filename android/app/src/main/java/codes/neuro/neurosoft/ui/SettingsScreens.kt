@@ -62,7 +62,7 @@ fun deviceStatusText(): String {
         device.state == ConnState.SETTING_UP -> R.string.state_setting_up
         device.state != ConnState.CONNECTED -> R.string.state_disconnected
         paused -> R.string.state_paused
-        !upload.connected -> R.string.state_listening_offline
+        !upload.connected && !upload.resting -> R.string.state_listening_offline
         else -> R.string.state_listening
     })
 }
@@ -171,6 +171,13 @@ fun SettingsScreen() {
                     }),
                 )
             }
+            item {
+                var saver by remember { mutableStateOf(Core.prefs.batterySaver) }
+                ToggleRow(stringResource(R.string.battery_saver), saver, {
+                    saver = it
+                    Core.setBatterySaver(it)
+                }, icon = Icons.Battery, subtitle = stringResource(R.string.battery_saver_sub))
+            }
             item { ToggleRow(stringResource(R.string.autostart), autoStart, {
                 autoStart = it
                 Core.prefs.autoStart = it
@@ -182,6 +189,7 @@ fun SettingsScreen() {
                 value = stringResource(when {
                     !Core.prefs.serverConfigured -> R.string.server_not_built_in
                     upload.connected -> R.string.server_online
+                    upload.resting -> R.string.server_batched
                     upload.connecting -> R.string.server_connecting
                     else -> R.string.server_offline
                 })) }
@@ -211,6 +219,8 @@ fun VoiceSettingsScreen() {
     var confirm by remember { mutableStateOf(prefs.confirmRemember) }
     var actions by remember { mutableStateOf(prefs.buttonActions) }
     var doubleTap by remember { mutableStateOf(prefs.doubleTap) }
+    var voiceReply by remember { mutableStateOf(prefs.voiceReply) }
+    val headphones = remember { Core.voice.headphonesConnected() }
     val rates = listOf(0.9f, 1.05f, 1.2f, 1.4f)
     var rate by remember { mutableStateOf(rates.indexOfFirst { it == prefs.voiceRate }.let { if (it < 0) 1 else it }) }
 
@@ -220,6 +230,25 @@ fun VoiceSettingsScreen() {
                 actions = it
                 prefs.buttonActions = it
             }, icon = Icons.Hand, subtitle = stringResource(R.string.button_actions_sub)) }
+        }
+        Group(stringResource(R.string.voice_reply), footer = stringResource(R.string.voice_reply_footer)) {
+            listOf(
+                Triple("always", R.string.voice_reply_always, Icons.Speaker),
+                Triple("headphones", R.string.voice_reply_headphones, Icons.Bluetooth),
+                Triple("off", R.string.voice_reply_off, Icons.Bubble),
+            ).forEach { (key, title, icon) ->
+                item {
+                    ListRow(stringResource(title), icon = icon,
+                        subtitle = if (key == "headphones") stringResource(if (headphones) R.string.headphones_on
+                        else R.string.headphones_off) else null,
+                        onClick = {
+                            voiceReply = key
+                            prefs.voiceReply = key
+                        }) {
+                        if (voiceReply == key) Icon(Icons.Check, null, tint = Mn.c.ink, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
         }
         Group(stringResource(R.string.double_tap)) {
             listOf("remember" to R.string.double_remember, "pause" to R.string.double_pause, "off" to R.string.double_off)

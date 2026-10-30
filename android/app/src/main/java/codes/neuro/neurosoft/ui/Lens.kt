@@ -50,7 +50,7 @@ fun rememberLensState(): LensState {
         voice.phase == VoiceAssistant.Phase.SPEAKING -> LensState.SPEAKING
         device.state != ConnState.CONNECTED -> LensState.OFFLINE
         paused -> LensState.PAUSED
-        !upload.connected -> LensState.OFFLINE
+        !upload.connected && !upload.resting -> LensState.OFFLINE
         System.currentTimeMillis() - device.lastAudioAt < 5_000 -> LensState.RECORDING
         else -> LensState.IDLE
     }

@@ -356,6 +356,16 @@ async def api_days(request: Request):
                FROM conversations c
                WHERE c.started_at > now() - interval '60 days'
                GROUP BY 1 ORDER BY 1 DESC""", (config.TZ,))).fetchall()
+        # время собственно речи (сумма фраз), без пауз и тишины — «полезные разговоры» за день
+        speech = await (await conn.execute(
+            """SELECT (s.started_at AT TIME ZONE %s)::date AS day,
+                      coalesce(sum(greatest(0, extract(epoch FROM s.ended_at - s.started_at))), 0)::int AS speech
+               FROM segments s
+               WHERE s.started_at > now() - interval '60 days'
+               GROUP BY 1""", (config.TZ,))).fetchall()
+    by_day = {r["day"]: r["speech"] for r in speech}
+    for r in rows:
+        r["speech_seconds"] = by_day.get(r["day"], 0)
     return Json({"items": rows})
 
 

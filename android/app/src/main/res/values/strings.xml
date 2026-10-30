@@ -17,12 +17,16 @@
     <string name="assistant">Assistant</string>
     <string name="assistant_answer">Answer to your button question</string>
     <string name="autostart">Start recording after restart</string>
+    <string name="avg_frame">Average audio frame</string>
+    <string name="avg_frame_sub">Frames shrink in silence: the codec saves data</string>
     <string name="back">Back</string>
     <string name="background">Background work</string>
     <string name="background_footer">Without this, Android may stop recording when the screen is off.</string>
     <string name="battery">Battery</string>
     <string name="battery_allow">Allow background work</string>
     <string name="battery_allow_sub">Turn off battery optimization for Mnemo</string>
+    <string name="battery_saver">Battery saver</string>
+    <string name="battery_saver_sub">When the app is in the background, recordings upload in batches every 2 minutes and the phone\'s network sleeps in between. Button questions are answered right away</string>
     <string name="battery_unrestricted">Background work allowed</string>
     <string name="button_actions">Button actions</string>
     <string name="button_actions_sub">One press asks the assistant</string>
@@ -130,7 +134,8 @@
     <string name="gain_normal">Normal, level %1$d</string>
     <string name="gain_quiet">Quieter, level %1$d</string>
     <string name="hardware_revision">Hardware revision</string>
-    <string name="heard_today">Heard today</string>
+    <string name="headphones_off">No headphones now: the answer goes to the app</string>
+    <string name="headphones_on">Headphones are connected now</string>
     <string name="hide">Hide</string>
     <string name="highlights">Highlights</string>
     <string name="how_to_use">How to use</string>
@@ -171,7 +176,6 @@
     <string name="live_connected_text">Waiting for audio from the pendant</string>
     <string name="live_disconnected">Pendant not connected</string>
     <string name="live_disconnected_for">For %1$s now. Bring it closer to the phone or charge it.</string>
-    <string name="live_heard_today">Heard today: %1$s</string>
     <string name="live_listening">Listening…</string>
     <string name="live_no_device">No pendant connected</string>
     <string name="live_no_device_text">Turn on your pendant and Mnemo will find it</string>
@@ -183,11 +187,13 @@
     <string name="live_permissions_text">To hear the pendant and keep running in the background</string>
     <string name="live_queue">%1$s queued; it will upload when the connection is back</string>
     <string name="live_queue_left">%1$s left</string>
+    <string name="live_quiet_note">Silence and steady noise don\'t become conversations</string>
     <string name="live_recording">Listening and recording</string>
     <string name="live_searching_text">Looking for the pendant nearby…</string>
     <string name="live_server_offline">Server unreachable</string>
     <string name="live_server_offline_text">Recordings are saved on the phone and will upload later</string>
     <string name="live_speaking">Answering in your headphones</string>
+    <string name="live_talk_today">Talking today: %1$s</string>
     <string name="live_thinking">Thinking…</string>
     <string name="location_sub">Places of the day in the diary</string>
     <string name="location_while_recording">Location while recording</string>
@@ -200,6 +206,7 @@
     <string name="memory_footer">The assistant uses memory when answering.</string>
     <string name="mic_gain">Microphone gain</string>
     <string name="mic_gain_sub">Higher picks up quiet speech better, with more noise</string>
+    <string name="mic_on_today">Microphone on today</string>
     <string name="model_number">Model</string>
     <string name="model_search_hint">Search: claude, gemini, deepseek…</string>
     <string name="models_agent">Assistant</string>
@@ -218,6 +225,9 @@
     <string name="notif_paused">Recording paused</string>
     <string name="notif_recording">Listening</string>
     <string name="notif_searching">Looking for the pendant</string>
+    <string name="now_batched">Saving battery</string>
+    <string name="now_batched_next">Recordings collect on the phone; next upload at %1$s</string>
+    <string name="now_batched_text">Recordings upload in batches</string>
     <string name="now_catching_up">Catching up</string>
     <string name="now_catching_up_text">Uploading saved recordings to the server</string>
     <string name="now_live">Live</string>
@@ -305,6 +315,7 @@
     <string name="search_title">Search everything the pendant heard</string>
     <string name="send">Send</string>
     <string name="server">Server</string>
+    <string name="server_batched">in batches</string>
     <string name="server_connecting">connecting</string>
     <string name="server_not_built_in">not set</string>
     <string name="server_offline">offline</string>
@@ -360,6 +371,7 @@
     <string name="tab_diary">Diary</string>
     <string name="tab_home">Home</string>
     <string name="tab_tasks">Tasks</string>
+    <string name="talk_today">Talk today</string>
     <string name="task_sync">Task integration</string>
     <string name="tasks_all_done">All done</string>
     <string name="tasks_done_count">Done: %1$d</string>
@@ -384,6 +396,11 @@
     <string name="voice_offline">Can\'t reach the server. I\'ll answer later in the chat.</string>
     <string name="voice_paused">Recording paused</string>
     <string name="voice_remembered">Got it</string>
+    <string name="voice_reply">Spoken answer</string>
+    <string name="voice_reply_always">Always</string>
+    <string name="voice_reply_footer">When the answer isn\'t spoken, the pendant buzzes briefly and the answer appears on the home screen and in the chat.</string>
+    <string name="voice_reply_headphones">Only with headphones</string>
+    <string name="voice_reply_off">Don\'t speak, text only</string>
     <string name="voice_resumed">Recording resumed</string>
     <string name="voice_server_error">Server error.</string>
     <string name="voice_slow">The server is taking a while. The answer will be in the chat.</string>

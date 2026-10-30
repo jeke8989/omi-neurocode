@@ -2,9 +2,11 @@ package codes.neuro.neurosoft.voice
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -129,10 +131,37 @@ class VoiceAssistant(
 
     /** Короткое голосовое подтверждение («Запомнил»). */
     fun confirm(text: String) {
-        if (_state.value.phase == Phase.IDLE) speak(text, keepAnswer = true)
+        if (_state.value.phase == Phase.IDLE) speak(text, keepAnswer = true, notify = false)
     }
 
-    fun testVoice() = speak(str(R.string.voice_test), keepAnswer = true)
+    fun testVoice() = speak(str(R.string.voice_test), keepAnswer = true, force = true)
+
+    /** Ответ готов, но вслух не озвучен (настройка «только в наушниках» без наушников или «не озвучивать»). */
+    @Volatile var onSilentAnswer: () -> Unit = {}
+
+    private val headphoneTypes: Set<Int> = buildSet {
+        add(AudioDeviceInfo.TYPE_WIRED_HEADSET)
+        add(AudioDeviceInfo.TYPE_WIRED_HEADPHONES)
+        add(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+        add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        add(AudioDeviceInfo.TYPE_USB_HEADSET)
+        if (Build.VERSION.SDK_INT >= 28) add(AudioDeviceInfo.TYPE_HEARING_AID)
+        if (Build.VERSION.SDK_INT >= 31) add(AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+
+    /** Подключены ли наушники (проводные, Bluetooth, USB) или аудиосистема машины. */
+    fun headphonesConnected(): Boolean = try {
+        audio?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.any { it.type in headphoneTypes } == true
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Можно ли сейчас говорить вслух: always — всегда, headphones — только в наушниках, off — никогда. */
+    fun mayTalk(): Boolean = when (prefs.voiceReply) {
+        "off" -> false
+        "headphones" -> headphonesConnected()
+        else -> true
+    }
 
     /** Язык голоса следует за языком приложения. */
     fun applyLanguage() {
@@ -257,7 +286,13 @@ class VoiceAssistant(
     }
 
     // ------------------------------------------------------------------ звук
-    private fun speak(text: String, keepAnswer: Boolean = false) {
+    private fun speak(text: String, keepAnswer: Boolean = false, force: Boolean = false, notify: Boolean = true) {
+        if (!force && !mayTalk()) {
+            // тихий режим: ответ остаётся в приложении и в чате, кулон коротко вибрирует
+            update { it.copy(phase = Phase.IDLE, answer = if (keepAnswer) text else it.answer) }
+            if (notify) onSilentAnswer()
+            return
+        }
         val engine = tts
         if (engine == null || !_state.value.ttsReady) {
             update { it.copy(phase = Phase.IDLE, answer = if (keepAnswer) text else it.answer) }
@@ -274,7 +309,7 @@ class VoiceAssistant(
     }
 
     private fun tone(type: Int) {
-        if (!prefs.earcons) return
+        if (!prefs.earcons || !mayTalk()) return
         try {
             tones?.startTone(type, 120)
         } catch (e: RuntimeException) {
