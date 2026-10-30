@@ -24,7 +24,26 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          set -o pipefail
+          ./gradlew --no-daemon assembleDebug 2>&1 | tee build.log
+
+      - name: Report build errors as annotations
+        if: failure()
+        working-directory: android
+        run: |
+          python3 - <<'PY'
+          import re
+          lines = open("build.log", encoding="utf-8", errors="replace").read().splitlines()
+          out = [l for l in lines if re.match(r"^e: ", l)]
+          for i, l in enumerate(lines):
+              if "What went wrong" in l:
+                  out += lines[i:i + 15]
+          if not out:
+              out = lines[-80:]
+          esc = lambda x: x.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+          for i in range(0, min(len(out), 200), 20):
+              print("::error title=build::" + "%0A".join(esc(x) for x in out[i:i + 20]))
+          PY
 
       - name: Name APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk "NeuroSoft-0.1.${{ github.run_number }}.apk"
