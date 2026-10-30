@@ -161,6 +161,14 @@ PHRASES: dict[str, dict[str, str]] = {
         "ru": "💬 Смотрю разговоры", "en": "💬 Looking through conversations",
         "tr": "💬 Konuşmalara bakıyorum", "es": "💬 Revisando conversaciones",
     },
+    "tool.people": {
+        "ru": "👥 Смотрю, кого узнаю по голосу", "en": "👥 Checking who I know by voice",
+        "tr": "👥 Sesinden tanıdığım kişilere bakıyorum", "es": "👥 Reviso a quién reconozco por la voz",
+    },
+    "tool.person_conversations": {
+        "ru": "👤 Разговоры с: {name}", "en": "👤 Conversations with: {name}",
+        "tr": "👤 Şununla konuşmalar: {name}", "es": "👤 Conversaciones con: {name}",
+    },
     "tool.extension": {"ru": "🧩 {name}", "en": "🧩 {name}", "tr": "🧩 {name}", "es": "🧩 {name}"},
     "memory.mark": {
         "ru": "Отметка {when} (речь рядом не распознана)", "en": "Marked at {when} (no speech recognized nearby)",

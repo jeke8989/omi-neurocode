@@ -25,13 +25,25 @@ jobs:
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y libopus0
-      - run: pip install -r server/gateway/requirements.txt requests pytest
+      - run: pip install -r server/gateway/requirements.txt requests pytest onnxruntime
       - name: Unit + pipeline tests
         working-directory: server
         env:
           PYTHONPATH: common:.
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
-        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py
+      - name: Voice model on real recordings
+        working-directory: server
+        env:
+          PYTHONPATH: common:.
+          SPEAKER_MODEL_DIR: /tmp/speaker-model
+          SPEAKER_TEST_DATA: /tmp/sr-data
+        run: |
+          mkdir -p /tmp/speaker-model
+          curl -fsSL -o /tmp/speaker-model/wespeaker_en_voxceleb_resnet34_LM.onnx \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+          git clone --depth 1 https://github.com/csukuangfj/sr-data /tmp/sr-data
+          pytest -q -rs tests/test_voices_model.py
 
   docker-e2e:
     needs: tests

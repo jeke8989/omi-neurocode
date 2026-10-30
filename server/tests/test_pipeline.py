@@ -22,6 +22,8 @@ os.environ.update({
     "LLM_API_KEY": "",
     "LLM_MODEL": "",
     "TZ": "Europe/Moscow",
+    "SPEAKER_BACKEND": "spectral",
+    "VOICE_DIR": tempfile.mkdtemp(prefix="neuro-voices-"),
 })
 
 from neuro import db  # noqa: E402
@@ -37,7 +39,8 @@ def conn():
     c = db.connect()
     c.execute("TRUNCATE devices, audio_chunks, conversations, segments, tasks, memories, events, "
               "received_batches, settings, llm_usage, questions, chat_messages, agent_runs, agent_steps, extensions, "
-              "locations, places, photos, diary_days, task_exports RESTART IDENTITY CASCADE")
+              "locations, places, photos, diary_days, task_exports, people, voiceprints, person_suggestions "
+              "RESTART IDENTITY CASCADE")
     yield c
     c.close()
 

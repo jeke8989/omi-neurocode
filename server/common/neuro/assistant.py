@@ -8,13 +8,14 @@ from zoneinfo import ZoneInfo
 
 from . import config, llm
 from .audio import BYTES_PER_MS, pcm_rms
+from .people import SEGMENT_SELECT, speaker_label
 
 log = logging.getLogger("neuro.assistant")
 TZ = ZoneInfo(config.TZ)
 
 TASK_SCHEMA = (
     '{"text": "конкретное действие", "due": "срок, если назван, иначе null", '
-    '"assignee": "кто делает, если ясно, иначе null", '
+    '"assignee": "кто делает: подпись говорящего или имя, если ясно, иначе null", '
     '"target": "github, если это задача на разработку программы, иначе notion"}'
 )
 
@@ -26,10 +27,13 @@ def fmt_time(dt: datetime) -> str:
 
 
 def transcript_text(segs: list[dict], limit: int | None = None) -> str:
+    """Расшифровка для модели: время, кто говорит (имя, «Владелец», «Голос N»), текст.
+    Голоса с пометкой «не учитывать» (телевизор, радио) пропускаются."""
     lines = []
     for s in segs:
-        who = f"Спикер {s['speaker'] + 1}" if s.get("speaker") is not None else "Голос"
-        lines.append(f"[{fmt_time(s['started_at'])}] {who}: {s['text']}")
+        if s.get("person_ignored"):
+            continue
+        lines.append(f"[{fmt_time(s['started_at'])}] {speaker_label(s)}: {s['text']}")
     text = "\n".join(lines)
     limit = limit or config.LLM_MAX_CHARS
     if len(text) > limit:
@@ -70,9 +74,9 @@ def clean_list(raw) -> list[str]:
 def insert_tasks(conn, conv_id, tasks: list[dict], source: str):
     for t in tasks:
         conn.execute(
-            """INSERT INTO tasks (conversation_id, text, due, assignee, target, source)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
-            (conv_id, t["text"], t["due"], t["assignee"], t["target"], source),
+            """INSERT INTO tasks (conversation_id, text, due, assignee, target, source, person_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (conv_id, t["text"], t["due"], t["assignee"], t["target"], source, t.get("person_id")),
         )
 
 
@@ -133,8 +137,7 @@ def build_context(conn, device_id: str) -> str:
     local = now.astimezone(TZ)
     parts = [f"Сейчас {WEEKDAYS[local.weekday()]}, {local.strftime('%d.%m.%Y %H:%M')}."]
     segs = conn.execute(
-        """SELECT started_at, speaker, text FROM segments
-           WHERE device_id = %s AND started_at > %s ORDER BY started_at""",
+        SEGMENT_SELECT + " WHERE s.device_id = %s AND s.started_at > %s ORDER BY s.started_at",
         (device_id, now - timedelta(minutes=config.ASK_CONTEXT_MIN)),
     ).fetchall()
     if segs:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from neuro import config, db, i18n, llm
+from neuro import config, db, i18n, llm, voices
 from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, speech_ms
 
 log = logging.getLogger("neuro.stt")
@@ -196,11 +196,13 @@ RETURNING id
 INSERT_SEGMENT_SQL = """
 INSERT INTO segments (chunk_id, conversation_id, device_id, started_at, ended_at, speaker, text)
 VALUES (%s, %s, %s, %s, %s, %s, %s)
+RETURNING id
 """
 
 
-def store_segments(conn, chunk: dict, segs: list[Seg]) -> int:
-    """Сохраняет фразы куска и привязывает их к разговору (новому или продолжающемуся)."""
+def store_segments(conn, chunk: dict, segs: list[Seg]) -> tuple[int, list[int]]:
+    """Сохраняет фразы куска и привязывает их к разговору (новому или продолжающемуся).
+    Возвращает (id разговора, id фраз по порядку)."""
     base = chunk["started_at"]
     rows = []
     for s in segs:
@@ -216,10 +218,77 @@ def store_segments(conn, chunk: dict, segs: list[Seg]) -> int:
             conn.execute(UPDATE_CONVERSATION_SQL, {**params, "id": conv_id})
         else:
             conv_id = conn.execute(CREATE_CONVERSATION_SQL, params).fetchone()["id"]
-        for start, end, speaker, text in rows:
-            conn.execute(INSERT_SEGMENT_SQL, (chunk["id"], conv_id, chunk["device_id"], start, end, speaker, text))
+        ids = [conn.execute(INSERT_SEGMENT_SQL, (chunk["id"], conv_id, chunk["device_id"], start, end, speaker,
+                                                 text)).fetchone()["id"]
+               for start, end, speaker, text in rows]
         conn.execute("UPDATE audio_chunks SET status = 'done', error = NULL WHERE id = %s", (chunk["id"],))
-    return conv_id
+    return conv_id, ids
+
+
+# ---------------------------------------------------------------------------
+# Кто говорит
+# ---------------------------------------------------------------------------
+MAX_TURN_CALLS = 12  # если расшифровка пришла без разметки по времени — не больше стольких отдельных запросов
+
+
+def _sec(samples: int) -> float:
+    return samples / SAMPLE_RATE
+
+
+def untimed(segs: list[Seg], pcm: bytes) -> bool:
+    """Провайдер вернул весь кусок одной фразой без времени — по ней не понять, где чей голос."""
+    dur = len(pcm) / 2 / SAMPLE_RATE
+    return len(segs) == 1 and segs[0].start <= 0.05 and segs[0].end >= dur - 0.3
+
+
+def transcribe_turns(conn, stt, pcm: bytes, turns: list[voices.Turn]) -> list[Seg]:
+    """Расшифровка по репликам: каждая реплика отдельно (с полями 0.15 с), чтобы знать, кто что сказал."""
+    pad = int(0.15 * SAMPLE_RATE) * 2
+    out: list[Seg] = []
+    for t in turns:
+        a, b = max(0, t.start * 2 - pad), min(len(pcm), t.end * 2 + pad)
+        for s in stt.transcribe(pcm[a:b], conn):
+            if s.text and s.text.strip() and not is_hallucination(s.text):
+                out.append(Seg(_sec(t.start), _sec(t.end), t.local, s.text.strip()))
+    return out
+
+
+def label_segments(segs: list[Seg], turns: list[voices.Turn]) -> list[int | None]:
+    """Каждой фразе — голос реплики, с которой она больше всего пересекается по времени."""
+    if not turns:
+        return [None] * len(segs)
+    if len({t.local for t in turns}) == 1:
+        return [turns[0].local] * len(segs)
+    out: list[int | None] = []
+    for s in segs:
+        overlap: dict[int, float] = {}
+        for t in turns:
+            o = min(s.end, _sec(t.end)) - max(s.start, _sec(t.start))
+            if o > 0:
+                overlap[t.local] = overlap.get(t.local, 0.0) + o
+        if overlap:
+            out.append(max(overlap, key=overlap.get))
+            continue
+        near = min(turns, key=lambda t: max(0.0, s.start - _sec(t.end), _sec(t.start) - s.end))
+        gap = max(0.0, s.start - _sec(near.end), _sec(near.start) - s.end)
+        out.append(near.local if gap <= 2.0 else None)
+    return out
+
+
+def attach_people(conn, pcm: bytes, segs: list[Seg], seg_ids: list[int], labels: list[int | None],
+                  turns: list[voices.Turn], local_voices: list[voices.LocalVoice]) -> int:
+    """Подписывает фразы людьми; возвращает число подписанных фраз."""
+    mapping = voices.identify(conn, local_voices, pcm, turns)
+    done = 0
+    for sid, seg, local in zip(seg_ids, segs, labels):
+        pid, score = mapping.get(local, (None, 0.0)) if local is not None else (None, 0.0)
+        if pid is None:
+            continue
+        emb = voices.embed_span(pcm, seg.start, seg.end)
+        conn.execute("UPDATE segments SET person_id = %s, voice_score = %s, embedding = %s WHERE id = %s",
+                     (pid, round(score, 3), voices.vec(emb) if emb is not None else None, sid))
+        done += 1
+    return done
 
 
 def mark(conn, chunk_id: int, status: str, error: str | None = None):
@@ -241,15 +310,36 @@ def process(conn, stt, chunk: dict):
         log.info("chunk %s: no speech (%.0fs of quiet or steady noise), skipped", chunk["id"], len(pcm) / 2 / SAMPLE_RATE)
         return
     t0 = time.monotonic()
+    turns: list[voices.Turn] = []
+    local_voices: list[voices.LocalVoice] = []
+    if voices.enabled(conn):
+        try:
+            turns, local_voices = voices.split_turns(pcm)
+        except voices.Unavailable:
+            pass
+        except Exception:  # noqa: BLE001 — голоса не должны ломать расшифровку
+            log.exception("chunk %s: voice split failed", chunk["id"])
     segs = [s for s in stt.transcribe(pcm, conn) if s.text and s.text.strip() and not is_hallucination(s.text)]
+    if len(local_voices) >= 2 and 2 <= len(turns) <= MAX_TURN_CALLS and untimed(segs, pcm):
+        segs = transcribe_turns(conn, stt, pcm, turns) or segs
     took = time.monotonic() - t0
     if not segs:
         mark(conn, chunk["id"], "empty")
         log.info("chunk %s: no speech (%.1fs)", chunk["id"], took)
         return
-    conv_id = store_segments(conn, chunk, segs)
-    log.info("chunk %s: %d segments -> conversation %s (%.1fs for %.1fs audio)",
-             chunk["id"], len(segs), conv_id, took, chunk["duration_ms"] / 1000)
+    labels = label_segments(segs, turns)
+    if turns:  # иначе остаётся разметка провайдера (Deepgram)
+        for s, local in zip(segs, labels):
+            s.speaker = local
+    conv_id, seg_ids = store_segments(conn, chunk, segs)
+    named = 0
+    if local_voices:
+        try:
+            named = attach_people(conn, pcm, segs, seg_ids, labels, turns, local_voices)
+        except Exception:  # noqa: BLE001
+            log.exception("chunk %s: speaker identification failed", chunk["id"])
+    log.info("chunk %s: %d segments, %d voices (%d signed) -> conversation %s (%.1fs for %.1fs audio)",
+             chunk["id"], len(segs), len(local_voices), named, conv_id, took, chunk["duration_ms"] / 1000)
 
 
 def main():
@@ -259,7 +349,9 @@ def main():
         raise SystemExit(f"unknown STT_PROVIDER={config.STT_PROVIDER!r}; use one of {', '.join(PROVIDERS)}")
     stt = provider_cls()
     log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE or "app")
+    voices.warm_up()
     last_requeue = 0.0
+    last_consolidate = time.monotonic()
     while True:
         try:
             with db.connect() as conn:
@@ -267,6 +359,14 @@ def main():
                     if time.monotonic() - last_requeue > 60:
                         conn.execute(REQUEUE_STUCK_SQL)
                         last_requeue = time.monotonic()
+                    if time.monotonic() - last_consolidate > 600:
+                        last_consolidate = time.monotonic()
+                        try:
+                            merged = voices.consolidate(conn)
+                            if merged:
+                                log.info("voices: merged %d duplicate voices", merged)
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: consolidate failed")
                     chunk = conn.execute(CLAIM_SQL).fetchone()
                     if chunk is None:
                         time.sleep(1.5)

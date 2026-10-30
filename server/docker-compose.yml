@@ -34,6 +34,7 @@ services:
     volumes:
       - audio:/data/audio
       - photos:/data/photos
+      - voices:/data/voices
     depends_on:
       db:
         condition: service_healthy
@@ -52,6 +53,7 @@ services:
     environment: *app-env
     volumes:
       - audio:/data/audio
+      - voices:/data/voices
       - whisper-models:/models
     depends_on:
       db:
@@ -75,4 +77,5 @@ volumes:
   pgdata:
   audio:
   photos:
+  voices:
   whisper-models:

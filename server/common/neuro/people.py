@@ -1,0 +1,378 @@
+"""Люди в разговорах: подписи говорящих, подсказки имён, экран «Люди» и «Созвездие».
+
+Голосовая часть (отпечатки, узнавание) — в voices.py; здесь — то, что видит пользователь и ассистент.
+Все функции синхронные (обычное соединение psycopg); gateway вызывает их в потоке.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+
+from . import voices
+
+log = logging.getLogger("neuro.people")
+
+# Фраза вместе с тем, кто её сказал (для расшифровки в подсказках модели)
+SEGMENT_SELECT = """
+SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.conversation_id, s.person_id, s.voice_score,
+       p.name AS person_name, p.is_owner AS person_owner, p.number AS person_number, p.ignored AS person_ignored
+FROM segments s LEFT JOIN people p ON p.id = s.person_id
+"""
+
+OWNER_LABEL = "Владелец"
+VOICE_LABEL = "Голос"
+
+
+def sure(score) -> bool:
+    return score is not None and float(score) >= voices.thresholds().match
+
+
+def speaker_label(s: dict) -> str:
+    """Подпись говорящего в расшифровке для модели. «Анна?» — узнана неуверенно."""
+    if s.get("person_id"):
+        if s.get("person_owner"):
+            base = f"{OWNER_LABEL} ({s['person_name']})" if s.get("person_name") else OWNER_LABEL
+        else:
+            base = s.get("person_name") or f"{VOICE_LABEL} {s.get('person_number')}"
+        return base if sure(s.get("voice_score")) else base + "?"
+    if s.get("speaker") is not None:
+        return f"Спикер {s['speaker'] + 1}"
+    return "Неизвестный"
+
+
+def labels_map(segs: list[dict]) -> dict[str, int]:
+    """Подпись -> id человека (для разбора ответа модели: исполнители задач, имена голосов)."""
+    out: dict[str, int] = {}
+    for s in segs:
+        if s.get("person_id"):
+            out[speaker_label(s).rstrip("?").lower()] = s["person_id"]
+            if s.get("person_owner"):
+                out[OWNER_LABEL.lower()] = s["person_id"]
+                if s.get("person_name"):
+                    out[s["person_name"].lower()] = s["person_id"]
+    return out
+
+
+def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
+    """Кто это: подпись из расшифровки, имя известного человека или «я/владелец»."""
+    if not who:
+        return None
+    key = who.strip().rstrip("?").lower()
+    if key in labels:
+        return labels[key]
+    if key in ("я", "владелец", "me", "owner", "ben", "yo"):
+        row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
+        return row["id"] if row else None
+    m = re.fullmatch(r"(?:голос|voice|ses|voz)\s*(\d+)", key)
+    if m:
+        row = conn.execute("SELECT id FROM people WHERE number = %s", (int(m.group(1)),)).fetchone()
+        return row["id"] if row else None
+    rows = conn.execute("SELECT id FROM people WHERE lower(name) = %s", (key,)).fetchall()
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+# ---------------------------------------------------------------- итоги разговора
+SUMMARY_PEOPLE_RULES = """Говорящие подписаны так: «Владелец» — владелец кулона (в скобках его имя, если известно);
+имя — человек, узнанный по голосу; «Голос N» — незнакомый голос; знак «?» — узнан неуверенно; «Спикер N» — голос без отпечатка.
+В задачах исполнителя (assignee) указывай подписью из расшифровки или именем, если оно звучит в разговоре.
+В "speakers" — только для подписей «Голос N» и «Владелец» без имени: имя, которое ясно следует из разговора
+(к человеку обратились по имени, он представился). Сомневаешься — не пиши. Нет таких — пустой список."""
+
+SUMMARY_PEOPLE_FIELDS = (
+    '"topics": ["2–4 темы разговора, по 1–3 слова, с маленькой буквы"],\n'
+    ' "speakers": [{"voice": "Голос N", "name": "имя", "evidence": "короткая цитата, откуда ясно имя"}]'
+)
+
+
+def clean_topics(raw) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for t in raw:
+        t = " ".join(str(t or "").split()).strip(" .,;:#\"'«»").lower()[:40]
+        if t and t not in out:
+            out.append(t)
+    return out[:4]
+
+
+def apply_summary(conn, conv_id: int, segs: list[dict], result: dict, tasks: list[dict]) -> list[str]:
+    """Темы, подсказки имён и исполнители задач из ответа модели. Возвращает темы."""
+    topics = clean_topics(result.get("topics"))
+    labels = labels_map(segs)
+    for t in tasks:
+        t["person_id"] = resolve(conn, t.get("assignee"), labels)
+        if t["person_id"] and t.get("assignee"):
+            row = conn.execute("SELECT name, is_owner FROM people WHERE id = %s", (t["person_id"],)).fetchone()
+            if row and row["name"]:
+                t["assignee"] = row["name"]
+    for sp in result.get("speakers") or []:
+        if not isinstance(sp, dict):
+            continue
+        name = " ".join(str(sp.get("name") or "").split()).strip(" .,«»\"'")[:60]
+        pid = resolve(conn, str(sp.get("voice") or ""), labels)
+        if not name or not pid or len(name) < 2:
+            continue
+        person = conn.execute("SELECT name FROM people WHERE id = %s", (pid,)).fetchone()
+        if not person or person["name"]:
+            continue
+        seen = conn.execute(
+            """SELECT 1 FROM person_suggestions WHERE person_id = %s AND lower(name) = lower(%s)
+                   AND status IN ('pending', 'rejected')""", (pid, name)).fetchone()
+        if seen:
+            continue
+        conn.execute(
+            """INSERT INTO person_suggestions (person_id, name, conversation_id, evidence)
+               VALUES (%s, %s, %s, %s)""",
+            (pid, name, conv_id, str(sp.get("evidence") or "").strip()[:300] or None))
+        log.info("conversation %s: voice of person %s may be %s", conv_id, pid, name)
+    return topics
+
+
+# ---------------------------------------------------------------- для приложения
+PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.number, p.samples, p.speech_sec, p.note,
+       p.first_seen, p.last_seen,
+       (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations"""
+
+
+def _with_sample(p: dict | None) -> dict | None:
+    if p is not None:
+        p["has_sample"] = voices.sample_path(p["id"]).exists()
+    return p
+
+
+def settings(conn) -> dict:
+    return {"enabled": voices.enabled(conn), "others": voices.others_enabled(conn)}
+
+
+def set_settings(conn, enabled: bool | None = None, others: bool | None = None) -> dict:
+    for key, value in (("voices.enabled", enabled), ("voices.others", others)):
+        if value is None:
+            continue
+        conn.execute(
+            """INSERT INTO settings (key, value) VALUES (%s, %s)
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+            (key, "1" if value else "0"))
+    if others is False and voices.has_owner(conn):
+        voices.purge_unnamed(conn)
+    return settings(conn)
+
+
+def list_people(conn) -> dict:
+    people = conn.execute(
+        f"""SELECT {PERSON_COLUMNS} FROM people p
+            ORDER BY p.is_owner DESC, p.ignored, (p.name IS NULL), p.last_seen DESC NULLS LAST""").fetchall()
+    for p in people:
+        _with_sample(p)
+    suggestions = conn.execute(
+        """SELECT g.id, g.person_id, g.name, g.evidence, g.conversation_id, c.title AS conversation_title,
+                  p.number, p.is_owner
+           FROM person_suggestions g JOIN people p ON p.id = g.person_id
+           LEFT JOIN conversations c ON c.id = g.conversation_id
+           WHERE g.status = 'pending' AND p.name IS NULL
+           ORDER BY g.id DESC LIMIT 20""").fetchall()
+    owner = voices.suggest_owner(conn)
+    return {"people": people, "suggestions": suggestions, "owner_candidate": _with_sample(owner),
+            "settings": settings(conn)}
+
+
+def person_detail(conn, pid: int) -> dict | None:
+    p = conn.execute(f"SELECT {PERSON_COLUMNS} FROM people p WHERE p.id = %s", (pid,)).fetchone()
+    if p is None:
+        return None
+    _with_sample(p)
+    p["recent"] = conn.execute(
+        """SELECT c.id, c.title, c.emoji, c.started_at, c.topics,
+                  greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
+                  sum(greatest(0, extract(epoch FROM s.ended_at - s.started_at)))::int AS speech_sec
+           FROM segments s JOIN conversations c ON c.id = s.conversation_id
+           WHERE s.person_id = %s
+           GROUP BY c.id ORDER BY c.started_at DESC LIMIT 30""", (pid,)).fetchall()
+    topics: dict[str, int] = {}
+    for c in p["recent"]:
+        for t in c.get("topics") or []:
+            topics[t] = topics.get(t, 0) + 1
+    p["topics"] = [t for t, _ in sorted(topics.items(), key=lambda kv: -kv[1])[:8]]
+    p["tasks"] = conn.execute(
+        """SELECT id, text, due, status, conversation_id FROM tasks
+           WHERE person_id = %s ORDER BY status, created_at DESC LIMIT 30""", (pid,)).fetchall()
+    p["quotes"] = conn.execute(
+        """SELECT id, text, started_at, conversation_id FROM segments
+           WHERE person_id = %s AND length(text) >= 20 ORDER BY started_at DESC LIMIT 5""", (pid,)).fetchall()
+    p["together"] = conn.execute(
+        """SELECT o.id, o.name, o.number, o.is_owner, count(DISTINCT s2.conversation_id) AS conversations
+           FROM segments s1 JOIN segments s2 ON s2.conversation_id = s1.conversation_id
+           JOIN people o ON o.id = s2.person_id
+           WHERE s1.person_id = %s AND s2.person_id <> %s AND NOT o.ignored
+           GROUP BY o.id ORDER BY conversations DESC LIMIT 8""", (pid, pid)).fetchall()
+    p["suggestions"] = conn.execute(
+        "SELECT id, name, evidence FROM person_suggestions WHERE person_id = %s AND status = 'pending'",
+        (pid,)).fetchall()
+    return p
+
+
+def update_person(conn, pid: int, body: dict) -> dict | None:
+    """Имя, «это я», «не учитывать», заметка. Имя подтверждает отпечатки голоса."""
+    if conn.execute("SELECT 1 FROM people WHERE id = %s", (pid,)).fetchone() is None:
+        return None
+    same_name = None
+    with conn.transaction():
+        if "name" in body:
+            name = " ".join(str(body.get("name") or "").split())[:60] or None
+            conn.execute("UPDATE people SET name = %s, updated_at = now() WHERE id = %s", (name, pid))
+            if name:
+                voices.confirm_person(conn, pid)
+                conn.execute("UPDATE person_suggestions SET status = CASE WHEN lower(name) = lower(%s) "
+                             "THEN 'accepted' ELSE 'rejected' END WHERE person_id = %s AND status = 'pending'",
+                             (name, pid))
+                other = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) AND id <> %s LIMIT 1",
+                                     (name, pid)).fetchone()
+                same_name = other["id"] if other else None
+        if body.get("is_owner") is True:
+            conn.execute("UPDATE people SET is_owner = false WHERE is_owner AND id <> %s", (pid,))
+            conn.execute("UPDATE people SET is_owner = true, ignored = false, updated_at = now() WHERE id = %s",
+                         (pid,))
+            voices.confirm_person(conn, pid)
+        elif body.get("is_owner") is False:
+            conn.execute("UPDATE people SET is_owner = false, updated_at = now() WHERE id = %s", (pid,))
+        if "ignored" in body:
+            conn.execute("UPDATE people SET ignored = %s, updated_at = now() WHERE id = %s",
+                         (bool(body["ignored"]), pid))
+        if "note" in body:
+            conn.execute("UPDATE people SET note = %s WHERE id = %s",
+                         (str(body.get("note") or "").strip()[:500] or None, pid))
+    if body.get("is_owner") is True and not voices.others_enabled(conn):
+        voices.purge_unnamed(conn)
+    p = person_detail(conn, pid)
+    if p is not None:
+        p["same_name"] = same_name
+    return p
+
+
+def create_named(conn, name: str) -> dict:
+    """Новый человек по имени (без голоса): «Кто это?» -> «Новый человек»."""
+    number = conn.execute("SELECT coalesce(max(number), 0) + 1 AS n FROM people").fetchone()["n"]
+    return conn.execute(
+        """INSERT INTO people (name, number, first_seen, last_seen) VALUES (%s, %s, now(), now())
+           RETURNING id, name, number, is_owner""", (name.strip()[:60], number)).fetchone()
+
+
+def assign_segment(conn, segment_id: int, person_id: int | None = None, name: str | None = None) -> dict | None:
+    """«Кто это?» для одной фразы: человек из списка, новый по имени или «не знаю» (снять подпись)."""
+    if conn.execute("SELECT 1 FROM segments WHERE id = %s", (segment_id,)).fetchone() is None:
+        return None
+    if person_id is None and name:
+        existing = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) ORDER BY id LIMIT 1",
+                                (name.strip(),)).fetchone()
+        person_id = existing["id"] if existing else create_named(conn, name)["id"]
+    if person_id is None:
+        old = conn.execute("SELECT person_id FROM segments WHERE id = %s", (segment_id,)).fetchone()
+        conn.execute("UPDATE segments SET person_id = NULL, voice_score = NULL WHERE id = %s", (segment_id,))
+        conn.execute("DELETE FROM voiceprints WHERE segment_id = %s", (segment_id,))
+        if old and old["person_id"]:
+            voices.recompute_centroid(conn, old["person_id"])
+        return {"segment_id": segment_id, "person_id": None}
+    if conn.execute("SELECT 1 FROM people WHERE id = %s", (person_id,)).fetchone() is None:
+        return None
+    voices.assign_segment(conn, segment_id, person_id)
+    return {"segment_id": segment_id, "person_id": person_id}
+
+
+def answer_suggestion(conn, sid: int, accept: bool) -> dict | None:
+    g = conn.execute("SELECT id, person_id, name FROM person_suggestions WHERE id = %s", (sid,)).fetchone()
+    if g is None:
+        return None
+    if not accept:
+        conn.execute("UPDATE person_suggestions SET status = 'rejected' WHERE id = %s", (sid,))
+        return {"id": sid, "status": "rejected"}
+    same = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) AND id <> %s ORDER BY id LIMIT 1",
+                        (g["name"], g["person_id"])).fetchone()
+    if same:
+        # такой человек уже есть — значит, это он же другим голосовым отпечатком: объединяем
+        voices.merge_people(conn, g["person_id"], same["id"])
+        conn.execute("UPDATE person_suggestions SET status = 'accepted' WHERE id = %s", (sid,))
+        return {"id": sid, "status": "accepted", "person_id": same["id"], "merged": True}
+    update_person(conn, g["person_id"], {"name": g["name"]})
+    return {"id": sid, "status": "accepted", "person_id": g["person_id"], "merged": False}
+
+
+def participants_sql(alias: str = "c") -> str:
+    """Подзапрос: кто говорил в разговоре (до 6 человек, кто больше говорил — первым)."""
+    return f"""coalesce((SELECT json_agg(json_build_object('id', x.id, 'name', x.name, 'number', x.number,
+                                                     'is_owner', x.is_owner) ORDER BY x.sec DESC)
+               FROM (SELECT p.id, p.name, p.number, p.is_owner,
+                            sum(extract(epoch FROM s.ended_at - s.started_at)) AS sec
+                     FROM segments s JOIN people p ON p.id = s.person_id
+                     WHERE s.conversation_id = {alias}.id AND NOT p.ignored
+                     GROUP BY p.id ORDER BY sec DESC LIMIT 6) x), '[]'::json)"""
+
+
+def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
+    """Данные для «Созвездия»: люди, темы, разговоры со связями и фото. Раскладку строит приложение."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    convs = conn.execute(
+        f"""SELECT c.id, c.title, c.emoji, c.started_at, c.last_activity AS ended_at, c.topics,
+                   greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
+                   coalesce((SELECT array_agg(DISTINCT s.person_id) FROM segments s JOIN people p ON p.id = s.person_id
+                             WHERE s.conversation_id = c.id AND NOT p.ignored), '{{}}') AS people,
+                   (SELECT ph.id FROM photos ph
+                    WHERE ph.taken_at BETWEEN c.started_at - interval '15 minutes'
+                                          AND c.last_activity + interval '15 minutes'
+                      AND ph.status IN ('analyzed', 'done')
+                    ORDER BY ph.taken_at LIMIT 1) AS photo_id
+            FROM conversations c
+            WHERE c.started_at > %s AND c.title IS NOT NULL
+            ORDER BY c.started_at LIMIT 400""", (since,)).fetchall()
+    ids = sorted({pid for c in convs for pid in (c["people"] or [])})
+    people = conn.execute(
+        f"SELECT {PERSON_COLUMNS} FROM people p WHERE p.id = ANY(%s) OR p.is_owner", (ids,)).fetchall() \
+        if ids else conn.execute(f"SELECT {PERSON_COLUMNS} FROM people p WHERE p.is_owner").fetchall()
+    topics: dict[str, dict] = {}
+    for c in convs:
+        c["topics"] = c.get("topics") or []
+        c["people"] = c.get("people") or []
+        for t in c["topics"]:
+            item = topics.setdefault(t, {"name": t, "count": 0, "first_at": c["started_at"]})
+            item["count"] += 1
+            item["last_at"] = c["started_at"]
+    return {"people": people, "topics": sorted(topics.values(), key=lambda t: -t["count"])[:60],
+            "conversations": convs, "since": since}
+
+
+# ---------------------------------------------------------------- для агента
+def people_overview(conn) -> str:
+    rows = conn.execute(
+        f"""SELECT {PERSON_COLUMNS} FROM people p WHERE NOT p.ignored
+            ORDER BY p.is_owner DESC, (p.name IS NULL), p.last_seen DESC NULLS LAST LIMIT 40""").fetchall()
+    if not rows:
+        return "Кулон пока не различает голоса (никого не запомнил)."
+    out = []
+    for r in rows:
+        who = (f"Владелец ({r['name']})" if r["name"] else "Владелец") if r["is_owner"] \
+            else (r["name"] or f"Голос {r['number']}")
+        last = r["last_seen"].strftime("%d.%m.%Y") if r["last_seen"] else "—"
+        out.append(f"- {who}: разговоров {r['conversations']}, говорил(а) {int(r['speech_sec'] // 60)} мин, "
+                   f"последний раз {last}" + (f"; заметка: {r['note']}" if r.get("note") else ""))
+    return "Люди, которых кулон узнаёт по голосу:\n" + "\n".join(out)
+
+
+def person_conversations(conn, who: str, days: int = 60) -> str:
+    pid = resolve(conn, who, {})
+    if pid is None:
+        rows = conn.execute("SELECT id FROM people WHERE name ILIKE %s LIMIT 2", (f"%{who.strip()}%",)).fetchall()
+        pid = rows[0]["id"] if len(rows) == 1 else None
+    if pid is None:
+        return f"Не знаю человека «{who}» по голосу. Посмотри список людей инструментом people."
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))
+    convs = conn.execute(
+        """SELECT DISTINCT c.id, c.started_at, c.title, c.summary FROM conversations c
+           JOIN segments s ON s.conversation_id = c.id
+           WHERE s.person_id = %s AND c.started_at > %s ORDER BY c.started_at DESC LIMIT 15""",
+        (pid, since)).fetchall()
+    tasks = conn.execute("SELECT text, due, status FROM tasks WHERE person_id = %s ORDER BY created_at DESC LIMIT 15",
+                         (pid,)).fetchall()
+    out = [f"[{c['started_at'].strftime('%d.%m %H:%M')}] {c['title'] or '…'}: {c['summary'] or ''}" for c in convs]
+    if tasks:
+        out.append("Задачи с этим человеком:")
+        out += [f"- [{t['status']}] {t['text']}" + (f" (срок: {t['due']})" if t["due"] else "") for t in tasks]
+    return "\n".join(out) or "Разговоров с этим человеком за это время нет."

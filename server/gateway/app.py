@@ -21,19 +21,21 @@ import psycopg
 from psycopg.rows import dict_row
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm
+from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm, people, voices
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
+    BYTES_PER_MS,
     BatchError,
     ChunkWriter,
     FinishedChunk,
     FrameDecoder,
     chunk_from_path,
     parse_batch,
+    pcm_to_wav,
     recover_orphans,
 )
 
@@ -330,8 +332,9 @@ async def api_conversations(request: Request):
     async with await aconnect() as conn:
         rows = await (await conn.execute(
             """SELECT c.id, c.device_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary,
-                      c.emoji, greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
+                      c.emoji, c.topics, greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
                       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id) AS tasks_count,
+                      """ + people.participants_sql("c") + """ AS people,
                       (SELECT left(string_agg(x.text, ' '), 240) FROM
                           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id
                            ORDER BY s.started_at LIMIT 6) x) AS preview
@@ -405,17 +408,26 @@ async def api_conversation(request: Request):
             return Json({"deleted": res.rowcount})
         conv = await (await conn.execute(
             """SELECT id, device_id, started_at, last_activity AS ended_at, status, title, summary, error, emoji,
-                      greatest(0, extract(epoch FROM last_activity - started_at))::int AS duration_sec
+                      topics, greatest(0, extract(epoch FROM last_activity - started_at))::int AS duration_sec
                FROM conversations WHERE id = %s""", (cid,)
         )).fetchone()
         if conv is None:
             return Json({"error": "not found"}, status_code=404)
         conv["segments"] = await (await conn.execute(
-            """SELECT id, started_at, ended_at, speaker, text FROM segments
-               WHERE conversation_id = %s ORDER BY started_at, id""", (cid,)
+            """SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.person_id, s.voice_score,
+                      (s.chunk_id IS NOT NULL AND a.path IS NOT NULL) AS has_audio
+               FROM segments s LEFT JOIN audio_chunks a ON a.id = s.chunk_id
+               WHERE s.conversation_id = %s ORDER BY s.started_at, s.id""", (cid,)
         )).fetchall()
+        match = voices.thresholds().match
+        for seg in conv["segments"]:
+            seg["sure"] = seg["voice_score"] is not None and seg["voice_score"] >= match
+        ids = sorted({seg["person_id"] for seg in conv["segments"] if seg["person_id"]})
+        conv["people"] = await (await conn.execute(
+            "SELECT id, name, number, is_owner, ignored FROM people WHERE id = ANY(%s)", (ids,)
+        )).fetchall() if ids else []
         conv["tasks"] = await (await conn.execute(
-            """SELECT id, text, due, assignee, target, status, source, exported_at, export_ref
+            """SELECT id, text, due, assignee, person_id, target, status, source, exported_at, export_ref
                FROM tasks WHERE conversation_id = %s ORDER BY id""", (cid,)
         )).fetchall()
         conv["memories"] = await (await conn.execute(
@@ -442,7 +454,7 @@ async def api_tasks(request: Request):
     status = request.query_params.get("status", "open")
     async with await aconnect() as conn:
         rows = await (await conn.execute(
-            """SELECT t.id, t.conversation_id, t.text, t.due, t.assignee, t.target, t.status, t.source,
+            """SELECT t.id, t.conversation_id, t.text, t.due, t.assignee, t.person_id, t.target, t.status, t.source,
                       t.exported_at, t.export_ref, t.created_at, c.title AS conversation_title,
                       coalesce((SELECT json_agg(json_build_object(
                                     'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref,
@@ -1020,6 +1032,166 @@ async def api_photo(request: Request):
     return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
 
 # ---------------------------------------------------------------------------
+# Люди: голоса в разговорах, «Кто это?», «Созвездие»
+# ---------------------------------------------------------------------------
+def _sync(fn, *args):
+    """Синхронная работа с базой (модуль people/voices) в отдельном потоке."""
+    def work():
+        with db.connect() as conn:
+            return fn(conn, *args)
+    return anyio.to_thread.run_sync(work)
+
+
+async def _body(request: Request) -> dict | None:
+    try:
+        body = await request.json()
+    except ValueError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+async def api_people(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    return Json(await _sync(people.list_people))
+
+
+async def api_people_settings(request: Request):
+    """Приватность: {"enabled": узнавать голоса, "others": запоминать голоса собеседников}."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None:
+        return Json({"error": "bad json"}, status_code=400)
+    enabled = bool(body["enabled"]) if "enabled" in body else None
+    others = bool(body["others"]) if "others" in body else None
+    return Json(await _sync(people.set_settings, enabled, others))
+
+
+async def api_people_forget_all(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    return Json({"forgotten": await _sync(voices.forget_all)})
+
+
+async def api_person(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    pid = request.path_params["id"]
+    if request.method == "DELETE":
+        await _sync(voices.forget_person, pid)
+        return Json({"deleted": pid})
+    if request.method == "POST":
+        body = await _body(request)
+        if body is None:
+            return Json({"error": "bad json"}, status_code=400)
+        p = await _sync(people.update_person, pid, body)
+    else:
+        p = await _sync(people.person_detail, pid)
+    if p is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(p)
+
+
+async def api_person_merge(request: Request):
+    """Это один и тот же человек: {"into": id} — голос id из пути переходит к нему."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    try:
+        target = int((body or {}).get("into"))
+    except (TypeError, ValueError):
+        return Json({"error": "into: person id"}, status_code=400)
+    source = request.path_params["id"]
+
+    def work(conn):
+        found = conn.execute("SELECT count(*) AS n FROM people WHERE id = ANY(%s)", ([source, target],)).fetchone()
+        if found["n"] != 2 or source == target:
+            return None
+        voices.merge_people(conn, source, target)
+        return people.person_detail(conn, target)
+
+    p = await _sync(work)
+    if p is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(p)
+
+
+async def api_person_sample(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    path = voices.sample_path(request.path_params["id"])
+    if not path.exists():
+        return Json({"error": "no voice sample"}, status_code=404)
+    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "private, max-age=300"})
+
+
+async def api_suggestion(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None or "accept" not in body:
+        return Json({"error": "accept: true | false"}, status_code=400)
+    res = await _sync(people.answer_suggestion, request.path_params["id"], bool(body["accept"]))
+    if res is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(res)
+
+
+async def api_segment_person(request: Request):
+    """«Кто это?» для одной фразы: {"person_id": id} | {"name": "Анна"} | {"person_id": null} — не знаю."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None:
+        return Json({"error": "bad json"}, status_code=400)
+    pid = body.get("person_id")
+    name = str(body.get("name") or "").strip() or None
+    try:
+        pid = int(pid) if pid is not None else None
+    except (TypeError, ValueError):
+        return Json({"error": "person_id: int"}, status_code=400)
+    res = await _sync(people.assign_segment, request.path_params["id"], pid, name)
+    if res is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(res)
+
+
+async def api_segment_audio(request: Request):
+    """Звук одной фразы (WAV), пока исходная запись хранится на сервере (KEEP_AUDIO_DAYS)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    async with await aconnect() as conn:
+        row = await (await conn.execute(
+            """SELECT a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
+                      extract(epoch FROM s.ended_at - s.started_at) AS dur
+               FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id WHERE s.id = %s""",
+            (request.path_params["id"],))).fetchone()
+    if not row or not row["path"] or not Path(row["path"]).exists():
+        return Json({"error": "audio is no longer stored"}, status_code=404)
+    start = max(0, int((float(row["off"]) - 0.2) * 1000)) * BYTES_PER_MS
+    length = int((min(float(row["dur"]), 20.0) + 0.4) * 1000) * BYTES_PER_MS
+
+    def read():
+        with open(row["path"], "rb") as f:
+            f.seek(start)
+            return f.read(length)
+
+    pcm = await anyio.to_thread.run_sync(read)
+    if not pcm:
+        return Json({"error": "empty"}, status_code=404)
+    return Response(pcm_to_wav(pcm), media_type="audio/wav", headers={"Cache-Control": "private, max-age=300"})
+
+
+async def api_graph(request: Request):
+    """«Созвездие»: люди, темы и разговоры за N дней (по умолчанию 90)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    days = _clamp(request.query_params.get("days"), 90, 1, 730)
+    return Json(await _sync(people.graph, days))
+
+
+# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app):
     if not config.API_TOKEN:
@@ -1071,6 +1243,16 @@ app = Starlette(
         Route("/api/diary/{day}/generate", api_diary_generate, methods=["POST"]),
         Route("/api/photos", api_photos_upload, methods=["POST"]),
         Route("/api/photos/{id:int}", api_photo, methods=["GET", "DELETE"]),
+        Route("/api/people", api_people),
+        Route("/api/people/settings", api_people_settings, methods=["POST"]),
+        Route("/api/people/forget", api_people_forget_all, methods=["POST"]),
+        Route("/api/people/suggestions/{id:int}", api_suggestion, methods=["POST"]),
+        Route("/api/people/{id:int}", api_person, methods=["GET", "POST", "DELETE"]),
+        Route("/api/people/{id:int}/merge", api_person_merge, methods=["POST"]),
+        Route("/api/people/{id:int}/sample", api_person_sample),
+        Route("/api/segments/{id:int}/person", api_segment_person, methods=["POST"]),
+        Route("/api/segments/{id:int}/audio", api_segment_audio),
+        Route("/api/graph", api_graph),
         WebSocketRoute("/ws/audio", ws_audio),
         WebSocketRoute("/ws/ask", ws_ask),
     ],

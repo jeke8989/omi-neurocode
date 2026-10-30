@@ -247,3 +247,56 @@ CREATE TABLE IF NOT EXISTS task_exports (
 
 -- Эмодзи разговора для ленты (выбирает агент)
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS emoji TEXT;
+
+-- Темы разговора (2–4 коротких метки) — для «Созвездия»
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS topics TEXT[] NOT NULL DEFAULT '{}';
+
+-- Голоса: люди, которых узнаёт кулон. Имени нет — показывается «Голос N».
+CREATE TABLE IF NOT EXISTS people (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT,
+    is_owner    BOOLEAN NOT NULL DEFAULT false,
+    ignored     BOOLEAN NOT NULL DEFAULT false,   -- «не учитывать» (телевизор, радио, случайный прохожий)
+    number      INTEGER NOT NULL,
+    centroid    REAL[],                           -- средний отпечаток голоса
+    samples     INTEGER NOT NULL DEFAULT 0,
+    speech_sec  REAL NOT NULL DEFAULT 0,
+    loudness    REAL,
+    note        TEXT,
+    first_seen  TIMESTAMPTZ,
+    last_seen   TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS people_owner_idx ON people (is_owner) WHERE is_owner;
+
+CREATE TABLE IF NOT EXISTS voiceprints (
+    id          BIGSERIAL PRIMARY KEY,
+    person_id   BIGINT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    embedding   REAL[] NOT NULL,
+    seconds     REAL NOT NULL,
+    backend     TEXT NOT NULL,
+    confirmed   BOOLEAN NOT NULL DEFAULT false,
+    segment_id  BIGINT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS voiceprints_person_idx ON voiceprints (person_id, confirmed, id DESC);
+
+-- Подсказки имён от ассистента: «Голос 3 — это, похоже, Анна» (пользователь подтверждает)
+CREATE TABLE IF NOT EXISTS person_suggestions (
+    id               BIGSERIAL PRIMARY KEY,
+    person_id        BIGINT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    conversation_id  BIGINT REFERENCES conversations(id) ON DELETE SET NULL,
+    evidence         TEXT,
+    status           TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS person_suggestions_idx ON person_suggestions (status, person_id);
+
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES people(id) ON DELETE SET NULL;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS voice_score REAL;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS embedding REAL[];
+CREATE INDEX IF NOT EXISTS segments_person_idx ON segments (person_id, started_at);
+
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES people(id) ON DELETE SET NULL;

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, diary, extensions, i18n
+from neuro import agent_core, diary, extensions, i18n, people
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
 
@@ -23,12 +23,14 @@ SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают рас
 Верни строго JSON-объект без пояснений и без markdown:
 {{"title": "название разговора, до 8 слов",
  "emoji": "одно эмодзи, которое лучше всего передаёт тему разговора",
- "summary": "о чём говорили и к чему пришли, 2–6 предложений",
+ "summary": "о чём говорили и к чему пришли, 2–6 предложений; называй людей по именам, если они известны",
  "tasks": [{TASK_SCHEMA}],
- "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"]}}
+ "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"],
+ {people.SUMMARY_PEOPLE_FIELDS}}}
 Правила: задачи — только явные поручения, обещания и договорённости из разговора, ничего не выдумывай.
 Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "-",
-summary = "", списки пустые."""
+summary = "", списки пустые.
+{people.SUMMARY_PEOPLE_RULES}"""
 
 REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кнопку «запомни это». Тебе дан фрагмент расшифровки перед нажатием
 (может содержать ошибки распознавания). Верни строго JSON:
@@ -85,14 +87,14 @@ def summarize_conversations(conn):
 
 def summarize_one(conn, conv_id: int):
     segs = conn.execute(
-        "SELECT started_at, speaker, text FROM segments WHERE conversation_id = %s ORDER BY started_at, id",
-        (conv_id,),
+        people.SEGMENT_SELECT + " WHERE s.conversation_id = %s ORDER BY s.started_at, s.id", (conv_id,)
     ).fetchall()
     tasks: list[dict] = []
     memories: list[str] = []
+    topics: list[str] = []
     summary = None
     emoji = "💬"
-    text_len = sum(len(s["text"]) for s in segs)
+    text_len = sum(len(s["text"]) for s in segs if not s.get("person_ignored"))
     lang = i18n.lang(conn)
     if not segs:
         title = i18n.t(lang, "conversation.empty")
@@ -106,6 +108,10 @@ def summarize_one(conn, conv_id: int):
         summary = str(result.get("summary") or "").strip() or None
         tasks = clean_tasks(result.get("tasks"))
         memories = clean_list(result.get("memories"))
+        try:
+            topics = people.apply_summary(conn, conv_id, segs, result, tasks)
+        except Exception:  # noqa: BLE001 — люди и темы не должны мешать итогам
+            log.exception("conversation %s: people/topics failed", conv_id)
     else:
         title = first_words(segs, lang=lang)
 
@@ -120,10 +126,10 @@ def summarize_one(conn, conv_id: int):
         insert_memories(conn, conv_id, memories, "conversation")
         # Если пока мы думали, пришли новые фразы, STT вернул статус 'open' — тогда разговор пересчитаем позже.
         conn.execute(
-            """UPDATE conversations SET title = %s, summary = %s, emoji = %s, error = NULL, updated_at = now(),
-                   status = CASE WHEN status = 'processing' THEN 'done' ELSE status END
+            """UPDATE conversations SET title = %s, summary = %s, emoji = %s, topics = %s, error = NULL,
+                   updated_at = now(), status = CASE WHEN status = 'processing' THEN 'done' ELSE status END
                WHERE id = %s""",
-            (title, summary, emoji, conv_id),
+            (title, summary, emoji, topics, conv_id),
         )
     log.info("conversation %s: '%s', %d tasks, %d memories", conv_id, title, len(tasks), len(memories))
 
@@ -164,8 +170,8 @@ def process_events(conn):
             if waiting and ev["created_at"] > now - timedelta(minutes=30):
                 continue
             segs = conn.execute(
-                """SELECT started_at, speaker, text, conversation_id FROM segments
-                   WHERE device_id = %s AND ended_at >= %s AND started_at <= %s ORDER BY started_at""",
+                people.SEGMENT_SELECT + """ WHERE s.device_id = %s AND s.ended_at >= %s AND s.started_at <= %s
+                                           ORDER BY s.started_at""",
                 (ev["device_id"], start, end),
             ).fetchall()
             if ev["value"] == BUTTON_REMEMBER:

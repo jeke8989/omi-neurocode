@@ -14,8 +14,8 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import config, extensions, i18n, llm
-from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks
+from . import config, extensions, i18n, llm, people
+from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
 
@@ -33,11 +33,12 @@ DEEP_WORDS = re.compile(
     r"|a fondo|investiga|anali[zc]|compara|estrategia|informe sobre|resumen detallado)", re.I)
 TOOL_WORDS = re.compile(
     r"\b(найди|поищи|загугли|узнай|посмотри|новост|курс|погод|созда|добав|напомн|запомни|задач|"
-    r"что (я|мы) (говорил|обсуждал)|о ч[её]м (я|мы)|отправ|напиши в"
+    r"что (я|мы) (говорил|обсуждал)|о ч[её]м (я|мы)|отправ|напиши в|с кем|кто (говорил|сказал|был)|что (сказал|говорил)"
     r"|find|search|look up|google|news|weather|exchange rate|create|add|remind|remember|task|todo|send"
-    r"|what did (i|we) (say|discuss)"
-    r"|bul|ara|haber|hava durumu|kur|oluştur|ekle|hatırlat|hatırla|görev|gönder"
-    r"|busca|encuentra|noticias|clima|tiempo|tipo de cambio|crea|añade|recuérda|recuerda|tarea|envía)", re.I)
+    r"|what did (i|we) (say|discuss)|who (said|was)|with whom|talk(ed)? (to|with)"
+    r"|bul|ara|haber|hava durumu|kur|oluştur|ekle|hatırlat|hatırla|görev|gönder|kim(inle)? (söyledi|dedi|konuştu)"
+    r"|busca|encuentra|noticias|clima|tiempo|tipo de cambio|crea|añade|recuérda|recuerda|tarea|envía"
+    r"|quién (dijo|era)|con quién)", re.I)
 
 
 def route(text: str, channel: str) -> str:
@@ -73,13 +74,18 @@ BUILTIN_TOOLS = [
         {"minutes": {"type": "integer", "description": "по умолчанию 15"}}),
     _fn("list_conversations", "Список разговоров с итогами за последние дни.",
         {"days": {"type": "integer", "description": "по умолчанию 1"}}),
+    _fn("people", "Люди, которых кулон узнаёт по голосу: имена, сколько и когда разговаривали с владельцем."),
+    _fn("person_conversations", "Разговоры и задачи с конкретным человеком (по имени или подписи «Голос N»).",
+        {"name": {"type": "string"}, "days": {"type": "integer", "description": "за сколько дней, по умолчанию 60"}},
+        ["name"]),
 ]
 
 def tool_title(lang: str, name: str, args: dict) -> str:
     """Короткая строка шага для чата: «🔎 Ищу в интернете: …» на языке приложения."""
     if "tool." + name not in i18n.PHRASES:
         return f"⚙️ {name}"
-    return i18n.t(lang, "tool." + name, query=args.get("query", ""), text=args.get("text", ""), id=args.get("id"))
+    return i18n.t(lang, "tool." + name, query=args.get("query", ""), text=args.get("text", ""), id=args.get("id"),
+                  name=args.get("name", ""))
 
 
 def web_search(conn, query: str) -> str:
@@ -131,19 +137,19 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
                WHERE started_at > %s AND (title ILIKE %s OR summary ILIKE %s)
                ORDER BY started_at DESC LIMIT 10""", (since, q, q)).fetchall()
         segs = conn.execute(
-            """SELECT started_at, text FROM segments WHERE started_at > %s AND text ILIKE %s
-               ORDER BY started_at DESC LIMIT 15""", (since, q)).fetchall()
+            people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND s.text ILIKE %s
+                                       ORDER BY s.started_at DESC LIMIT 15""", (since, q)).fetchall()
         out = [f"[память {_d(m['created_at'])}] {m['text']}" for m in mems]
         out += [f"[разговор {_d(c['started_at'])}] {c['title']}: {c['summary'] or ''}" for c in convs]
-        out += [f"[фраза {_d(s['started_at'])}] {s['text']}" for s in segs]
+        out += [f"[фраза {_d(s['started_at'])}] {people.speaker_label(s)}: {s['text']}" for s in segs]
         return "\n".join(out) or "Ничего не найдено. Попробуй другие слова (поиск по точному совпадению)."
     if name == "recent_conversation":
         minutes = max(1, min(int(args.get("minutes") or 15), 240))
         rows = conn.execute(
-            """SELECT started_at, speaker, text FROM segments WHERE started_at > %s
-               AND (%s::text IS NULL OR device_id = %s) ORDER BY started_at""",
+            people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND (%s::text IS NULL OR s.device_id = %s)
+                                       ORDER BY s.started_at""",
             (datetime.now(timezone.utc) - timedelta(minutes=minutes), device_id, device_id)).fetchall()
-        return "\n".join(f"[{_t(r['started_at'])}] {r['text']}" for r in rows)[-12000:] or "За это время записи нет."
+        return transcript_text(rows, limit=12000) or "За это время записи нет."
     if name == "list_conversations":
         days = max(1, min(int(args.get("days") or 1), 30))
         rows = conn.execute(
@@ -152,6 +158,10 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
             (datetime.now(timezone.utc) - timedelta(days=days),)).fetchall()
         return "\n".join(f"#{r['id']} {_d(r['started_at'])} {r['title'] or '…'}: {r['summary'] or ''}"
                          for r in rows) or "Разговоров нет."
+    if name == "people":
+        return people.people_overview(conn)
+    if name == "person_conversations":
+        return people.person_conversations(conn, str(args.get("name") or ""), int(args.get("days") or 60))
     return f"Неизвестный инструмент {name}"
 
 
@@ -180,7 +190,8 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
     return (
         f"Ты — Mnemo, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть расшифровки его "
         f"разговоров, задачи и память. Сейчас {WEEKDAYS[now.weekday()]}, {now.strftime('%d.%m.%Y %H:%M')}. "
-        f"{i18n.reply_in(lang)} Расшифровки автоматические и могут содержать ошибки. {depth} {style} "
+        f"{i18n.reply_in(lang)} Расшифровки автоматические и могут содержать ошибки; говорящие подписаны "
+        f"«Владелец», по имени или «Голос N» (узнаны по голосу). {depth} {style} "
         f"Никогда не выдумывай факты; если не знаешь — скажи и предложи, что сделать."
     )
 
