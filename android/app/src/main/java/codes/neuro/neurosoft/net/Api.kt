@@ -28,7 +28,53 @@ data class ConversationItem(
     val preview: String?,
     val emoji: String? = null,
     val durationSec: Int = 0,
+    val people: List<PersonRef> = emptyList(),
+    val topics: List<String> = emptyList(),
 )
+
+/** Человек, узнанный по голосу: имя или «Голос N»; владелец кулона — «Я». */
+data class PersonRef(val id: Long, val name: String?, val number: Int, val isOwner: Boolean = false,
+                     val ignored: Boolean = false)
+
+data class Person(
+    val ref: PersonRef,
+    val conversations: Int,
+    val speechSec: Int,
+    val samples: Int,
+    val firstSeen: String?,
+    val lastSeen: String?,
+    val hasSample: Boolean,
+    val note: String?,
+) {
+    val id get() = ref.id
+}
+
+data class PersonConversation(val id: Long, val title: String?, val emoji: String?, val startedAt: String,
+                              val durationSec: Int, val speechSec: Int)
+data class PersonQuote(val segmentId: Long, val text: String, val at: String, val conversationId: Long?)
+data class PersonTogether(val ref: PersonRef, val conversations: Int)
+data class NameSuggestion(val id: Long, val personId: Long, val name: String, val evidence: String?,
+                          val conversationId: Long? = null, val conversationTitle: String? = null,
+                          val number: Int = 0, val isOwner: Boolean = false)
+
+data class PersonDetail(
+    val person: Person,
+    val recent: List<PersonConversation>,
+    val topics: List<String>,
+    val tasks: List<TaskItem>,
+    val quotes: List<PersonQuote>,
+    val together: List<PersonTogether>,
+    val suggestions: List<NameSuggestion>,
+    val sameName: Long? = null,
+)
+
+data class PeopleInfo(val people: List<Person>, val suggestions: List<NameSuggestion>, val ownerCandidate: Person?,
+                      val enabled: Boolean, val others: Boolean)
+
+data class GraphTopic(val name: String, val count: Int, val firstAt: String)
+data class GraphConversation(val id: Long, val title: String?, val emoji: String?, val startedAt: String,
+                             val durationSec: Int, val people: List<Long>, val topics: List<String>, val photoId: Long?)
+data class Graph(val people: List<Person>, val topics: List<GraphTopic>, val conversations: List<GraphConversation>)
 
 /** День с записями: для ленты дней и календаря. */
 data class DayInfo(val day: String, val conversations: Int, val seconds: Int, val speechSeconds: Int = 0)
@@ -40,7 +86,8 @@ data class SearchResults(val conversations: List<SearchHit>, val segments: List<
     val isEmpty get() = conversations.isEmpty() && segments.isEmpty() && tasks.isEmpty() && memories.isEmpty()
 }
 
-data class Segment(val startedAt: String, val speaker: Int?, val text: String)
+data class Segment(val startedAt: String, val speaker: Int?, val text: String, val id: Long = 0,
+                   val personId: Long? = null, val sure: Boolean = true, val hasAudio: Boolean = false)
 
 data class TaskItem(
     val id: Long,
@@ -54,6 +101,7 @@ data class TaskItem(
     val exportRef: String?,
     val exports: List<TaskExport> = emptyList(),
     val createdAt: String = "",
+    val personId: Long? = null,
 )
 
 data class MemoryItem(
@@ -69,6 +117,7 @@ data class ConversationDetail(
     val segments: List<Segment>,
     val tasks: List<TaskItem>,
     val memories: List<MemoryItem>,
+    val people: Map<Long, PersonRef> = emptyMap(),
 )
 
 data class TaskExport(val ext: String, val name: String?, val icon: String?, val ok: Boolean, val ref: String?)
@@ -212,10 +261,12 @@ object Api {
         return ConversationDetail(
             item = conversation(o),
             segments = o.optJSONArray("segments").map {
-                Segment(it.optString("started_at"), it.intOrNull("speaker"), it.optString("text"))
+                Segment(it.optString("started_at"), it.intOrNull("speaker"), it.optString("text"), it.optLong("id"),
+                    it.longOrNull("person_id"), it.optBoolean("sure", true), it.optBoolean("has_audio"))
             },
             tasks = o.optJSONArray("tasks").map { task(it) },
             memories = o.optJSONArray("memories").map { memory(it) },
+            people = o.optJSONArray("people").map { personRef(it) }.associateBy { it.id },
         )
     }
 
@@ -410,6 +461,116 @@ object Api {
             }
         }
 
+    // ---------------------------------------------------------------- люди (голоса)
+    suspend fun people(): PeopleInfo {
+        val o = JSONObject(call("GET", "/api/people"))
+        val st = o.optJSONObject("settings") ?: JSONObject()
+        return PeopleInfo(
+            people = o.optJSONArray("people").map { person(it) },
+            suggestions = o.optJSONArray("suggestions").map { suggestion(it) },
+            ownerCandidate = o.optJSONObject("owner_candidate")?.let { person(it) },
+            enabled = st.optBoolean("enabled", true), others = st.optBoolean("others", true),
+        )
+    }
+
+    suspend fun person(id: Long): PersonDetail = personDetail(JSONObject(call("GET", "/api/people/$id")))
+
+    /** Имя («» — убрать), «это я», «не учитывать», заметка. */
+    suspend fun updatePerson(id: Long, name: String? = null, isOwner: Boolean? = null, ignored: Boolean? = null,
+                             clearName: Boolean = false): PersonDetail {
+        val body = JSONObject()
+        if (name != null) body.put("name", name)
+        if (clearName) body.put("name", "")
+        if (isOwner != null) body.put("is_owner", isOwner)
+        if (ignored != null) body.put("ignored", ignored)
+        return personDetail(JSONObject(call("POST", "/api/people/$id", body)))
+    }
+
+    suspend fun mergePerson(id: Long, into: Long): PersonDetail =
+        personDetail(JSONObject(call("POST", "/api/people/$id/merge", JSONObject().put("into", into))))
+
+    suspend fun forgetPerson(id: Long) {
+        call("DELETE", "/api/people/$id")
+    }
+
+    suspend fun forgetAllVoices(): Int = JSONObject(call("POST", "/api/people/forget", JSONObject())).optInt("forgotten")
+
+    suspend fun setVoiceSettings(enabled: Boolean? = null, others: Boolean? = null): Pair<Boolean, Boolean> {
+        val body = JSONObject()
+        if (enabled != null) body.put("enabled", enabled)
+        if (others != null) body.put("others", others)
+        val o = JSONObject(call("POST", "/api/people/settings", body))
+        return o.optBoolean("enabled", true) to o.optBoolean("others", true)
+    }
+
+    suspend fun answerSuggestion(id: Long, accept: Boolean): Long? =
+        JSONObject(call("POST", "/api/people/suggestions/$id", JSONObject().put("accept", accept))).longOrNull("person_id")
+
+    /** «Кто это?» для одной фразы: человек из списка, новый по имени или null — снять подпись. */
+    suspend fun assignSegment(segmentId: Long, personId: Long?, name: String? = null): Long? {
+        val body = JSONObject().put("person_id", personId ?: JSONObject.NULL)
+        if (name != null) body.put("name", name)
+        return JSONObject(call("POST", "/api/segments/$segmentId/person", body)).longOrNull("person_id")
+    }
+
+    fun sampleUrl(personId: Long): String = Core.prefs.serverUrl + "/api/people/$personId/sample"
+
+    fun segmentAudioUrl(segmentId: Long): String = Core.prefs.serverUrl + "/api/segments/$segmentId/audio"
+
+    suspend fun graph(days: Int = 90): Graph {
+        val o = JSONObject(call("GET", "/api/graph?days=$days"))
+        return Graph(
+            people = o.optJSONArray("people").map { person(it) },
+            topics = o.optJSONArray("topics").map {
+                GraphTopic(it.optString("name"), it.optInt("count"), it.optString("first_at"))
+            },
+            conversations = o.optJSONArray("conversations").map { c ->
+                val ids = c.optJSONArray("people")
+                GraphConversation(
+                    id = c.getLong("id"), title = c.str("title"), emoji = c.str("emoji"),
+                    startedAt = c.optString("started_at"), durationSec = c.optInt("duration_sec"),
+                    people = if (ids == null) emptyList() else (0 until ids.length()).map { ids.optLong(it) },
+                    topics = c.optJSONArray("topics").strings(), photoId = c.longOrNull("photo_id"),
+                )
+            },
+        )
+    }
+
+    private fun personRef(o: JSONObject) = PersonRef(
+        id = o.getLong("id"), name = o.str("name"), number = o.optInt("number"),
+        isOwner = o.optBoolean("is_owner"), ignored = o.optBoolean("ignored"),
+    )
+
+    private fun person(o: JSONObject) = Person(
+        ref = personRef(o), conversations = o.optInt("conversations"), speechSec = o.optDouble("speech_sec", 0.0).toInt(),
+        samples = o.optInt("samples"), firstSeen = o.str("first_seen"), lastSeen = o.str("last_seen"),
+        hasSample = o.optBoolean("has_sample"), note = o.str("note"),
+    )
+
+    private fun suggestion(o: JSONObject) = NameSuggestion(
+        id = o.getLong("id"), personId = o.optLong("person_id"), name = o.optString("name"), evidence = o.str("evidence"),
+        conversationId = o.longOrNull("conversation_id"), conversationTitle = o.str("conversation_title"),
+        number = o.optInt("number"), isOwner = o.optBoolean("is_owner"),
+    )
+
+    private fun personDetail(o: JSONObject) = PersonDetail(
+        person = person(o),
+        recent = o.optJSONArray("recent").map {
+            PersonConversation(it.getLong("id"), it.str("title"), it.str("emoji"), it.optString("started_at"),
+                it.optInt("duration_sec"), it.optInt("speech_sec"))
+        },
+        topics = o.optJSONArray("topics").strings(),
+        tasks = o.optJSONArray("tasks").map { task(it) },
+        quotes = o.optJSONArray("quotes").map {
+            PersonQuote(it.getLong("id"), it.optString("text"), it.optString("started_at"), it.longOrNull("conversation_id"))
+        },
+        together = o.optJSONArray("together").map { PersonTogether(personRef(it), it.optInt("conversations")) },
+        suggestions = o.optJSONArray("suggestions").map {
+            NameSuggestion(it.getLong("id"), o.getLong("id"), it.optString("name"), it.str("evidence"))
+        },
+        sameName = o.longOrNull("same_name"),
+    )
+
     // ---------------------------------------------------------------- разбор JSON
     private fun conversation(o: JSONObject) = ConversationItem(
         id = o.getLong("id"),
@@ -422,6 +583,8 @@ object Api {
         preview = o.str("preview"),
         emoji = o.str("emoji"),
         durationSec = o.optInt("duration_sec"),
+        people = o.optJSONArray("people").map { personRef(it) },
+        topics = o.optJSONArray("topics").strings(),
     )
 
     private fun task(o: JSONObject) = TaskItem(
@@ -438,6 +601,7 @@ object Api {
             TaskExport(it.optString("ext"), it.str("name"), it.str("icon"), it.optBoolean("ok"), it.str("ref"))
         },
         createdAt = o.optString("created_at"),
+        personId = o.longOrNull("person_id"),
     )
 
     private fun memory(o: JSONObject) = MemoryItem(
@@ -452,6 +616,8 @@ object Api {
 private fun JSONObject.str(key: String): String? = if (isNull(key)) null else optString(key).ifBlank { null }
 
 private fun JSONObject.intOrNull(key: String): Int? = if (isNull(key)) null else optInt(key)
+
+private fun JSONObject.longOrNull(key: String): Long? = if (isNull(key)) null else optLong(key)
 
 private fun JSONObject.dbl(key: String): Double? = if (isNull(key)) null else optDouble(key)
 

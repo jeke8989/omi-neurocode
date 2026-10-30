@@ -1,7 +1,10 @@
 package codes.neuro.neurosoft.ui
 
 import android.content.Intent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,8 +23,10 @@ import androidx.compose.ui.unit.dp
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ConversationDetail
+import codes.neuro.neurosoft.net.Segment
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(id: Long) {
     val context = LocalContext.current
@@ -33,6 +38,7 @@ fun ConversationScreen(id: Long) {
     val c = Mn.c
     val reprocessed = stringResource(R.string.reprocess_started)
     val speakerLabel = stringResource(R.string.speaker)
+    var who by remember { mutableStateOf<Segment?>(null) }
 
     fun reload() {
         scope.launch {
@@ -74,6 +80,18 @@ fun ConversationScreen(id: Long) {
     }
 
     val d = state.data
+    // подписи говорящих: имя, «Я», «Голос 3»; без отпечатка — «Спикер 1»
+    val labels = HashMap<Long, String>()
+    d?.people?.values?.forEach { labels[it.id] = personLabel(it) }
+    fun label(s: Segment): String? = s.personId?.let { pid -> labels[pid]?.let { if (s.sure) it else "$it?" } }
+        ?: s.speaker?.let { "$speakerLabel ${it + 1}" }
+
+    who?.let { seg ->
+        WhoIsThisSheet(seg, d?.people.orEmpty(), onDismiss = { who = null }, onDone = {
+            who = null
+            reload()
+        })
+    }
     Column(Modifier.fillMaxSize()) {
         TopBar(null, { Nav.pop() }) {
             if (d != null) {
@@ -85,7 +103,7 @@ fun ConversationScreen(id: Long) {
                         d.item.summary?.let { append(it).append("\n\n") }
                         d.segments.forEach { s ->
                             append(fmt.time(s.startedAt)).append("  ")
-                            s.speaker?.let { append("$speakerLabel ${it + 1}: ") }
+                            label(s)?.let { append(it).append(": ") }
                             append(s.text).append("\n")
                         }
                     }
@@ -108,6 +126,16 @@ fun ConversationScreen(id: Long) {
                     MetaPill(Icons.Calendar, fmt.dayShortTitle(fmt.dayOf(d.item.startedAt)))
                     MetaPill(Icons.Clock, fmt.time(d.item.startedAt) + "–" + fmt.time(d.item.endedAt))
                     if (d.item.durationSec > 0) MetaPill(Icons.Wave, fmt.duration(d.item.durationSec.toLong()))
+                }
+                // кто участвовал: тап — карточка человека
+                val present = d.people.values.filter { !it.ignored }.sortedByDescending { it.isOwner }
+                if (present.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        present.forEach { p ->
+                            Chip(personLabel(p), false, { Nav.push(Route.Person(p.id)) }, leading = { Avatar(p, 24.dp) })
+                        }
+                    }
                 }
                 when (d.item.status) {
                     "open", "processing" -> Txt(stringResource(R.string.status_processing), T.caption, c.graphite,
@@ -151,23 +179,39 @@ fun ConversationScreen(id: Long) {
                 SectionTitle(stringResource(R.string.transcript))
                 if (d.segments.isEmpty()) {
                     Txt(stringResource(R.string.transcript_empty), T.small, c.graphite, Modifier.padding(horizontal = 22.dp))
+                } else if (d.people.values.any { it.name == null && !it.isOwner } || d.segments.any { it.personId != null && !it.sure }) {
+                    Txt(stringResource(R.string.who_hint), T.caption, c.graphite,
+                        Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp))
                 }
+                val byPerson = d.people.isNotEmpty()
                 Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    var lastSpeaker: Int? = -1
+                    var last: String? = "\u0000"
                     d.segments.forEach { s ->
-                        val other = (s.speaker ?: 0) % 2 == 1
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (other) Alignment.End else Alignment.Start) {
-                            if (s.speaker != lastSpeaker) {
-                                Txt(listOfNotNull(s.speaker?.let { "$speakerLabel ${it + 1}" }, fmt.time(s.startedAt))
-                                    .joinToString(", "), T.tiny, c.graphite,
-                                    Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                        val ref = s.personId?.let { d.people[it] }
+                        // «я» — справа, как в мессенджере; без голосов — чередуем по номеру спикера
+                        val mine = if (byPerson) ref?.isOwner == true else (s.speaker ?: 0) % 2 == 1
+                        val name = label(s)
+                        val key = "${s.personId}:${s.speaker}:${s.sure}"
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+                            if (key != last) {
+                                Row(Modifier.padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
+                                    .tap({ if (s.id > 0) who = s }).padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    if (byPerson) {
+                                        Avatar(ref, 22.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+                                    Txt(listOfNotNull(name, fmt.time(s.startedAt)).joinToString(", "), T.tiny,
+                                        if (ref != null && !s.sure) c.amber else c.graphite)
+                                }
                             }
-                            Txt(s.text, T.body, c.ink,
+                            Txt(s.text, T.body, if (ref?.ignored == true) c.faint else c.ink,
                                 Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(18.dp))
-                                    .background(if (other) c.raised else c.paper)
+                                    .background(if (mine) c.paper else c.raised)
+                                    .combinedClickable(onClick = {}, onLongClick = { if (s.id > 0) who = s })
                                     .padding(horizontal = 14.dp, vertical = 10.dp))
                         }
-                        lastSpeaker = s.speaker
+                        last = key
                     }
                 }
                 Group {

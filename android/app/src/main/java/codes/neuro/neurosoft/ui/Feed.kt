@@ -8,7 +8,9 @@ import codes.neuro.neurosoft.net.ConversationItem
 import codes.neuro.neurosoft.net.DayInfo
 import codes.neuro.neurosoft.net.DiaryInfo
 import codes.neuro.neurosoft.net.Features
+import codes.neuro.neurosoft.net.Graph
 import codes.neuro.neurosoft.net.ModelTask
+import codes.neuro.neurosoft.net.PeopleInfo
 import codes.neuro.neurosoft.net.TaskItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +51,8 @@ object Repo {
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
     val chat = Cached<ChatState> { Api.chat() }
+    val people = Cached<PeopleInfo> { Api.people() }
+    val graph = Cached<Graph> { Api.graph(365) }
     private val byDay = HashMap<String, Cached<List<ConversationItem>>>()
 
     @Synchronized
@@ -80,6 +84,8 @@ sealed interface Route {
     data object Extensions : Route
     data class Extension(val id: String) : Route
     data object Memories : Route
+    data class Person(val id: Long) : Route
+    data object VoicesSettings : Route
 }
 
 object Nav {

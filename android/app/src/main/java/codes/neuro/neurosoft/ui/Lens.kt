@@ -57,7 +57,7 @@ fun rememberLensState(): LensState {
 }
 
 @Composable
-private fun reducedMotion(): Boolean {
+fun reducedMotion(): Boolean {
     val context = LocalContext.current
     return remember {
         try {

@@ -53,7 +53,7 @@ import java.time.LocalDate
 
 @Composable
 fun HomeScreen() {
-    val pager = rememberPagerState(initialPage = HomeState.page.value) { 3 }
+    val pager = rememberPagerState(initialPage = HomeState.page.value) { 4 }
     val scope = rememberCoroutineScope()
     var calendar by remember { mutableStateOf(false) }
     LaunchedEffect(pager.currentPage) { HomeState.page.value = pager.currentPage }
@@ -61,13 +61,15 @@ fun HomeScreen() {
     Column(Modifier.fillMaxSize()) {
         HomeTopBar(onCalendar = { calendar = true })
         TextTabs(
-            listOf(stringResource(R.string.tab_home), stringResource(R.string.tab_tasks), stringResource(R.string.tab_diary)),
+            listOf(stringResource(R.string.tab_home), stringResource(R.string.tab_tasks), stringResource(R.string.tab_people),
+                stringResource(R.string.tab_diary)),
             pager.currentPage,
         ) { scope.launch { pager.animateScrollToPage(it) } }
         HorizontalPager(pager, Modifier.weight(1f)) { page ->
             when (page) {
                 0 -> HomeTab()
                 1 -> TasksTab()
+                2 -> PeopleTab()
                 else -> DiaryTab()
             }
         }
@@ -144,7 +146,7 @@ private fun TextTabs(titles: List<String>, selected: Int, onSelect: (Int) -> Uni
         val scale = remember(titles, available) {
             val words = titles.sumOf { measurer.measure(it, T.display).size.width }
             val gaps = with(density) { 20.dp.toPx() } * (titles.size - 1)
-            (available / (words + gaps)).coerceIn(0.68f, 1f)
+            (available / (words + gaps)).coerceIn(0.6f, 1f)
         }
         val style = T.display.copy(fontSize = T.display.fontSize * scale, lineHeight = T.display.lineHeight * scale)
         Row(
@@ -339,6 +341,16 @@ fun ConversationRow(c: ConversationItem, fmt: Fmt, showDay: Boolean = false) {
                     Icon(Icons.Tasks, null, tint = colors.graphite, modifier = Modifier.size(13.dp))
                     Spacer(Modifier.width(3.dp))
                     Txt("${c.tasksCount}", T.caption, colors.graphite)
+                }
+                // с кем говорили (кроме владельца): «Анна, Голос 3 +1»
+                val others = c.people.filter { !it.isOwner }
+                if (others.isNotEmpty()) {
+                    Spacer(Modifier.width(10.dp))
+                    Icon(Icons.Person, null, tint = colors.graphite, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(3.dp))
+                    val names = others.take(2).map { personLabel(it) }.joinToString(", ") +
+                        if (others.size > 2) " +${others.size - 2}" else ""
+                    Txt(names, T.caption, colors.graphite, maxLines = 1)
                 }
             }
         }

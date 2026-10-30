@@ -91,6 +91,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("photo_auto", false)
         set(value) = sp.edit().putBoolean("photo_auto", value).apply()
 
+    /** «Это вы?» — пользователь ответил «нет» для этого голоса, больше не спрашиваем. */
+    var ownerDismissed: Long
+        get() = sp.getLong("owner_dismissed", 0L)
+        set(value) = sp.edit().putLong("owner_dismissed", value).apply()
+
     var photoSyncedUntil: Long
         get() = sp.getLong("photo_synced_until", 0L)
         set(value) = sp.edit().putLong("photo_synced_until", value).apply()

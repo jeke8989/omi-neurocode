@@ -113,6 +113,15 @@ fun TaskRow(t: TaskItem, onToggle: () -> Unit) {
             Txt(t.text, if (done) T.body.copy(textDecoration = TextDecoration.LineThrough) else T.body,
                 if (done) c.graphite else c.ink, maxLines = 6)
             val source = sourceLabel(t)
+            t.assignee?.let { who ->
+                val pid = t.personId
+                Row(Modifier.padding(top = 4.dp).then(if (pid != null) Modifier.quietTap { Nav.push(Route.Person(pid)) }
+                    else Modifier), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Person, null, tint = if (pid != null) c.lens else c.graphite, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Txt(who, T.caption, if (pid != null) c.lens else c.graphite, maxLines = 1)
+                }
+            }
             if (t.due != null || source != null) {
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     t.due?.let { due ->

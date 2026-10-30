@@ -132,6 +132,11 @@ fun SettingsScreen() {
                 subtitle = stringResource(R.string.integrations_sub), onClick = { Nav.push(Route.Extensions) }) }
         }
 
+        Group(stringResource(R.string.tab_people)) {
+            item { ListRow(stringResource(R.string.voices_title), icon = Icons.People, chevron = true,
+                subtitle = stringResource(R.string.voices_settings_sub), onClick = { Nav.push(Route.VoicesSettings) }) }
+        }
+
         Group(stringResource(R.string.tab_diary)) {
             item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Book, chevron = true,
                 value = features.data?.let { stringResource(if (it.diary) R.string.on else R.string.off) },
