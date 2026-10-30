@@ -83,7 +83,7 @@ def test_voice_question_through_agent(conn, monkeypatch):  # noqa: F811
 
     # пустое распознавание -> просьба повторить
     monkeypatch.setattr(llm, "transcribe", lambda *a, **k: {"text": " "})
-    assert "повторите" in asyncio.run(gw.answer_voice(DEVICE, "q3", voice(1.0)))["answer"]
+    assert "ещё раз" in asyncio.run(gw.answer_voice(DEVICE, "q3", voice(1.0)))["answer"]
 
 
 def test_model_choice_and_usage(conn, monkeypatch):  # noqa: F811

@@ -136,12 +136,13 @@ def test_full_pipeline(conn, monkeypatch):
     def fake_llm(conn_, task, system, user, **kw):
         assert task in ("summary", "remember", "ask")
         assert "Спикер 1:" in user or task == "ask"
-        if system is agent.SUMMARY_SYSTEM:
+        if system.startswith(agent.SUMMARY_SYSTEM):
+            assert "по-русски" in system  # язык приложения по умолчанию
             return {"title": "Отчёт к пятнице", "summary": "Договорились подготовить отчёт.",
                     "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "assignee": None, "target": "notion"},
                               {"text": "Починить синхронизацию", "due": "null", "target": "github"}, {"text": ""}],
                     "memories": ["Отчёт нужен к пятнице"]}
-        if system is agent.REMEMBER_SYSTEM:
+        if system.startswith(agent.REMEMBER_SYSTEM):
             return {"memory": "Отчёт к пятнице", "tasks": []}
         return {"answer": "Создать задачу по отчёту", "tasks": [{"text": "Задача из команды"}], "memories": []}
 

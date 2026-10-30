@@ -20,7 +20,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, llm
+from . import config, i18n, llm
 from .assistant import TZ, WEEKDAYS
 
 log = logging.getLogger("neuro.diary")
@@ -87,7 +87,8 @@ def visits(points: list[dict], radius_m: float = 200, min_minutes: float = 10) -
 
 
 def place_name(conn, lat: float, lon: float) -> str | None:
-    key = f"{lat:.3f},{lon:.3f}"
+    lang = i18n.lang(conn)
+    key = f"{lat:.3f},{lon:.3f}" if lang == "ru" else f"{lang}:{lat:.3f},{lon:.3f}"
     row = conn.execute("SELECT name FROM places WHERE key = %s", (key,)).fetchone()
     if row:
         return row["name"]
@@ -95,8 +96,8 @@ def place_name(conn, lat: float, lon: float) -> str | None:
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
-            params={"lat": lat, "lon": lon, "format": "jsonv2", "accept-language": "ru", "zoom": 17},
-            headers={"User-Agent": "NeuroSoft-diary/1.0 (personal diary)"}, timeout=10,
+            params={"lat": lat, "lon": lon, "format": "jsonv2", "accept-language": lang, "zoom": 17},
+            headers={"User-Agent": "Mnemo-diary/1.0 (personal diary)"}, timeout=10,
         )
         if r.ok:
             j = r.json()
@@ -159,7 +160,7 @@ def _data_url(jpeg: bytes) -> str:
 
 
 ANALYZE_PROMPT = """Это фото с телефона владельца. Реши, годится ли оно для личного дневника дня.
-Верни строго JSON: {"caption": "что происходит на фото, одна живая фраза по-русски",
+Верни строго JSON: {"caption": "что происходит на фото, одна живая фраза",
 "kind": "moment | screenshot | document | receipt | other",
 "score": число 0–10 — насколько это интересный момент дня (люди, места, еда, события выше; случайные кадры ниже)}"""
 
@@ -173,7 +174,7 @@ def analyze_photo(conn, photo: dict):
     if photo["lat"] is None and meta.get("lat") is not None:
         updates["lat"], updates["lon"] = meta["lat"], meta["lon"]
     msg = llm.chat(conn, "vision", [{"role": "user", "content": [
-        {"type": "text", "text": ANALYZE_PROMPT},
+        {"type": "text", "text": ANALYZE_PROMPT + "\n" + i18n.write_in(i18n.lang(conn))},
         {"type": "image_url", "image_url": {"url": _data_url(jpeg)}},
     ]}], timeout=60)
     result = llm.parse_json(msg.get("content") or "{}")
@@ -276,7 +277,7 @@ def material_text(m: dict, max_photos: int) -> str:
     return "\n".join(lines)
 
 
-DIARY_SYSTEM = """Ты ведёшь личный дневник владельца кулона NeuroSoft. По данным его дня собери красивую ленту.
+DIARY_SYSTEM = """Ты ведёшь личный дневник владельца кулона Mnemo. По данным его дня собери красивую ленту.
 Верни строго JSON:
 {"title": "заголовок дня, до 6 слов",
  "emoji": "одно эмодзи — символ дня",
@@ -286,22 +287,23 @@ DIARY_SYSTEM = """Ты ведёшь личный дневник владельц
  "highlights": [{"time": "ЧЧ:ММ", "emoji": "…", "title": "коротко", "text": "1–2 предложения",
                  "kind": "conversation | place | photo | task | memory | question", "photo_id": число или null}]}
 Правила: 3–8 хайлайтов по времени; только реальные события из данных, ничего не выдумывай;
-photo_id ставь, только если фото относится именно к этому событию; пиши по-русски, живо и без пафоса."""
+photo_id ставь, только если фото относится именно к этому событию; пиши живо и без пафоса."""
 
 
 def generate_day(conn, day: date, force: bool = False) -> bool:
     max_photos = int(get_setting(conn, "diary.photos_per_day") or 3)
     m = material(conn, day)
     text = material_text(m, max_photos)
+    lang = i18n.lang(conn)
     has_content = any(m[k] for k in ("conversations", "questions", "tasks", "memories", "visits", "photos"))
-    content_hash = hashlib.sha256(text.encode()).hexdigest()[:32]
+    content_hash = hashlib.sha256((lang + "\n" + text).encode()).hexdigest()[:32]
     row = conn.execute("SELECT content_hash, status FROM diary_days WHERE day = %s", (day,)).fetchone()
     if not has_content:
         return False
     if row and row["content_hash"] == content_hash and row["status"] == "done" and not force:
         conn.execute("UPDATE diary_days SET generated_at = now() WHERE day = %s", (day,))
         return False
-    result = llm.chat_json(conn, "diary", DIARY_SYSTEM, text)
+    result = llm.chat_json(conn, "diary", DIARY_SYSTEM + "\n" + i18n.write_in(lang), text)
     photo_ids = {p["id"] for p in m["photos"] if p["event"]}
     highlights, used = [], []
     for h in result.get("highlights") or []:

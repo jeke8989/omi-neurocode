@@ -6,26 +6,74 @@
   "version": "1.0.0",
   "author": "Neuro Codes",
   "description": "Новые задачи из ленты автоматически появляются в вашей базе Notion. Агент может создавать там заметки.",
-  "permissions": {"hosts": ["api.notion.com"]},
+  "permissions": {
+    "hosts": [
+      "api.notion.com"
+    ]
+  },
   "settings": [
-    {"key": "token", "title": "Токен интеграции", "secret": true, "required": true,
-     "hint": "notion.so/my-integrations → New integration, затем подключите её к базе (••• → Connections)"},
-    {"key": "database_id", "title": "ID базы задач", "secret": false, "required": true,
-     "hint": "32 символа из ссылки на базу"},
-    {"key": "title_property", "title": "Колонка заголовка", "secret": false, "required": true,
-     "hint": "Обычно Name или Название"}
+    {
+      "key": "token",
+      "title": "Токен интеграции",
+      "secret": true,
+      "required": true,
+      "hint": "notion.so/my-integrations → New integration, затем подключите её к базе (••• → Connections)"
+    },
+    {
+      "key": "database_id",
+      "title": "ID базы задач",
+      "secret": false,
+      "required": true,
+      "hint": "32 символа из ссылки на базу"
+    },
+    {
+      "key": "title_property",
+      "title": "Колонка заголовка",
+      "secret": false,
+      "required": true,
+      "hint": "Обычно Name или Название"
+    }
   ],
   "on_task": {
     "title": "Отправлять новые задачи в Notion",
     "http": {
       "method": "POST",
       "url": "https://api.notion.com/v1/pages",
-      "headers": {"Authorization": "Bearer {settings.token}", "Notion-Version": "2022-06-28"},
+      "headers": {
+        "Authorization": "Bearer {settings.token}",
+        "Notion-Version": "2022-06-28"
+      },
       "body": {
-        "parent": {"database_id": "{settings.database_id}"},
-        "properties": {"{settings.title_property}": {"title": [{"text": {"content": "{text}"}}]}},
-        "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [
-          {"type": "text", "text": {"content": "Срок: {due} · {source} · {conversation} — NeuroSoft"}}]}}]
+        "parent": {
+          "database_id": "{settings.database_id}"
+        },
+        "properties": {
+          "{settings.title_property}": {
+            "title": [
+              {
+                "text": {
+                  "content": "{text}"
+                }
+              }
+            ]
+          }
+        },
+        "children": [
+          {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+              "rich_text": [
+                {
+                  "type": "text",
+                  "text": {
+                    "content": "Срок: {due} · {source} · {conversation} — NeuroSoft"
+                  }
+                }
+              ]
+            }
+          }
+        ]
       }
     }
   },
@@ -34,17 +82,126 @@
       "name": "create_note",
       "title": "Создаю заметку в Notion",
       "description": "Создать страницу-заметку в базе Notion владельца (заголовок и текст).",
-      "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "text": {"type": "string"}}, "required": ["title", "text"]},
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "text"
+        ]
+      },
       "http": {
         "method": "POST",
         "url": "https://api.notion.com/v1/pages",
-        "headers": {"Authorization": "Bearer {settings.token}", "Notion-Version": "2022-06-28"},
+        "headers": {
+          "Authorization": "Bearer {settings.token}",
+          "Notion-Version": "2022-06-28"
+        },
         "body": {
-          "parent": {"database_id": "{settings.database_id}"},
-          "properties": {"{settings.title_property}": {"title": [{"text": {"content": "{title}"}}]}},
-          "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": "{text}"}}]}}]
+          "parent": {
+            "database_id": "{settings.database_id}"
+          },
+          "properties": {
+            "{settings.title_property}": {
+              "title": [
+                {
+                  "text": {
+                    "content": "{title}"
+                  }
+                }
+              ]
+            }
+          },
+          "children": [
+            {
+              "object": "block",
+              "type": "paragraph",
+              "paragraph": {
+                "rich_text": [
+                  {
+                    "type": "text",
+                    "text": {
+                      "content": "{text}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "description": "New tasks from your feed appear in your Notion database automatically. The agent can also create notes there.",
+      "tools": {
+        "create_note": "Creating a Notion note"
+      },
+      "task_sync": "Send new tasks to Notion",
+      "settings": {
+        "token": {
+          "title": "Integration token",
+          "hint": "notion.so/my-integrations → New integration, then connect it to the database (••• → Connections)"
+        },
+        "database_id": {
+          "title": "Task database ID",
+          "hint": "32 characters from the database link"
+        },
+        "title_property": {
+          "title": "Title column",
+          "hint": "Usually Name"
+        }
+      }
+    },
+    "tr": {
+      "description": "Akıştaki yeni görevler Notion veritabanınızda otomatik olarak görünür. Ajan orada not da oluşturabilir.",
+      "tools": {
+        "create_note": "Notion'da not oluşturuyorum"
+      },
+      "task_sync": "Yeni görevleri Notion'a gönder",
+      "settings": {
+        "token": {
+          "title": "Entegrasyon token'ı",
+          "hint": "notion.so/my-integrations → New integration, sonra veritabanına bağlayın (••• → Connections)"
+        },
+        "database_id": {
+          "title": "Görev veritabanı ID",
+          "hint": "Veritabanı bağlantısındaki 32 karakter"
+        },
+        "title_property": {
+          "title": "Başlık sütunu",
+          "hint": "Genellikle Name"
+        }
+      }
+    },
+    "es": {
+      "description": "Las tareas nuevas aparecen automáticamente en tu base de datos de Notion. El agente también puede crear notas allí.",
+      "tools": {
+        "create_note": "Creando una nota en Notion"
+      },
+      "task_sync": "Enviar tareas nuevas a Notion",
+      "settings": {
+        "token": {
+          "title": "Token de integración",
+          "hint": "notion.so/my-integrations → New integration y conéctala a la base (••• → Connections)"
+        },
+        "database_id": {
+          "title": "ID de la base de tareas",
+          "hint": "32 caracteres del enlace de la base"
+        },
+        "title_property": {
+          "title": "Columna del título",
+          "hint": "Normalmente Name"
+        }
+      }
+    }
+  }
 }

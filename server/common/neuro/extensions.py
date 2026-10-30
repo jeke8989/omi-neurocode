@@ -14,7 +14,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 import requests
 
-from . import config
+from . import config, i18n
 
 log = logging.getLogger("neuro.extensions")
 
@@ -64,16 +64,26 @@ def validate(m: dict) -> dict:
         if bool(t.get("http")) == bool(t.get("webhook")):
             raise ExtensionError(f"{t['name']}: нужен ровно один из http или webhook")
         url = (t.get("http") or t.get("webhook") or {}).get("url", "")
-        _check_host(_static_host(url), hosts)
+        for host in _template_hosts(url):
+            _check_host(host, hosts)
     hook = m.get("on_task")
     if hook is not None:
         if not isinstance(hook, dict) or bool(hook.get("http")) == bool(hook.get("webhook")):
             raise ExtensionError("on_task: нужен ровно один из http или webhook")
-        _check_host(_static_host((hook.get("http") or hook.get("webhook"))["url"]), hosts)
+        for host in _template_hosts((hook.get("http") or hook.get("webhook"))["url"]):
+            _check_host(host, hosts)
     for s in m.get("settings") or []:
         if not re.match(r"^[a-z0-9_]{1,32}$", str(s.get("key", ""))):
             raise ExtensionError("settings[].key: a-z, 0-9, _")
     return m
+
+
+def _template_hosts(url_template: str) -> list[str]:
+    """Все домены, куда может пойти запрос по шаблону. {app.locale} в домене разрешён (ru.wikipedia.org…):
+    его задаёт приложение, а не модель, и каждый вариант должен быть в permissions.hosts."""
+    if "{app.locale}" in (urlparse(url_template).netloc or ""):
+        return [_static_host(url_template.replace("{app.locale}", code)) for code in i18n.LANGS]
+    return [_static_host(url_template)]
 
 
 def _static_host(url_template: str) -> str:
@@ -136,8 +146,30 @@ def load_manifest(entry_or_url) -> tuple[dict, str]:
     return validate(_read_json(src)), src
 
 
-def public_manifest(m: dict) -> dict:
+def localize(m: dict, lang: str) -> dict:
+    """Манифест с переводом из m["i18n"][lang]: name, description, task_sync, tools{имя: заголовок},
+    settings{key: {title, hint}}. Без перевода — как есть."""
+    tr = (m.get("i18n") or {}).get(i18n.normalize(lang)) if lang else None
+    if not isinstance(tr, dict):
+        return m
+    out = {**m}
+    for key in ("name", "description"):
+        if isinstance(tr.get(key), str) and tr[key].strip():
+            out[key] = tr[key]
+    tools = tr.get("tools") or {}
+    out["tools"] = [{**t, "title": tools[t["name"]]} if isinstance(tools.get(t["name"]), str) else t
+                    for t in m.get("tools") or []]
+    if m.get("on_task") and isinstance(tr.get("task_sync"), str):
+        out["on_task"] = {**m["on_task"], "title": tr["task_sync"]}
+    sets = tr.get("settings") or {}
+    out["settings"] = [{**s, **{k: v for k, v in (sets.get(s["key"]) or {}).items() if k in ("title", "hint")}}
+                       for s in m.get("settings") or []]
+    return out
+
+
+def public_manifest(m: dict, lang: str | None = None) -> dict:
     """Что показываем в приложении (без внутренностей запросов)."""
+    m = localize(m, lang) if lang else m
     return {
         "id": m["id"], "name": m["name"], "version": m["version"], "description": m["description"],
         "author": m.get("author"), "icon": m.get("icon"), "homepage": m.get("homepage"),
@@ -174,6 +206,15 @@ def tool_specs(rows: list[dict]) -> tuple[list[dict], dict[str, tuple[dict, dict
     return specs, index
 
 
+def _lookup(key: str, args: dict, settings: dict):
+    """{arg} — аргумент от агента, {settings.x} — настройка пользователя, {app.locale} — язык приложения."""
+    if key.startswith("settings."):
+        return settings.get(key[9:], "")
+    if key.startswith("app."):
+        return settings.get(key, "")
+    return args.get(key, "")
+
+
 def _render(value, args: dict, settings: dict, url_mode: bool = False):
     if isinstance(value, dict):
         return {(_render(k, args, settings) if isinstance(k, str) else k): _render(v, args, settings)
@@ -184,12 +225,10 @@ def _render(value, args: dict, settings: dict, url_mode: bool = False):
         return value
     whole = PLACEHOLDER.fullmatch(value)
     if whole and not url_mode:  # "{amount}" целиком -> сохраняем тип (число, bool)
-        key = whole.group(1)
-        return settings.get(key[9:], "") if key.startswith("settings.") else args.get(key, "")
+        return _lookup(whole.group(1), args, settings)
 
     def sub(mt):
-        key = mt.group(1)
-        v = settings.get(key[9:], "") if key.startswith("settings.") else args.get(key, "")
+        v = _lookup(mt.group(1), args, settings)
         v = "" if v is None else str(v)
         return quote(v, safe=":@") if url_mode else v
 
@@ -222,7 +261,8 @@ def call_hook(row: dict, args: dict) -> tuple[bool, str]:
 
 def run_tool(row: dict, tool: dict, args: dict, context: dict | None = None) -> str:
     m = row["manifest"]
-    settings = row.get("settings") or {}
+    settings = {**(row.get("settings") or {}),
+                "app.locale": i18n.normalize((context or {}).get("locale") or i18n.DEFAULT)}
     hosts = (m.get("permissions") or {}).get("hosts") or []
     try:
         if tool.get("http"):

@@ -11,14 +11,14 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, diary, extensions
+from neuro import agent_core, diary, extensions, i18n
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
 
 log = logging.getLogger("neuro.agent")
 MAX_ATTEMPTS = 3
 
-SUMMARY_SYSTEM = f"""Ты — ассистент NeuroSoft. Тебе дают расшифровку разговора, записанного носимым микрофоном владельца.
+SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают расшифровку разговора, записанного носимым микрофоном владельца.
 Расшифровка автоматическая и может содержать ошибки распознавания.
 Верни строго JSON-объект без пояснений и без markdown:
 {{"title": "название разговора, до 8 слов",
@@ -27,8 +27,8 @@ SUMMARY_SYSTEM = f"""Ты — ассистент NeuroSoft. Тебе дают р
  "tasks": [{TASK_SCHEMA}],
  "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"]}}
 Правила: задачи — только явные поручения, обещания и договорённости из разговора, ничего не выдумывай.
-Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "Без содержания",
-summary = "", списки пустые. Пиши по-русски."""
+Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "-",
+summary = "", списки пустые."""
 
 REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кнопку «запомни это». Тебе дан фрагмент расшифровки перед нажатием
 (может содержать ошибки распознавания). Верни строго JSON:
@@ -36,10 +36,10 @@ REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кн
 Задачи — только если во фрагменте есть явное поручение или договорённость, иначе пустой список."""
 
 
-def first_words(segs: list[dict], n: int = 7) -> str:
+def first_words(segs: list[dict], n: int = 7, lang: str = i18n.DEFAULT) -> str:
     words = " ".join(s["text"] for s in segs).split()
     title = " ".join(words[:n])
-    return (title + "…") if len(words) > n else (title or "Без содержания")
+    return (title + "…") if len(words) > n else (title or i18n.t(lang, "conversation.empty"))
 
 
 # ---------------------------------------------------------------------------
@@ -93,17 +93,21 @@ def summarize_one(conn, conv_id: int):
     summary = None
     emoji = "💬"
     text_len = sum(len(s["text"]) for s in segs)
+    lang = i18n.lang(conn)
     if not segs:
-        title = "Без содержания"
+        title = i18n.t(lang, "conversation.empty")
     elif llm.configured() and text_len >= 40:
-        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM, transcript_text(segs))
-        title = str(result.get("title") or first_words(segs))[:200]
+        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + i18n.write_in(lang), transcript_text(segs))
+        title = str(result.get("title") or "").strip()
+        if not title or title == "-":
+            title = i18n.t(lang, "conversation.empty") if not result.get("summary") else first_words(segs, lang=lang)
+        title = title[:200]
         emoji = str(result.get("emoji") or "💬").strip()[:8] or "💬"
         summary = str(result.get("summary") or "").strip() or None
         tasks = clean_tasks(result.get("tasks"))
         memories = clean_list(result.get("memories"))
     else:
-        title = first_words(segs)
+        title = first_words(segs, lang=lang)
 
     with conn.transaction():
         conn.execute(
@@ -187,9 +191,10 @@ def handle_remember(conn, ev: dict, segs: list[dict]):
     when = ev["ts"].astimezone(TZ).strftime("%d.%m %H:%M")
     tasks: list[dict] = []
     if not segs:
-        memory = f"Отметка {when} (речь рядом не распознана)"
+        memory = i18n.t(i18n.lang(conn), "memory.mark", when=when)
     elif llm.configured():
-        result = llm.chat_json(conn, "remember", REMEMBER_SYSTEM, transcript_text(segs))
+        result = llm.chat_json(conn, "remember", REMEMBER_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
+                               transcript_text(segs))
         memory = str(result.get("memory") or "").strip() or " ".join(s["text"] for s in segs)
         tasks = clean_tasks(result.get("tasks"))
     else:
@@ -239,7 +244,7 @@ def task_details(t: dict) -> str:
         parts.append(f"Исполнитель: {t['assignee']}")
     if t.get("conversation_title"):
         parts.append(f"Из разговора: {t['conversation_title']}")
-    parts.append("Создано NeuroSoft")
+    parts.append("Mnemo")
     return "\n".join(parts)
 
 

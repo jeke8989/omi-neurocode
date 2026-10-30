@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "NeuroSoft Marketplace",
+  "name": "Mnemo Marketplace",
   "extensions": [
     {
       "id": "notion",
@@ -14,7 +14,18 @@
         "заметки"
       ],
       "description": "Лента задач → ваша база Notion автоматически. Агент создаёт заметки.",
-      "manifest": "extensions/notion/manifest.json"
+      "manifest": "extensions/notion/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "Your task feed → your Notion database, automatically. The agent creates notes."
+        },
+        "tr": {
+          "description": "Görev akışı → Notion veritabanınız, otomatik. Ajan not oluşturur."
+        },
+        "es": {
+          "description": "Tu lista de tareas → tu base de Notion, automáticamente. El agente crea notas."
+        }
+      }
     },
     {
       "id": "github",
@@ -28,7 +39,18 @@
         "разработка"
       ],
       "description": "Задачи на разработку из разговоров → issues в репозитории.",
-      "manifest": "extensions/github/manifest.json"
+      "manifest": "extensions/github/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "Development tasks from conversations → issues in your repository."
+        },
+        "tr": {
+          "description": "Konuşmalardaki geliştirme görevleri → depodaki issue'lar."
+        },
+        "es": {
+          "description": "Tareas de desarrollo de las conversaciones → issues del repositorio."
+        }
+      }
     },
     {
       "id": "weather",
@@ -42,7 +64,21 @@
         "open-meteo"
       ],
       "description": "Текущая погода и прогноз на 3 дня по названию города. Без ключей.",
-      "manifest": "extensions/weather/manifest.json"
+      "manifest": "extensions/weather/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "Current weather and a 3-day forecast by city name. No keys.",
+          "name": "Weather"
+        },
+        "tr": {
+          "description": "Şehir adına göre güncel hava ve 3 günlük tahmin. Anahtar gerekmez.",
+          "name": "Hava durumu"
+        },
+        "es": {
+          "description": "Tiempo actual y previsión a 3 días por ciudad. Sin claves.",
+          "name": "El tiempo"
+        }
+      }
     },
     {
       "id": "currency",
@@ -55,7 +91,21 @@
         "финансы"
       ],
       "description": "Актуальные курсы валют и пересчёт сумм. Без ключей.",
-      "manifest": "extensions/currency/manifest.json"
+      "manifest": "extensions/currency/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "Current exchange rates and conversions. No keys needed.",
+          "name": "Exchange rates"
+        },
+        "tr": {
+          "description": "Güncel döviz kurları ve çevirme. Anahtar gerekmez.",
+          "name": "Döviz kurları"
+        },
+        "es": {
+          "description": "Tipos de cambio actuales y conversiones. Sin claves.",
+          "name": "Tipos de cambio"
+        }
+      }
     },
     {
       "id": "wikipedia",
@@ -67,8 +117,22 @@
       "tags": [
         "знания"
       ],
-      "description": "Поиск статей и краткие справки из русской Википедии.",
-      "manifest": "extensions/wikipedia/manifest.json"
+      "description": "Поиск статей и краткие справки из Википедии на вашем языке.",
+      "manifest": "extensions/wikipedia/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "Article search and short summaries from Wikipedia in your language.",
+          "name": "Wikipedia"
+        },
+        "tr": {
+          "description": "Kendi dilinizdeki Vikipedi'den makale arama ve kısa özetler.",
+          "name": "Vikipedi"
+        },
+        "es": {
+          "description": "Búsqueda de artículos y resúmenes breves de Wikipedia en tu idioma.",
+          "name": "Wikipedia"
+        }
+      }
     },
     {
       "id": "telegram",
@@ -81,7 +145,18 @@
         "сообщения"
       ],
       "description": "Агент отправляет сообщения в ваш Telegram через своего бота: «пришли мне итоги в телеграм».",
-      "manifest": "extensions/telegram/manifest.json"
+      "manifest": "extensions/telegram/manifest.json",
+      "i18n": {
+        "en": {
+          "description": "The agent sends messages to your Telegram via your bot: “send me the summary on Telegram”."
+        },
+        "tr": {
+          "description": "Ajan botunuz üzerinden Telegram'ınıza mesaj gönderir: “özeti Telegram'dan gönder”."
+        },
+        "es": {
+          "description": "El agente envía mensajes a tu Telegram con tu bot: «mándame el resumen por Telegram»."
+        }
+      }
     }
   ]
 }

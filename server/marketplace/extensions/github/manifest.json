@@ -6,12 +6,31 @@
   "version": "1.0.0",
   "author": "Neuro Codes",
   "description": "Задачи на разработку из разговоров становятся issues в вашем репозитории. Агент может создавать issues по просьбе.",
-  "permissions": {"hosts": ["api.github.com"]},
+  "permissions": {
+    "hosts": [
+      "api.github.com"
+    ]
+  },
   "settings": [
-    {"key": "token", "title": "GitHub токен", "secret": true, "required": true,
-     "hint": "Fine-grained token с правом Issues: Read and write для нужного репозитория"},
-    {"key": "owner", "title": "Владелец (организация)", "secret": false, "required": true},
-    {"key": "repo", "title": "Репозиторий", "secret": false, "required": true}
+    {
+      "key": "token",
+      "title": "GitHub токен",
+      "secret": true,
+      "required": true,
+      "hint": "Fine-grained token с правом Issues: Read and write для нужного репозитория"
+    },
+    {
+      "key": "owner",
+      "title": "Владелец (организация)",
+      "secret": false,
+      "required": true
+    },
+    {
+      "key": "repo",
+      "title": "Репозиторий",
+      "secret": false,
+      "required": true
+    }
   ],
   "on_task": {
     "title": "Задачи на разработку → GitHub Issues",
@@ -19,8 +38,14 @@
     "http": {
       "method": "POST",
       "url": "https://api.github.com/repos/{settings.owner}/{settings.repo}/issues",
-      "headers": {"Authorization": "Bearer {settings.token}", "Accept": "application/vnd.github+json"},
-      "body": {"title": "{text}", "body": "Срок: {due}\nИсточник: {source}\nРазговор: {conversation}\n\nСоздано NeuroSoft"}
+      "headers": {
+        "Authorization": "Bearer {settings.token}",
+        "Accept": "application/vnd.github+json"
+      },
+      "body": {
+        "title": "{text}",
+        "body": "Срок: {due}\nИсточник: {source}\nРазговор: {conversation}\n\nСоздано NeuroSoft"
+      }
     }
   },
   "tools": [
@@ -28,13 +53,91 @@
       "name": "create_issue",
       "title": "Создаю issue",
       "description": "Создать issue в GitHub-репозитории владельца.",
-      "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}}, "required": ["title"]},
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
       "http": {
         "method": "POST",
         "url": "https://api.github.com/repos/{settings.owner}/{settings.repo}/issues",
-        "headers": {"Authorization": "Bearer {settings.token}", "Accept": "application/vnd.github+json"},
-        "body": {"title": "{title}", "body": "{body}"}
+        "headers": {
+          "Authorization": "Bearer {settings.token}",
+          "Accept": "application/vnd.github+json"
+        },
+        "body": {
+          "title": "{title}",
+          "body": "{body}"
+        }
       }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "description": "Development tasks from your conversations become issues in your repository. The agent can also open issues on request.",
+      "tools": {
+        "create_issue": "Creating an issue"
+      },
+      "task_sync": "Development tasks → GitHub Issues",
+      "settings": {
+        "token": {
+          "title": "GitHub token",
+          "hint": "Fine-grained token with Issues: Read and write for the repository"
+        },
+        "owner": {
+          "title": "Owner (organization)"
+        },
+        "repo": {
+          "title": "Repository"
+        }
+      }
+    },
+    "tr": {
+      "description": "Konuşmalardaki geliştirme görevleri deponuzda issue olur. Ajan istek üzerine de issue açabilir.",
+      "tools": {
+        "create_issue": "Issue oluşturuyorum"
+      },
+      "task_sync": "Geliştirme görevleri → GitHub Issues",
+      "settings": {
+        "token": {
+          "title": "GitHub token",
+          "hint": "Depo için Issues: Read and write yetkili fine-grained token"
+        },
+        "owner": {
+          "title": "Sahip (kuruluş)"
+        },
+        "repo": {
+          "title": "Depo"
+        }
+      }
+    },
+    "es": {
+      "description": "Las tareas de desarrollo de tus conversaciones se convierten en issues de tu repositorio. El agente también puede abrirlas cuando se lo pidas.",
+      "tools": {
+        "create_issue": "Creando una issue"
+      },
+      "task_sync": "Tareas de desarrollo → GitHub Issues",
+      "settings": {
+        "token": {
+          "title": "Token de GitHub",
+          "hint": "Token fine-grained con Issues: Read and write para el repositorio"
+        },
+        "owner": {
+          "title": "Propietario (organización)"
+        },
+        "repo": {
+          "title": "Repositorio"
+        }
+      }
+    }
+  }
 }

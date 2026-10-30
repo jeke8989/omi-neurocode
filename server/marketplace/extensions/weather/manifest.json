@@ -6,21 +6,83 @@
   "version": "1.0.0",
   "author": "Neuro Codes",
   "description": "Текущая погода и прогноз на 3 дня. Данные Open-Meteo, без ключей.",
-  "permissions": {"hosts": ["geocoding-api.open-meteo.com", "api.open-meteo.com"]},
+  "permissions": {
+    "hosts": [
+      "geocoding-api.open-meteo.com",
+      "api.open-meteo.com"
+    ]
+  },
   "tools": [
     {
       "name": "find_city",
       "title": "Ищу город",
       "description": "Координаты города по названию. Вызывай перед forecast, если координаты неизвестны.",
-      "parameters": {"type": "object", "properties": {"city": {"type": "string", "description": "название города"}}, "required": ["city"]},
-      "http": {"method": "GET", "url": "https://geocoding-api.open-meteo.com/v1/search?name={city}&count=3&language=ru&format=json"}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "название города"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://geocoding-api.open-meteo.com/v1/search?name={city}&count=3&language={app.locale}&format=json"
+      }
     },
     {
       "name": "forecast",
       "title": "Смотрю прогноз",
       "description": "Текущая погода и прогноз на 3 дня по координатам. weather_code — код WMO.",
-      "parameters": {"type": "object", "properties": {"latitude": {"type": "number"}, "longitude": {"type": "number"}}, "required": ["latitude", "longitude"]},
-      "http": {"method": "GET", "url": "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3"}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ]
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3"
+      }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "name": "Weather",
+      "description": "Current weather and a 3-day forecast. Open-Meteo data, no keys.",
+      "tools": {
+        "find_city": "Finding the city",
+        "forecast": "Checking the forecast"
+      }
+    },
+    "tr": {
+      "name": "Hava durumu",
+      "description": "Güncel hava ve 3 günlük tahmin. Open-Meteo verisi, anahtar gerekmez.",
+      "tools": {
+        "find_city": "Şehri arıyorum",
+        "forecast": "Tahmine bakıyorum"
+      }
+    },
+    "es": {
+      "name": "El tiempo",
+      "description": "Tiempo actual y previsión a 3 días. Datos de Open-Meteo, sin claves.",
+      "tools": {
+        "find_city": "Buscando la ciudad",
+        "forecast": "Consultando la previsión"
+      }
+    }
+  }
 }

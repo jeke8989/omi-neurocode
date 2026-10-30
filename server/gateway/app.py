@@ -25,8 +25,8 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import agent_core, assistant, config, db, diary, extensions, llm
-from neuro.models import CATALOG, TASK_KEYS, TASKS
+from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm
+from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BatchError,
     ChunkWriter,
@@ -633,6 +633,8 @@ async def api_models(request: Request):
                 await conn.execute("DELETE FROM settings WHERE key = %s", (f"model.{task_key}",))
         rows = await (await conn.execute("SELECT key, value FROM settings WHERE key LIKE 'model.%%'")).fetchall()
         chosen = {r["key"][6:]: r["value"] for r in rows}
+        lang_row = await (await conn.execute("SELECT value FROM settings WHERE key = 'app.language'")).fetchone()
+        lang = i18n.normalize(lang_row["value"] if lang_row else None)
         spend = await (await conn.execute(
             """SELECT task, coalesce(sum(cost), 0) AS cost, count(*) AS calls FROM llm_usage
                WHERE created_at > now() - interval '30 days' GROUP BY task"""
@@ -641,13 +643,13 @@ async def api_models(request: Request):
     tasks = []
     for t in TASKS:
         model = chosen.get(t["key"]) or llm.resolve_model(None, t["key"])
-        tasks.append({**t, "model": model, "custom": t["key"] in chosen})
+        tasks.append({**localized_task(t, lang), "model": model, "custom": t["key"] in chosen})
     out = {
         "provider": "openrouter" if llm.is_openrouter() else "custom",
         "configured": llm.configured(),
         "stt_provider": config.STT_PROVIDER,
         "tasks": tasks,
-        "catalog": llm.catalog_with_live_prices(live),
+        "catalog": [localized_model(m, lang) for m in llm.catalog_with_live_prices(live)],
         "spend_30d": {r["task"]: round(float(r["cost"]), 4) for r in spend},
         "spend_30d_total": round(sum(float(r["cost"]) for r in spend), 4),
         "live_prices": live is not None,
@@ -673,11 +675,16 @@ def _execute_run(run_id: int) -> str:
 async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
     """Вопрос с кнопки: распознать -> уровень -> агент. Долгую работу продолжаем в фоне, ответ — в чат."""
     t0 = time.monotonic()
+
+    def current_lang():
+        with db.connect() as conn:
+            return i18n.lang(conn)
+
+    lang = await _run_in_thread(current_lang)
     if len(pcm) < 16000:
-        return {"type": "answer", "question": "", "answer": "Не расслышал вопрос, повторите, пожалуйста."}
+        return {"type": "answer", "question": "", "answer": i18n.t(lang, "voice.not_heard")}
     if not llm.configured():
-        return {"type": "answer", "question": "", "error": True,
-                "answer": "Ассистент не настроен: на сервере нет ключа модели."}
+        return {"type": "answer", "question": "", "error": True, "answer": i18n.t(lang, "voice.no_model")}
 
     def transcribe():
         with db.connect() as conn:
@@ -687,9 +694,9 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
         question = await _run_in_thread(transcribe)
     except Exception:  # noqa: BLE001
         log.exception("ask transcription failed")
-        return {"type": "answer", "question": "", "error": True, "answer": "Не получилось распознать вопрос."}
+        return {"type": "answer", "question": "", "error": True, "answer": i18n.t(lang, "voice.failed")}
     if not question:
-        return {"type": "answer", "question": "", "answer": "Не расслышал вопрос, повторите, пожалуйста."}
+        return {"type": "answer", "question": "", "answer": i18n.t(lang, "voice.not_heard")}
 
     level = agent_core.route(question, "voice")
 
@@ -700,12 +707,12 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
     run_id = await _run_in_thread(start)
     future = _run_in_thread(_execute_run, run_id)
     if level == "deep":
-        answer, pending = "Займусь подробно. Готовый ответ пришлю в чат.", True
+        answer, pending = i18n.t(lang, "voice.deep"), True
     else:
         try:
             answer, pending = await asyncio.wait_for(asyncio.shield(future), timeout=VOICE_BUDGET_SEC), False
         except asyncio.TimeoutError:
-            answer, pending = "Нужно чуть больше времени — ответ будет в чате.", True
+            answer, pending = i18n.t(lang, "voice.later"), True
     latency = int((time.monotonic() - t0) * 1000)
 
     def record():
@@ -785,9 +792,11 @@ async def api_extensions(request: Request):
         rows = await (await conn.execute(
             "SELECT id, manifest, enabled, settings, source_url, installed_at FROM extensions ORDER BY installed_at"
         )).fetchall()
+        lang_row = await (await conn.execute("SELECT value FROM settings WHERE key = 'app.language'")).fetchone()
+    lang = i18n.normalize(lang_row["value"] if lang_row else None)
     installed = []
     for r in rows:
-        pub = extensions.public_manifest(r["manifest"])
+        pub = extensions.public_manifest(r["manifest"], lang)
         filled = {k for k, v in (r["settings"] or {}).items() if v}
         for st in pub["settings"]:
             st["filled"] = st["key"] in filled
@@ -796,7 +805,8 @@ async def api_extensions(request: Request):
         installed.append({**pub, "enabled": r["enabled"], "source_url": r["source_url"],
                           "ready": all(st["filled"] for st in pub["settings"] if st["required"])})
     ids = {e["id"] for e in installed}
-    available = [{k: v for k, v in e.items() if not k.startswith("_") and k != "manifest"}
+    available = [{k: v for k, v in extensions.localize(e, lang).items()
+                  if not k.startswith("_") and k not in ("manifest", "i18n")}
                  for e in reg if e["id"] not in ids]
     return Json({"installed": installed, "available": available})
 
@@ -872,6 +882,21 @@ async def api_features(request: Request):
                 body = await request.json()
             except ValueError:
                 return Json({"error": "bad json"}, status_code=400)
+            if "language" in body:
+                code = i18n.normalize(str(body["language"]))
+                await conn.execute(
+                    """INSERT INTO settings (key, value) VALUES ('app.language', %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (code,))
+                # язык расшифровки по умолчанию следует за языком приложения (а не за STT_LANGUAGE из .env)
+                await conn.execute("INSERT INTO settings (key, value) VALUES ('stt.language', 'app') "
+                                   "ON CONFLICT (key) DO NOTHING")
+            if "stt_language" in body:
+                choice = str(body["stt_language"])
+                if choice not in i18n.STT_CHOICES:
+                    return Json({"error": "unknown language"}, status_code=400)
+                await conn.execute(
+                    """INSERT INTO settings (key, value) VALUES ('stt.language', %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (choice,))
             for name, key in FEATURE_KEYS.items():
                 if name not in body:
                     continue
@@ -893,6 +918,9 @@ async def api_features(request: Request):
         "style": st["diary.style"],
         "photos_per_day": int(st["diary.photos_per_day"] or 3),
         "styles": [{"key": k, "title": v[0]} for k, v in diary.STYLES.items()],
+        "language": i18n.normalize(st.get("app.language")),
+        "stt_language": st.get("stt.language") or config.STT_LANGUAGE or "app",
+        "languages": [{"code": k, "name": v["name"]} for k, v in i18n.LANGS.items()],
     })
 
 

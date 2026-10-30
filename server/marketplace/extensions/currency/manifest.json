@@ -6,14 +6,55 @@
   "version": "1.0.0",
   "author": "Neuro Codes",
   "description": "Курсы валют на сегодня (open.er-api.com), без ключей.",
-  "permissions": {"hosts": ["open.er-api.com"]},
+  "permissions": {
+    "hosts": [
+      "open.er-api.com"
+    ]
+  },
   "tools": [
     {
       "name": "rates",
       "title": "Смотрю курсы",
       "description": "Курсы всех валют относительно базовой (код ISO: USD, EUR, RUB, TRY…). Для пересчёта суммы умножь сам.",
-      "parameters": {"type": "object", "properties": {"base": {"type": "string", "description": "код базовой валюты"}}, "required": ["base"]},
-      "http": {"method": "GET", "url": "https://open.er-api.com/v6/latest/{base}"}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string",
+            "description": "код базовой валюты"
+          }
+        },
+        "required": [
+          "base"
+        ]
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://open.er-api.com/v6/latest/{base}"
+      }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "name": "Exchange rates",
+      "description": "Today's exchange rates (open.er-api.com), no keys needed.",
+      "tools": {
+        "rates": "Checking rates"
+      }
+    },
+    "tr": {
+      "name": "Döviz kurları",
+      "description": "Günün döviz kurları (open.er-api.com), anahtar gerekmez.",
+      "tools": {
+        "rates": "Kurlara bakıyorum"
+      }
+    },
+    "es": {
+      "name": "Tipos de cambio",
+      "description": "Tipos de cambio de hoy (open.er-api.com), sin claves.",
+      "tools": {
+        "rates": "Consultando tipos"
+      }
+    }
+  }
 }

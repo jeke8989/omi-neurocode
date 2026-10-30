@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from neuro import config, db, llm
+from neuro import config, db, i18n, llm
 from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav
 
 log = logging.getLogger("neuro.stt")
@@ -37,7 +37,7 @@ class DeepgramSTT:
     def transcribe(self, pcm: bytes, conn=None) -> list[Seg]:
         params = {
             "model": config.DEEPGRAM_MODEL,
-            "language": config.STT_LANGUAGE,
+            "language": i18n.stt_language(conn) or "multi",
             "punctuate": "true",
             "smart_format": "true",
             "diarize": "true",
@@ -107,7 +107,7 @@ class LocalWhisperSTT:
         audio = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16).astype(np.float32) / 32768.0
         segments, _info = self.model.transcribe(
             audio,
-            language=config.STT_LANGUAGE,
+            language=i18n.stt_language(conn),
             vad_filter=True,
             beam_size=config.WHISPER_BEAM,
             condition_on_previous_text=False,
@@ -235,7 +235,7 @@ def main():
     if provider_cls is None:
         raise SystemExit(f"unknown STT_PROVIDER={config.STT_PROVIDER!r}; use one of {', '.join(PROVIDERS)}")
     stt = provider_cls()
-    log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE)
+    log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE or "app")
     last_requeue = 0.0
     while True:
         try:

@@ -1,4 +1,4 @@
-"""Агент NeuroSoft с уровнями работы (harness).
+"""Агент Mnemo с уровнями работы (harness).
 
 Уровень 1 «быстро»       — голос с кулона: ответ за секунды, до 3 вызовов инструментов.
 Уровень 2 «основательно» — инструменты: поиск, задачи, память, разговоры, расширения (до 8 шагов).
@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import config, extensions, llm
+from . import config, extensions, i18n, llm
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks
 
 log = logging.getLogger("neuro.agent_core")
@@ -25,11 +25,19 @@ LEVELS = {
     "deep": {"title": "Глубоко", "task": "agent_deep", "max_steps": 16, "reasoning": "high", "plan": True},
 }
 
+# Подсказки для автовыбора уровня: русский, английский, турецкий, испанский.
 DEEP_WORDS = re.compile(
-    r"\b(глубок|подробн|исследу|проанализ|анализ|сравни|разбер|составь план|стратеги|отч[её]т о|обзор|изучи)", re.I)
+    r"\b(глубок|подробн|исследу|проанализ|анализ|сравни|разбер|составь план|стратеги|отч[её]т о|обзор|изучи"
+    r"|in[- ]depth|research|analy[sz]|compare|comparison|strategy|deep dive|report on|overview of|study"
+    r"|derinlemesine|araştır|analiz|karşılaştır|strateji|rapor"
+    r"|a fondo|investiga|anali[zc]|compara|estrategia|informe sobre|resumen detallado)", re.I)
 TOOL_WORDS = re.compile(
     r"\b(найди|поищи|загугли|узнай|посмотри|новост|курс|погод|созда|добав|напомн|запомни|задач|"
-    r"что (я|мы) (говорил|обсуждал)|о ч[её]м (я|мы)|отправ|напиши в)", re.I)
+    r"что (я|мы) (говорил|обсуждал)|о ч[её]м (я|мы)|отправ|напиши в"
+    r"|find|search|look up|google|news|weather|exchange rate|create|add|remind|remember|task|todo|send"
+    r"|what did (i|we) (say|discuss)"
+    r"|bul|ara|haber|hava durumu|kur|oluştur|ekle|hatırlat|hatırla|görev|gönder"
+    r"|busca|encuentra|noticias|clima|tiempo|tipo de cambio|crea|añade|recuérda|recuerda|tarea|envía)", re.I)
 
 
 def route(text: str, channel: str) -> str:
@@ -67,21 +75,16 @@ BUILTIN_TOOLS = [
         {"days": {"type": "integer", "description": "по умолчанию 1"}}),
 ]
 
-TOOL_TITLES = {
-    "web_search": lambda a: f"🔎 Ищу в интернете: {a.get('query', '')}",
-    "create_task": lambda a: f"📝 Создаю задачу: {a.get('text', '')}",
-    "list_tasks": lambda a: "📋 Смотрю задачи",
-    "complete_task": lambda a: f"✅ Закрываю задачу #{a.get('id')}",
-    "save_memory": lambda a: f"🧠 Запоминаю: {a.get('text', '')}",
-    "search_memory": lambda a: f"🗂 Ищу в памяти: {a.get('query', '')}",
-    "recent_conversation": lambda a: "🎙 Читаю недавний разговор",
-    "list_conversations": lambda a: "💬 Смотрю разговоры",
-}
+def tool_title(lang: str, name: str, args: dict) -> str:
+    """Короткая строка шага для чата: «🔎 Ищу в интернете: …» на языке приложения."""
+    if "tool." + name not in i18n.PHRASES:
+        return f"⚙️ {name}"
+    return i18n.t(lang, "tool." + name, query=args.get("query", ""), text=args.get("text", ""), id=args.get("id"))
 
 
 def web_search(conn, query: str) -> str:
-    system = ("Найди в интернете ответ на запрос и кратко изложи по-русски главное (до 8 предложений). "
-              "В конце перечисли 2–5 источников в формате «Источник: адрес».")
+    system = ("Найди в интернете ответ на запрос и кратко изложи главное (до 8 предложений). "
+              "В конце перечисли 2–5 источников в формате «Источник: адрес». " + i18n.write_in(i18n.lang(conn)))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": query}]
     try:
         msg = llm.chat(conn, "search", messages, tools=[{"type": "openrouter:web_search"}], timeout=60)
@@ -161,7 +164,7 @@ def _t(dt):
 
 
 # ---------------------------------------------------------------- запуск
-def system_prompt(level: str, channel: str) -> str:
+def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
     now = datetime.now(timezone.utc).astimezone(TZ)
     style = (
         "Ответ прочитает синтезатор речи в наушнике: 1–3 коротких предложения, без markdown, списков, эмодзи и "
@@ -175,9 +178,9 @@ def system_prompt(level: str, channel: str) -> str:
         "deep": "Работай основательно: следуй плану, проверяй факты в нескольких источниках, сделай вывод.",
     }[level]
     return (
-        f"Ты — NeuroSoft, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть расшифровки его "
+        f"Ты — Mnemo, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть расшифровки его "
         f"разговоров, задачи и память. Сейчас {WEEKDAYS[now.weekday()]}, {now.strftime('%d.%m.%Y %H:%M')}. "
-        f"Отвечай по-русски. Расшифровки автоматические и могут содержать ошибки. {depth} {style} "
+        f"{i18n.reply_in(lang)} Расшифровки автоматические и могут содержать ошибки. {depth} {style} "
         f"Никогда не выдумывай факты; если не знаешь — скажи и предложи, что сделать."
     )
 
@@ -216,14 +219,16 @@ def execute(conn, run_id: int) -> str:
     level, channel, device_id = run["level"], run["channel"], run["device_id"]
     cfg = LEVELS[level]
     model = run["model"]
-    step(conn, run_id, "level", f"Уровень: {cfg['title']} · {model.split('/')[-1]}")
+    lang = i18n.lang(conn)
+    step(conn, run_id, "level", i18n.t(lang, "agent.level", level=i18n.t(lang, "level." + level),
+                                       model=model.split("/")[-1]))
     try:
         ext_rows = conn.execute("SELECT id, manifest, settings FROM extensions WHERE enabled").fetchall()
         ext_specs, ext_index = extensions.tool_specs(ext_rows)
         tools = BUILTIN_TOOLS + ext_specs
 
         context = build_context(conn, device_id) if device_id else ""
-        messages = [{"role": "system", "content": system_prompt(level, channel)}]
+        messages = [{"role": "system", "content": system_prompt(level, channel, lang)}]
         if context:
             messages.append({"role": "system", "content": "Контекст:\n" + context})
         messages += history(conn, run_id)
@@ -235,8 +240,8 @@ def execute(conn, run_id: int) -> str:
                                 reasoning=cfg["reasoning"], model=model)
             plan = (plan_msg.get("content") or "").strip()
             if plan:
-                step(conn, run_id, "plan", "🗺 План: " + " → ".join(
-                    re.sub(r"^\s*\d+[.)]\s*", "", p).strip() for p in plan.splitlines() if p.strip())[:280], plan)
+                step(conn, run_id, "plan", i18n.t(lang, "agent.plan", plan=" → ".join(
+                    re.sub(r"^\s*\d+[.)]\s*", "", p).strip() for p in plan.splitlines() if p.strip())[:280]), plan)
                 messages.append({"role": "assistant", "content": plan})
                 messages.append({"role": "user", "content": "Выполни план и дай итоговый ответ."})
 
@@ -257,12 +262,13 @@ def execute(conn, run_id: int) -> str:
                     args = {}
                 if name in ext_index:
                     row, tool = ext_index[name]
-                    step(conn, run_id, "tool", f"{row['manifest'].get('icon') or '🧩'} "
-                                               f"{row['manifest']['name']}: {tool.get('title') or tool['name']}",
+                    shown = extensions.localize(row["manifest"], lang)
+                    title = next((t.get("title") for t in shown["tools"] if t["name"] == tool["name"]), None)
+                    step(conn, run_id, "tool", f"{shown.get('icon') or '🧩'} {shown['name']}: {title or tool['name']}",
                          json.dumps(args, ensure_ascii=False))
-                    result = extensions.run_tool(row, tool, args, {"device_id": device_id, "locale": "ru"})
+                    result = extensions.run_tool(row, tool, args, {"device_id": device_id, "locale": lang})
                 else:
-                    title = TOOL_TITLES.get(name, lambda a: f"⚙️ {name}")(args)
+                    title = tool_title(lang, name, args)
                     step(conn, run_id, "tool", title, json.dumps(args, ensure_ascii=False))
                     try:
                         result = run_builtin(conn, name, args, device_id)
@@ -274,12 +280,12 @@ def execute(conn, run_id: int) -> str:
         if not answer:
             msg = llm.chat(conn, cfg["task"], messages + [{"role": "user", "content":
                            "Шаги закончились. Дай лучший ответ по тому, что уже известно."}], model=model)
-            answer = (msg.get("content") or "").strip() or "Не получилось найти ответ."
+            answer = (msg.get("content") or "").strip() or i18n.t(lang, "agent.no_answer")
         status = "done"
     except Exception as exc:  # noqa: BLE001
         log.exception("run %s failed", run_id)
         step(conn, run_id, "error", "⚠️ Ошибка: " + str(exc)[:200])
-        answer, status = "Не получилось выполнить запрос — модель или сервис недоступны. Попробуйте ещё раз.", "failed"
+        answer, status = i18n.t(i18n.lang(conn), "agent.failed"), "failed"
     conn.execute("UPDATE agent_runs SET status = %s, answer = %s, finished_at = now() WHERE id = %s",
                  (status, answer, run_id))
     conn.execute("INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('assistant', %s, %s, %s)",

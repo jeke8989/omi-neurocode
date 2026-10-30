@@ -6,19 +6,102 @@
   "version": "1.0.0",
   "author": "Neuro Codes",
   "description": "Отправка сообщений в ваш Telegram через вашего бота.",
-  "permissions": {"hosts": ["api.telegram.org"]},
+  "permissions": {
+    "hosts": [
+      "api.telegram.org"
+    ]
+  },
   "settings": [
-    {"key": "bot_token", "title": "Токен бота", "secret": true, "required": true, "hint": "Создайте бота у @BotFather"},
-    {"key": "chat_id", "title": "Ваш chat_id", "secret": false, "required": true, "hint": "Напишите боту и узнайте id у @userinfobot"}
+    {
+      "key": "bot_token",
+      "title": "Токен бота",
+      "secret": true,
+      "required": true,
+      "hint": "Создайте бота у @BotFather"
+    },
+    {
+      "key": "chat_id",
+      "title": "Ваш chat_id",
+      "secret": false,
+      "required": true,
+      "hint": "Напишите боту и узнайте id у @userinfobot"
+    }
   ],
   "tools": [
     {
       "name": "send_message",
       "title": "Отправляю в Telegram",
       "description": "Отправить владельцу сообщение в Telegram. Используй, когда он просит прислать, переслать или напомнить в телеграм.",
-      "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "текст сообщения"}}, "required": ["text"]},
-      "http": {"method": "POST", "url": "https://api.telegram.org/bot{settings.bot_token}/sendMessage",
-               "body": {"chat_id": "{settings.chat_id}", "text": "{text}"}}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "текст сообщения"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot{settings.bot_token}/sendMessage",
+        "body": {
+          "chat_id": "{settings.chat_id}",
+          "text": "{text}"
+        }
+      }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "description": "Sends messages to your Telegram through your own bot.",
+      "tools": {
+        "send_message": "Sending to Telegram"
+      },
+      "settings": {
+        "bot_token": {
+          "title": "Bot token",
+          "hint": "Create a bot with @BotFather"
+        },
+        "chat_id": {
+          "title": "Your chat_id",
+          "hint": "Message the bot and get your id from @userinfobot"
+        }
+      }
+    },
+    "tr": {
+      "description": "Kendi botunuz üzerinden Telegram'ınıza mesaj gönderir.",
+      "tools": {
+        "send_message": "Telegram'a gönderiyorum"
+      },
+      "settings": {
+        "bot_token": {
+          "title": "Bot token'ı",
+          "hint": "@BotFather ile bir bot oluşturun"
+        },
+        "chat_id": {
+          "title": "chat_id'niz",
+          "hint": "Bota yazın ve id'nizi @userinfobot'tan öğrenin"
+        }
+      }
+    },
+    "es": {
+      "description": "Envía mensajes a tu Telegram a través de tu propio bot.",
+      "tools": {
+        "send_message": "Enviando a Telegram"
+      },
+      "settings": {
+        "bot_token": {
+          "title": "Token del bot",
+          "hint": "Crea un bot con @BotFather"
+        },
+        "chat_id": {
+          "title": "Tu chat_id",
+          "hint": "Escribe al bot y consulta tu id en @userinfobot"
+        }
+      }
+    }
+  }
 }

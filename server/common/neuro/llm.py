@@ -9,7 +9,7 @@ import time
 
 import requests
 
-from . import config
+from . import config, i18n
 from .audio import SAMPLE_RATE, pcm_to_wav
 from .models import CATALOG, catalog_entry, task as task_info
 
@@ -80,7 +80,7 @@ def parse_json(content: str) -> dict:
 def _headers() -> dict:
     h = {"Authorization": f"Bearer {config.LLM_API_KEY}"}
     if is_openrouter():
-        h["X-Title"] = "NeuroSoft"
+        h["X-Title"] = "Mnemo"
         h["HTTP-Referer"] = "https://neuro.codes"
     return h
 
@@ -151,15 +151,15 @@ def transcribe(conn, task: str, pcm: bytes, verbose: bool = False, timeout: floa
     """OpenAI-совместимое распознавание. Возвращает JSON ответа ({"text": ..., "segments": [...]})."""
     model = resolve_model(conn, task)
     want_segments = verbose and "whisper" in model
+    data = {"model": model, "response_format": "verbose_json" if want_segments else "json"}
+    language = i18n.stt_language(conn)
+    if language:
+        data["language"] = language
     r = requests.post(
         config.OPENAI_STT_BASE_URL.rstrip("/") + "/audio/transcriptions",
         headers={"Authorization": f"Bearer {config.OPENAI_STT_API_KEY}"},
         files={"file": ("audio.wav", pcm_to_wav(pcm), "audio/wav")},
-        data={
-            "model": model,
-            "language": config.STT_LANGUAGE,
-            "response_format": "verbose_json" if want_segments else "json",
-        },
+        data=data,
         timeout=timeout,
     )
     if r.status_code >= 400:

@@ -1,0 +1,189 @@
+"""Язык приложения: на нём пишутся итоги, дневник, ответы агента и голосовые фразы.
+
+Язык выбирается в приложении и хранится в settings (app.language). Модели получают
+явное указание «пиши на таком-то языке»; короткие фразы сервера переведены здесь.
+"""
+from __future__ import annotations
+
+DEFAULT = "ru"
+LANGS = {
+    "ru": {"name": "Русский", "english": "Russian", "locale": "ru-RU"},
+    "en": {"name": "English", "english": "English", "locale": "en-US"},
+    "tr": {"name": "Türkçe", "english": "Turkish", "locale": "tr-TR"},
+    "es": {"name": "Español", "english": "Spanish", "locale": "es-ES"},
+}
+
+_cache: dict[str, tuple[float, str]] = {}
+
+
+def normalize(code: str | None) -> str:
+    code = (code or "").strip().lower().replace("_", "-").split("-")[0]
+    return code if code in LANGS else DEFAULT
+
+
+def lang(conn) -> str:
+    """Текущий язык приложения (settings app.language)."""
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'app.language'").fetchone()
+    except Exception:  # noqa: BLE001 — нет таблицы в старой базе или соединение занято
+        return DEFAULT
+    return normalize(row["value"] if row else None)
+
+
+def set_lang(conn, code: str) -> str:
+    code = normalize(code)
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('app.language', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()", (code,))
+    return code
+
+
+STT_CHOICES = ("app", "auto", *LANGS)
+
+
+def stt_choice(conn) -> str:
+    """Что выбрано для расшифровки: app (как язык приложения), auto или код языка."""
+    from . import config  # noqa: PLC0415 — config тянет окружение, i18n должен импортироваться без него
+
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'stt.language'").fetchone() if conn else None
+    except Exception:  # noqa: BLE001
+        row = None
+    value = (row["value"] if row else None) or config.STT_LANGUAGE or "app"
+    return value if value in STT_CHOICES else "app"
+
+
+def stt_language(conn) -> str | None:
+    """Код языка для распознавания речи или None — пусть модель определит сама."""
+    choice = stt_choice(conn)
+    if choice == "auto":
+        return None
+    if choice == "app":
+        return lang(conn) if conn else DEFAULT
+    return choice
+
+
+def write_in(code: str) -> str:
+    """Указание модели, на каком языке писать текст для владельца."""
+    code = normalize(code)
+    if code == "ru":
+        return "Все тексты для владельца пиши по-русски."
+    return (f"Write every text field for the owner in {LANGS[code]['english']} "
+            f"(the instructions above are in Russian, but the output must be in {LANGS[code]['english']}).")
+
+
+def reply_in(code: str) -> str:
+    """Для агента: язык по умолчанию, но если спросили на другом — отвечать на нём."""
+    code = normalize(code)
+    name = LANGS[code]["english"]
+    if code == "ru":
+        return "Отвечай по-русски, а если владелец обратился на другом языке — на его языке."
+    return f"Answer in {name}; if the owner writes or speaks in another language, answer in that language."
+
+
+# Короткие фразы сервера (голос, шаги агента, ответы инструментов).
+PHRASES: dict[str, dict[str, str]] = {
+    "voice.deep": {
+        "ru": "Займусь подробно. Готовый ответ пришлю в чат.",
+        "en": "I'll dig into this. The full answer will be in the chat.",
+        "tr": "Bunu ayrıntılı inceleyeceğim. Tam cevap sohbette olacak.",
+        "es": "Lo voy a mirar a fondo. La respuesta completa estará en el chat.",
+    },
+    "voice.later": {
+        "ru": "Нужно чуть больше времени — ответ будет в чате.",
+        "en": "This needs a bit more time. The answer will be in the chat.",
+        "tr": "Biraz daha zaman gerekiyor. Cevap sohbette olacak.",
+        "es": "Necesito un poco más de tiempo. La respuesta estará en el chat.",
+    },
+    "voice.not_heard": {
+        "ru": "Не расслышал вопрос. Нажмите кнопку и спросите ещё раз.",
+        "en": "I didn't catch the question. Press the button and ask again.",
+        "tr": "Soruyu duyamadım. Düğmeye basıp tekrar sorun.",
+        "es": "No entendí la pregunta. Pulsa el botón y vuelve a preguntar.",
+    },
+    "voice.no_model": {
+        "ru": "На сервере не подключена модель. Добавьте ключ OpenRouter.",
+        "en": "No AI model is connected on the server. Add an OpenRouter key.",
+        "tr": "Sunucuda yapay zekâ modeli bağlı değil. Bir OpenRouter anahtarı ekleyin.",
+        "es": "No hay ningún modelo de IA conectado en el servidor. Añade una clave de OpenRouter.",
+    },
+    "voice.failed": {
+        "ru": "Не получилось ответить. Попробуйте ещё раз.",
+        "en": "I couldn't answer. Please try again.",
+        "tr": "Cevap veremedim. Lütfen tekrar deneyin.",
+        "es": "No pude responder. Inténtalo de nuevo.",
+    },
+    "agent.level": {
+        "ru": "Уровень: {level} · {model}", "en": "Level: {level} · {model}",
+        "tr": "Seviye: {level} · {model}", "es": "Nivel: {level} · {model}",
+    },
+    "agent.plan": {"ru": "🗺 План: {plan}", "en": "🗺 Plan: {plan}", "tr": "🗺 Plan: {plan}", "es": "🗺 Plan: {plan}"},
+    "agent.no_answer": {
+        "ru": "Не получилось найти ответ.", "en": "I couldn't find an answer.",
+        "tr": "Bir cevap bulamadım.", "es": "No pude encontrar una respuesta.",
+    },
+    "agent.failed": {
+        "ru": "Не получилось выполнить запрос — модель или сервис недоступны. Попробуйте ещё раз.",
+        "en": "I couldn't complete the request: the model or a service is unavailable. Please try again.",
+        "tr": "İstek tamamlanamadı: model ya da bir servis kullanılamıyor. Lütfen tekrar deneyin.",
+        "es": "No pude completar la solicitud: el modelo o un servicio no está disponible. Inténtalo de nuevo.",
+    },
+    "level.fast": {"ru": "Быстро", "en": "Quick", "tr": "Hızlı", "es": "Rápido"},
+    "level.tools": {"ru": "Основательно", "en": "Thorough", "tr": "Kapsamlı", "es": "A fondo"},
+    "level.deep": {"ru": "Глубоко", "en": "Deep", "tr": "Derin", "es": "Profundo"},
+    "tool.web_search": {
+        "ru": "🔎 Ищу в интернете: {query}", "en": "🔎 Searching the web: {query}",
+        "tr": "🔎 İnternette arıyorum: {query}", "es": "🔎 Buscando en internet: {query}",
+    },
+    "tool.create_task": {
+        "ru": "📝 Создаю задачу: {text}", "en": "📝 Creating a task: {text}",
+        "tr": "📝 Görev oluşturuyorum: {text}", "es": "📝 Creando una tarea: {text}",
+    },
+    "tool.list_tasks": {"ru": "📋 Смотрю задачи", "en": "📋 Checking tasks", "tr": "📋 Görevlere bakıyorum",
+                        "es": "📋 Revisando tareas"},
+    "tool.complete_task": {
+        "ru": "✅ Закрываю задачу #{id}", "en": "✅ Completing task #{id}",
+        "tr": "✅ #{id} görevini kapatıyorum", "es": "✅ Cerrando la tarea #{id}",
+    },
+    "tool.save_memory": {
+        "ru": "🧠 Запоминаю: {text}", "en": "🧠 Remembering: {text}", "tr": "🧠 Hatırlıyorum: {text}",
+        "es": "🧠 Recordando: {text}",
+    },
+    "tool.search_memory": {
+        "ru": "🗂 Ищу в памяти: {query}", "en": "🗂 Searching memory: {query}",
+        "tr": "🗂 Hafızada arıyorum: {query}", "es": "🗂 Buscando en la memoria: {query}",
+    },
+    "tool.recent_conversation": {
+        "ru": "🎙 Читаю недавний разговор", "en": "🎙 Reading the recent conversation",
+        "tr": "🎙 Son konuşmayı okuyorum", "es": "🎙 Leyendo la conversación reciente",
+    },
+    "tool.list_conversations": {
+        "ru": "💬 Смотрю разговоры", "en": "💬 Looking through conversations",
+        "tr": "💬 Konuşmalara bakıyorum", "es": "💬 Revisando conversaciones",
+    },
+    "tool.extension": {"ru": "🧩 {name}", "en": "🧩 {name}", "tr": "🧩 {name}", "es": "🧩 {name}"},
+    "memory.mark": {
+        "ru": "Отметка {when} (речь рядом не распознана)", "en": "Marked at {when} (no speech recognized nearby)",
+        "tr": "{when} işareti (yakında konuşma tanınmadı)", "es": "Marca de las {when} (no se reconoció voz cerca)",
+    },
+    "conversation.empty": {"ru": "Без содержания", "en": "No content", "tr": "İçerik yok", "es": "Sin contenido"},
+}
+
+
+def t(code: str, key: str, **kwargs) -> str:
+    variants = PHRASES.get(key)
+    if not variants:
+        return key
+    text = variants.get(normalize(code)) or variants[DEFAULT]
+    try:
+        return text.format(**kwargs)
+    except (KeyError, IndexError, ValueError):
+        return text
+
+
+def pick(value, code: str):
+    """Строка или словарь {язык: строка} -> строка на нужном языке (для каталога моделей и манифестов)."""
+    if isinstance(value, dict):
+        code = normalize(code)
+        return value.get(code) or value.get("en") or value.get(DEFAULT) or next(iter(value.values()), "")
+    return value

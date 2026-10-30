@@ -5,22 +5,81 @@
   "icon": "📚",
   "version": "1.0.0",
   "author": "Neuro Codes",
-  "description": "Поиск по русской Википедии и краткие справки.",
-  "permissions": {"hosts": ["ru.wikipedia.org"]},
+  "description": "Поиск по Википедии на языке приложения и краткие справки.",
+  "permissions": {
+    "hosts": [
+      "ru.wikipedia.org",
+      "en.wikipedia.org",
+      "tr.wikipedia.org",
+      "es.wikipedia.org"
+    ]
+  },
   "tools": [
     {
       "name": "search",
       "title": "Ищу в Википедии",
       "description": "Найти статьи по запросу. Возвращает названия и фрагменты.",
-      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-      "http": {"method": "GET", "url": "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&srlimit=5&format=json&utf8=1"}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://{app.locale}.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&srlimit=5&format=json&utf8=1"
+      }
     },
     {
       "name": "summary",
       "title": "Читаю статью",
       "description": "Краткое содержание статьи по точному названию (из search).",
-      "parameters": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
-      "http": {"method": "GET", "url": "https://ru.wikipedia.org/api/rest_v1/page/summary/{title}"}
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://{app.locale}.wikipedia.org/api/rest_v1/page/summary/{title}"
+      }
     }
-  ]
+  ],
+  "i18n": {
+    "en": {
+      "name": "Wikipedia",
+      "description": "Searches Wikipedia in the app's language and gives short summaries.",
+      "tools": {
+        "search": "Searching Wikipedia",
+        "summary": "Reading the article"
+      }
+    },
+    "tr": {
+      "name": "Vikipedi",
+      "description": "Uygulama dilindeki Vikipedi'de arar ve kısa özetler verir.",
+      "tools": {
+        "search": "Vikipedi'de arıyorum",
+        "summary": "Makaleyi okuyorum"
+      }
+    },
+    "es": {
+      "name": "Wikipedia",
+      "description": "Busca en la Wikipedia del idioma de la app y da resúmenes breves.",
+      "tools": {
+        "search": "Buscando en Wikipedia",
+        "summary": "Leyendo el artículo"
+      }
+    }
+  }
 }

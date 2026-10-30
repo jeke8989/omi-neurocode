@@ -50,7 +50,8 @@ OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", "")
 # openrouter — Whisper и др. через OpenRouter (рекомендуется), whisper — локально на сервере,
 # deepgram — Deepgram напрямую, openai — любой OpenAI-совместимый /audio/transcriptions, fake — для тестов
 STT_PROVIDER = (env("STT_PROVIDER", "openrouter" if OPENROUTER_API_KEY else "whisper") or "whisper").lower()
-STT_LANGUAGE = env("STT_LANGUAGE", "ru")
+# Язык расшифровки: пусто — как язык приложения (меняется в приложении), "auto" — определять самому
+STT_LANGUAGE = env("STT_LANGUAGE", "")
 SILENCE_RMS = env_int("SILENCE_RMS", 0)  # 0 = не пропускать тишину; иначе порог громкости
 DEEPGRAM_API_KEY = env("DEEPGRAM_API_KEY", "")
 DEEPGRAM_MODEL = env("DEEPGRAM_MODEL", "nova-2")
