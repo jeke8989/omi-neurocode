@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Установка / обновление сервера NeuroSoft. Запускать на сервере из папки server/:
-#   cd neurosoft/server && sudo bash deploy.sh
+# Установка и обновление сервера Mnemo. Запускать на сервере из папки server/:
+#   cd ~/omi-neurocode/server && sudo bash deploy.sh
+# Повторный запуск безопасен: данные сохраняются, контейнеры пересобираются из свежего кода.
 set -euo pipefail
 cd "$(dirname "$0")"
 
