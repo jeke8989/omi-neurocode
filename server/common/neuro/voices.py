@@ -24,6 +24,7 @@ import threading
 import time
 import wave
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -53,6 +54,11 @@ MIN_EMBED_SEC = 1.0               # короче — отпечаток нена
 MIN_NEW_VOICE_SEC = 2.0           # дообучение — только по уверенным отрезкам
 MIN_NEW_PERSON_SEC = config.env_float("SPEAKER_MIN_NEW_SEC", 8.0)  # новый «Голос N» — если говорил столько
 MIN_MATCH_SEC = 3.0               # «похоже, но не уверены» подписываем, только если речи достаточно
+# Новый «Голос N» — только у того, кто разговаривает с владельцем: реплики сменяют друг друга (пауза не больше
+# REPLY_GAP_SEC) хотя бы MIN_REPLIES раз. Реклама, объявления, телевизор и чужие разговоры рядом владельцу не
+# отвечают — им «Голос N» не заводим.
+REPLY_GAP_SEC = 4.0
+MIN_REPLIES = 2
 TOP_K = 3                         # сравнение с лучшими образцами человека
 
 
@@ -587,6 +593,21 @@ def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict
     return clusters
 
 
+def replies(cluster_segs: list, times: dict, owner_spans: list) -> int:
+    """Сколько раз этот голос и владелец сменяли друг друга (ответ в пределах REPLY_GAP_SEC)."""
+    if not owner_spans:
+        return 0
+    owner = sorted((st, st + timedelta(seconds=sec)) for st, sec in owner_spans)
+    n = 0
+    for sid, _, _ in cluster_segs:
+        st, sec = times[sid]
+        en = st + timedelta(seconds=sec)
+        gap = timedelta(seconds=REPLY_GAP_SEC)
+        if any(timedelta(0) <= st - oe <= gap or timedelta(0) <= os_ - en <= gap for os_, oe in owner):
+            n += 1
+    return n
+
+
 def finalize_conversation(conn, conv_id: int) -> dict:
     """Кто говорил в разговоре — по всем его отрезкам. Ручные подписи («Кто это?») сохраняются и служат опорой."""
     th = thresholds()
@@ -606,10 +627,12 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     people = people_vectors(conn)
     assign: dict[int, tuple[int | None, float]] = {}
     used: set[int] = set()
+    times = {s["id"]: (s["started_at"], float(s["sec"] or 0)) for s in segs}
     # сначала голоса с ручной подписью, потом — по убыванию количества речи
     order = sorted(clusters, key=lambda c: (not any(sid in manual for sid, _, _ in c.segs), -c.seconds))
-    for c in order:
-        result["voices"] += 1
+    # 1) узнаём знакомых
+    found: dict[int, tuple[int | None, float, list]] = {}
+    for i, c in enumerate(order):
         pins = [manual[sid] for sid, _, _ in c.segs if sid in manual]
         pid, score = None, 0.0
         if pins:
@@ -618,14 +641,27 @@ def finalize_conversation(conn, conv_id: int) -> dict:
             person, sim = match_person(conn, c.centroid, exclude=used, people=people)
             if person is not None and (sim >= th.match or sim >= th.maybe and c.seconds >= MIN_MATCH_SEC):
                 pid, score = person["id"], sim
-            elif c.seconds >= MIN_NEW_PERSON_SEC and allow_new:
-                best = sorted(c.segs, key=lambda t: -t[1])[:8]
-                p = new_unknown(conn, c.centroid, c.seconds, 0.0,
-                                prints=[(emb, sec) for _, sec, emb in best if sec >= MIN_EMBED_SEC])
-                people = people_vectors(conn)
-                pid, score = p["id"], 1.0
-                result["new"] += 1
-                _keep_sample(conn, pid, best[0][0])
+        if pid is not None:
+            used.add(pid)
+        found[i] = (pid, score, pins)
+    row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
+    owner = row["id"] if row else None
+    owner_ids = {sid for i, c in enumerate(order) if owner and found[i][0] == owner for sid, _, _ in c.segs}
+    owner_ids |= {s["id"] for s in segs if owner and s["person_id"] == owner}
+    owner_spans = [times[sid] for sid in owner_ids]
+    # 2) незнакомцы: новый «Голос N» — только если отвечает владельцу
+    for i, c in enumerate(order):
+        result["voices"] += 1
+        pid, score, pins = found[i]
+        if pid is None and c.seconds >= MIN_NEW_PERSON_SEC and allow_new and \
+                (owner is None or replies(c.segs, times, owner_spans) >= MIN_REPLIES):
+            best = sorted(c.segs, key=lambda t: -t[1])[:8]
+            p = new_unknown(conn, c.centroid, c.seconds, 0.0,
+                            prints=[(emb, sec) for _, sec, emb in best if sec >= MIN_EMBED_SEC])
+            people = people_vectors(conn)
+            pid, score = p["id"], 1.0
+            result["new"] += 1
+            _keep_sample(conn, pid, best[0][0])
         if pid is None:
             for sid, _, _ in c.segs:
                 assign[sid] = (None, 0.0)
@@ -688,14 +724,48 @@ def _keep_sample(conn, person_id: int, segment_id: int):
         log.warning("cannot save voice sample for person %s", person_id)
 
 
+PRUNE_KEY = "voices.pruned_v1"
+
+
+def prune_background(conn) -> int:
+    """Один раз: безымянные голоса, которые ни разу не отвечали владельцу (реклама, объявления, люди рядом), —
+    в «фон». Они не пропадают (их можно вернуть в карточке голоса), но и не мешают в людях и расшифровках."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (PRUNE_KEY,)).fetchone():
+        return 0
+    row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
+    if row is None:
+        return 0  # пока не знаем голос владельца — не с кем сравнивать
+    owner = row["id"]
+    hidden = 0
+    for p in conn.execute(
+            """SELECT id FROM people WHERE name IS NULL AND NOT is_owner AND NOT ignored AND kind IS NULL""").fetchall():
+        mine = conn.execute(
+            """SELECT id, conversation_id, started_at, extract(epoch FROM ended_at - started_at) AS sec
+               FROM segments WHERE person_id = %s""", (p["id"],)).fetchall()
+        convs = list({m["conversation_id"] for m in mine})
+        theirs = conn.execute(
+            """SELECT started_at, extract(epoch FROM ended_at - started_at) AS sec FROM segments
+               WHERE person_id = %s AND conversation_id = ANY(%s)""", (owner, convs)).fetchall()
+        times = {m["id"]: (m["started_at"], float(m["sec"] or 0)) for m in mine}
+        spans = [(t["started_at"], float(t["sec"] or 0)) for t in theirs]
+        if replies([(m["id"], 0, None) for m in mine], times, spans) < MIN_REPLIES:
+            conn.execute("UPDATE people SET kind = 'crowd', kind_auto = true, updated_at = now() WHERE id = %s",
+                         (p["id"],))
+            hidden += 1
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                 (PRUNE_KEY, str(hidden)))
+    return hidden
+
+
 def pending_conversations(conn, idle_sec: int) -> list[int]:
     """Разговоры, которые закончились, а голоса по ним ещё не решены."""
     rows = conn.execute(
         """SELECT c.id FROM conversations c
            WHERE NOT c.voices_done AND c.last_activity < now() - %s * interval '1 second'
              AND NOT EXISTS (SELECT 1 FROM audio_chunks a WHERE a.device_id = c.device_id
-                             AND a.status IN ('pending', 'processing') AND a.started_at <= c.last_activity)
-           ORDER BY c.last_activity LIMIT 5""", (idle_sec,)).fetchall()
+                             AND a.status IN ('pending', 'processing') AND a.started_at <= c.last_activity
+                             AND a.started_at + a.duration_ms * interval '1 millisecond' >= c.started_at)
+           ORDER BY c.last_activity DESC LIMIT 5""", (idle_sec,)).fetchall()  # ждём только свой звук
     return [r["id"] for r in rows]
 
 
@@ -948,7 +1018,7 @@ def suggest_owner(conn) -> dict | None:
         """SELECT p.id, p.number, p.speech_sec, p.loudness,
                   (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations
            FROM people p
-           WHERE p.name IS NULL AND NOT p.ignored AND p.speech_sec >= 60
+           WHERE p.name IS NULL AND NOT p.ignored AND p.speech_sec >= 60 AND coalesce(p.kind, 'person') = 'person'
            ORDER BY coalesce(p.loudness, 0) * sqrt(p.speech_sec) DESC LIMIT 1""").fetchone()
 
 

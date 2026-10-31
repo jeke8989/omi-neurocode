@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
 import re
+import secrets
 import time
 import urllib.request
 from contextlib import asynccontextmanager
@@ -25,7 +27,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, claude_agent, cleanup, config, crypto, db, diary, extensions,
-                   geo, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -428,7 +430,7 @@ async def api_status(request: Request):
         counts = await (await conn.execute(
             """SELECT (SELECT count(*) FROM conversations) AS conversations,
                       (SELECT count(*) FROM tasks WHERE status = 'open') AS open_tasks,
-                      (SELECT count(*) FROM memories) AS memories"""
+                      (SELECT count(*) FROM memories WHERE archived_at IS NULL) AS memories"""
         )).fetchone()
     return Json({
         "chunks": {r["status"]: r["n"] for r in chunks},
@@ -529,7 +531,7 @@ def search_all(conn, q: str) -> dict:
                             LEFT JOIN conversations c ON c.id = s.conversation_id
                             WHERE NOT s.junk ORDER BY s.started_at DESC""", ("text",), 30),
         "tasks": scan("SELECT id, text, status, due FROM tasks ORDER BY created_at DESC", ("text",), 20),
-        "memories": scan("SELECT id, text, created_at FROM memories ORDER BY created_at DESC", ("text",), 20),
+        "memories": scan("SELECT id, text, created_at FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC", ("text",), 20),
     }
 
 
@@ -561,8 +563,8 @@ async def api_conversation(request: Request):
             seg["sure"] = seg["voice_score"] is not None and seg["voice_score"] >= match
         ids = sorted({seg["person_id"] for seg in conv["segments"] if seg["person_id"]})
         conv["people"] = await (await conn.execute(
-            """SELECT p.id, p.name, p.number, p.is_owner, p.ignored, NOT """ + people.VISIBLE_SQL + """ AS transient
-               FROM people p WHERE p.id = ANY(%s)""", (ids,)
+            """SELECT p.id, p.name, p.number, p.is_owner, p.ignored, p.kind, NOT """ + people.VISIBLE_SQL
+            + """ AS transient FROM people p WHERE p.id = ANY(%s)""", (ids,)
         )).fetchall() if ids else []
         conv["tasks"] = await (await conn.execute(
             """SELECT id, text, due, due_at, assignee, person_id, kind, confidence, evidence, target, status, source,
@@ -570,7 +572,8 @@ async def api_conversation(request: Request):
                FROM tasks WHERE conversation_id = %s AND status <> 'dismissed' ORDER BY id""", (cid,)
         )).fetchall()
         conv["memories"] = await (await conn.execute(
-            "SELECT id, text, source, created_at FROM memories WHERE conversation_id = %s ORDER BY id", (cid,)
+            "SELECT id, text, source, created_at FROM memories WHERE conversation_id = %s AND archived_at IS NULL "
+            "ORDER BY id", (cid,)
         )).fetchall()
     return Json(conv)
 
@@ -631,15 +634,39 @@ async def api_task_update(request: Request):
 
 
 async def api_memories(request: Request):
+    """Память: ?archived=1 — архив (то, что модель сочла лишним; можно вернуть)."""
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
+    archived = request.query_params.get("archived") == "1"
     async with await aconnect() as conn:
         rows = await (await conn.execute(
             """SELECT m.id, m.conversation_id, m.text, m.source, m.created_at, c.title AS conversation_title
                FROM memories m LEFT JOIN conversations c ON c.id = m.conversation_id
-               ORDER BY m.created_at DESC LIMIT 300"""
+               WHERE (m.archived_at IS NOT NULL) = %s
+               ORDER BY coalesce(m.archived_at, m.created_at) DESC LIMIT 300""", (archived,)
         )).fetchall()
-    return Json({"items": rows})
+        n = await (await conn.execute("SELECT count(*) AS n FROM memories WHERE archived_at IS NOT NULL")).fetchone()
+    return Json({"items": rows, "archived": n["n"]})
+
+
+async def api_memory(request: Request):
+    """Одна запись памяти: POST {"archived": true|false} — в архив / вернуть; DELETE — удалить совсем."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    mid = int(request.path_params["id"])
+    async with await aconnect() as conn:
+        if request.method == "DELETE":
+            res = await conn.execute("DELETE FROM memories WHERE id = %s", (mid,))
+        else:
+            body = await _body(request)
+            if body is None or "archived" not in body:
+                return Json({"error": "archived"}, status_code=400)
+            res = await conn.execute(
+                "UPDATE memories SET archived_at = CASE WHEN %s THEN now() ELSE NULL END WHERE id = %s",
+                (bool(body["archived"]), mid))
+    if res.rowcount == 0:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"ok": True})
 
 
 
@@ -1071,9 +1098,24 @@ async def api_chat_clear(request: Request):
     return Json({"cleared": True})
 
 
+MCP_KEY = "mcp.token_hash"
+
+
+def _mcp_personal(token: str | None) -> bool:
+    """Личный ключ MCP (Claude Desktop, Cursor…): в базе только его хеш."""
+    if not token:
+        return False
+    with db.connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = %s", (MCP_KEY,)).fetchone()
+    want = row["value"] if row else ""
+    return bool(want) and hmac.compare_digest(want, hashlib.sha256(token.encode()).hexdigest())
+
+
 async def mcp_endpoint(request: Request):
-    """Инструменты Mnemo для Claude (MCP, JSON-RPC). Пускает только с токеном текущего запуска «Claude»."""
-    if claude_agent.run_for_token(_token(request.headers, {})) is None:
+    """Инструменты Mnemo по MCP (JSON-RPC): для Claude внутри Mnemo (токен запуска) и для ваших программ —
+    Claude Desktop, Cursor и других (личный ключ из «Интеграций», его можно отозвать)."""
+    token = _token(request.headers, {})
+    if claude_agent.run_for_token(token) is None and not await anyio.to_thread.run_sync(_mcp_personal, token):
         return _unauthorized()
     if request.method != "POST":
         return Json({"error": "method not allowed"}, status_code=405)  # SSE-поток не держим
@@ -1086,6 +1128,25 @@ async def mcp_endpoint(request: Request):
     if not replies:
         return Response(status_code=202)
     return Json(replies if isinstance(body, list) else replies[0])
+
+
+async def api_mcp(request: Request):
+    """Mnemo в других программах: GET — подключён ли, POST — новый ключ (показывается один раз), DELETE — отозвать."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    async with await aconnect() as conn:
+        if request.method == "POST":
+            token = "mnemo_" + secrets.token_urlsafe(32)
+            await conn.execute(
+                """INSERT INTO settings (key, value) VALUES (%s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                (MCP_KEY, hashlib.sha256(token.encode()).hexdigest()))
+            return Json({"enabled": True, "token": token, "path": "/mcp"})
+        if request.method == "DELETE":
+            await conn.execute("DELETE FROM settings WHERE key = %s", (MCP_KEY,))
+            return Json({"enabled": False, "path": "/mcp"})
+        row = await (await conn.execute("SELECT updated_at FROM settings WHERE key = %s", (MCP_KEY,))).fetchone()
+    return Json({"enabled": row is not None, "since": row["updated_at"] if row else None, "path": "/mcp"})
 
 
 async def api_claude(request: Request):
@@ -1141,6 +1202,8 @@ async def api_extensions(request: Request):
             st["filled"] = st["key"] in filled
             if not st["secret"]:
                 st["value"] = (r["settings"] or {}).get(st["key"], "")
+        if pub["events"]:
+            pub["delivery"] = await _sync(hooks.stats, r["id"])
         installed.append({**pub, "enabled": r["enabled"], "source_url": r["source_url"],
                           "ready": all(st["filled"] for st in pub["settings"] if st["required"])})
     ids = {e["id"] for e in installed}
@@ -1159,6 +1222,8 @@ async def api_extension_install(request: Request):
         return Json({"error": "bad json"}, status_code=400)
 
     def load():
+        if isinstance(body.get("manifest"), dict):  # собранная с ассистентом и проверенная владельцем
+            return extensions.validate(dict(body["manifest"])), "assistant"
         if body.get("manifest_url"):
             return extensions.load_manifest(str(body["manifest_url"]))
         entry = next((e for e in extensions.registry() if e["id"] == body.get("id")), None)
@@ -1179,6 +1244,29 @@ async def api_extension_install(request: Request):
     return Json({"installed": extensions.public_manifest(manifest)})
 
 
+async def api_extension_draft(request: Request):
+    """«Создать с ассистентом»: описание словами -> черновик манифеста (ещё не установлен)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None or not str(body.get("description") or "").strip():
+        return Json({"error": "description"}, status_code=400)
+    if not llm.configured():
+        return Json({"error": "на сервере не задан ключ модели (OPENROUTER_API_KEY)"}, status_code=400)
+
+    def build():
+        with db.connect() as conn:
+            return ext_builder.draft(conn, str(body["description"]),
+                                     body.get("previous") if isinstance(body.get("previous"), dict) else None,
+                                     str(body.get("feedback") or "") or None)
+
+    try:
+        return Json(await _run_in_thread(build))
+    except Exception as exc:  # noqa: BLE001
+        log.exception("extension draft failed")
+        return Json({"error": f"модель не ответила: {exc.__class__.__name__}"}, status_code=502)
+
+
 async def api_extension(request: Request):
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
@@ -1194,6 +1282,14 @@ async def api_extension(request: Request):
         if "enabled" in body:
             await conn.execute("UPDATE extensions SET enabled = %s WHERE id = %s", (bool(body["enabled"]), ext_id))
         if isinstance(body.get("settings"), dict):
+            row = await (await conn.execute("SELECT manifest FROM extensions WHERE id = %s", (ext_id,))).fetchone()
+            urls = {st["key"] for st in ((row or {}).get("manifest") or {}).get("settings") or [] if st.get("type") == "url"}
+            for k in urls & set(body["settings"]):
+                if body["settings"][k]:
+                    try:
+                        extensions.check_user_url(str(body["settings"][k]).strip())
+                    except extensions.ExtensionError as exc:
+                        return Json({"error": str(exc)}, status_code=400)
             # ключи и токены расширений — зашифрованы в базе (каждое значение отдельно: слияние || работает)
             clean = {str(k): crypto.seal(str(v)) for k, v in body["settings"].items() if v is not None}
             await conn.execute("UPDATE extensions SET settings = settings || %s::jsonb WHERE id = %s",
@@ -1704,6 +1800,7 @@ app = Starlette(
         Route("/api/tasks", api_tasks),
         Route("/api/tasks/{id:int}", api_task_update, methods=["POST", "PATCH"]),
         Route("/api/memories", api_memories),
+        Route("/api/memories/{id:int}", api_memory, methods=["POST", "DELETE"]),
         Route("/api/questions", api_questions),
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
@@ -1712,8 +1809,10 @@ app = Starlette(
         Route("/api/share", api_share),
         Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
         Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),
+        Route("/api/mcp", api_mcp, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),
         Route("/api/extensions/install", api_extension_install, methods=["POST"]),
+        Route("/api/extensions/draft", api_extension_draft, methods=["POST"]),
         Route("/api/extensions/{id}", api_extension, methods=["POST", "DELETE"]),
         Route("/api/features", api_features, methods=["GET", "POST"]),
         Route("/api/diary", api_diary),

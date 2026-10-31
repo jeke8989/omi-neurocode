@@ -3,6 +3,36 @@
   "name": "Mnemo Marketplace",
   "extensions": [
     {
+      "id": "webhook",
+      "name": "Вебхук",
+      "icon": "🔗",
+      "author": "Mnemo",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "события",
+        "n8n",
+        "make",
+        "zapier"
+      ],
+      "description": "События Mnemo — на ваш адрес: n8n, Make, Zapier или свой сервер.",
+      "manifest": "extensions/webhook/manifest.json",
+      "i18n": {
+        "en": {
+          "name": "Webhook",
+          "description": "Mnemo events to your address: n8n, Make, Zapier or your own server."
+        },
+        "tr": {
+          "name": "Webhook",
+          "description": "Mnemo olayları adresinize: n8n, Make, Zapier veya kendi sunucunuz."
+        },
+        "es": {
+          "name": "Webhook",
+          "description": "Eventos de Mnemo a tu dirección: n8n, Make, Zapier o tu servidor."
+        }
+      }
+    },
+    {
       "id": "notion",
       "name": "Notion",
       "icon": "🗒",

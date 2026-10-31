@@ -17,7 +17,8 @@ log = logging.getLogger("neuro.people")
 SEGMENT_SELECT = """
 SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.conversation_id, s.person_id, s.voice_score,
        s.junk, s.cleaned, s.raw_text,
-       p.name AS person_name, p.is_owner AS person_owner, p.number AS person_number, p.ignored AS person_ignored
+       p.name AS person_name, p.is_owner AS person_owner, p.number AS person_number, p.ignored AS person_ignored,
+       p.kind AS person_kind
 FROM segments s LEFT JOIN people p ON p.id = s.person_id
 """
 
@@ -85,14 +86,27 @@ def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
 # ---------------------------------------------------------------- итоги разговора
 SUMMARY_PEOPLE_RULES = """Говорящие подписаны так: «Владелец» — владелец кулона (в скобках его имя, если известно);
 имя — человек, узнанный по голосу; «Голос N» — незнакомый голос; знак «?» — узнан неуверенно; «Спикер N» — голос без отпечатка.
+Кулон слышит всё вокруг: рекламу, объявления, телевизор, радио, видео, песни и чужие разговоры рядом. Итог, задачи
+и факты — только из речи людей, которые участвуют в разговоре с владельцем; фон не пересказывай.
 В задачах исполнителя (assignee) указывай подписью из расшифровки или именем, если оно звучит в разговоре.
-В "speakers" — только для подписей «Голос N» и «Владелец» без имени: имя, которое ясно следует из разговора
-(к человеку обратились по имени, он представился). Сомневаешься — не пиши. Нет таких — пустой список."""
+В "speakers" — для подписей «Голос N» и «Владелец» без имени:
+ kind: "person" — участник разговора; "media" — реклама, объявление, диктор, телевизор, радио, видео, песня;
+ "crowd" — посторонние рядом, не разговаривают с владельцем;
+ name — имя участника, если оно ясно следует из разговора; sure = true, только если к нему прямо обратились
+ по имени или он представился (цитата в evidence). Сомневаешься в имени — не пиши. Нечего сказать — пустой список."""
 
 SUMMARY_PEOPLE_FIELDS = (
     '"topics": ["2–4 темы разговора, по 1–3 слова, с маленькой буквы"],\n'
-    ' "speakers": [{"voice": "Голос N", "name": "имя", "evidence": "короткая цитата, откуда ясно имя"}]'
+    ' "speakers": [{"voice": "Голос N", "kind": "person | media | crowd", "name": "имя или пусто", "sure": false,'
+    ' "evidence": "короткая цитата, откуда это ясно"}]'
 )
+KINDS = ("media", "crowd")
+
+
+def _kind_by_user(conn, pid: int) -> bool:
+    """Владелец сам сказал «это человек» — модель больше не прячет этот голос."""
+    row = conn.execute("SELECT kind_auto, kind FROM people WHERE id = %s", (pid,)).fetchone()
+    return bool(row and row["kind"] == "person")
 
 
 def clean_topics(raw) -> list[str]:
@@ -121,10 +135,29 @@ def apply_summary(conn, conv_id: int, segs: list[dict], result: dict, tasks: lis
             continue
         name = " ".join(str(sp.get("name") or "").split()).strip(" .,«»\"'")[:60]
         pid = resolve(conn, str(sp.get("voice") or ""), labels)
-        if not name or not pid or len(name) < 2:
+        if not pid:
             continue
-        person = conn.execute("SELECT name FROM people WHERE id = %s", (pid,)).fetchone()
+        person = conn.execute("SELECT name, is_owner, kind, kind_auto FROM people WHERE id = %s", (pid,)).fetchone()
         if not person or person["name"]:
+            continue
+        kind = str(sp.get("kind") or "person").strip().lower()
+        if kind in KINDS and not person["is_owner"] and (person["kind"] is None and not _kind_by_user(conn, pid)):
+            # реклама, телевизор, чужие разговоры: голос прячется из людей, расшифровки и итогов
+            conn.execute("UPDATE people SET kind = %s, kind_auto = true, updated_at = now() WHERE id = %s", (kind, pid))
+            log.info("conversation %s: voice of person %s is background (%s)", conv_id, pid, kind)
+            continue
+        if kind == "person" and person["kind"] and person["kind_auto"]:
+            conn.execute("UPDATE people SET kind = NULL, kind_auto = false WHERE id = %s", (pid,))  # всё-таки человек
+        if not name or len(name) < 2:
+            continue
+        evidence = str(sp.get("evidence") or "").strip()[:300] or None
+        if sp.get("sure") in (True, "true", 1) and evidence and not by_name(conn, name) and not person["is_owner"]:
+            # прямо обратились по имени или представился — подписываем сразу (переименовать можно в карточке)
+            conn.execute("UPDATE people SET name = %s, updated_at = now() WHERE id = %s", (crypto.seal_det(name), pid))
+            conn.execute(
+                """INSERT INTO person_suggestions (person_id, name, conversation_id, evidence, status)
+                   VALUES (%s, %s, %s, %s, 'accepted')""", (pid, crypto.seal_det(name), conv_id, crypto.seal(evidence)))
+            log.info("conversation %s: voice of person %s named from context", conv_id, pid)
             continue
         seen = [r for r in conn.execute(
             """SELECT name FROM person_suggestions WHERE person_id = %s AND status IN ('pending', 'rejected')""",
@@ -140,15 +173,15 @@ def apply_summary(conn, conv_id: int, segs: list[dict], result: dict, tasks: lis
 
 
 # ---------------------------------------------------------------- для приложения
-PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.number, p.samples, p.speech_sec, p.note,
+PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.kind, p.number, p.samples, p.speech_sec, p.note,
        p.first_seen, p.last_seen,
        (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations"""
 
 # Голос, услышанный только в одном разговоре, — «Собеседник»: не показываем в «Людях», «Созвездии» и
 # подсказках, пока он не встретится снова (или пока владелец сам его не назовёт).
 RECURRING = 2
-VISIBLE_SQL = f"""(p.name IS NOT NULL OR p.is_owner OR
-    (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING})"""
+VISIBLE_SQL = f"""(p.name IS NOT NULL OR p.is_owner OR (coalesce(p.kind, 'person') = 'person' AND
+    (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}))"""
 
 
 def transient(p: dict) -> bool:
@@ -190,7 +223,7 @@ def list_people(conn) -> dict:
            FROM person_suggestions g JOIN people p ON p.id = g.person_id
            LEFT JOIN people t ON t.id = g.target_id
            LEFT JOIN conversations c ON c.id = g.conversation_id
-           WHERE g.status = 'pending' AND p.name IS NULL AND NOT p.is_owner
+           WHERE g.status = 'pending' AND p.name IS NULL AND NOT p.is_owner AND coalesce(p.kind, 'person') = 'person'
              AND (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}
            ORDER BY g.id DESC LIMIT 20""").fetchall()
     owner = voices.suggest_owner(conn)
@@ -226,7 +259,7 @@ def person_detail(conn, pid: int) -> dict | None:
         """SELECT o.id, o.name, o.number, o.is_owner, count(DISTINCT s2.conversation_id) AS conversations
            FROM segments s1 JOIN segments s2 ON s2.conversation_id = s1.conversation_id
            JOIN people o ON o.id = s2.person_id
-           WHERE s1.person_id = %s AND s2.person_id <> %s AND NOT o.ignored
+           WHERE s1.person_id = %s AND s2.person_id <> %s AND NOT o.ignored AND coalesce(o.kind, 'person') = 'person'
              AND (o.name IS NOT NULL OR o.is_owner OR (SELECT count(DISTINCT x.conversation_id) FROM segments x
                                                       WHERE x.person_id = o.id) >= 2)
            GROUP BY o.id ORDER BY conversations DESC LIMIT 8""", (pid, pid)).fetchall()
@@ -264,6 +297,11 @@ def update_person(conn, pid: int, body: dict) -> dict | None:
         if "ignored" in body:
             conn.execute("UPDATE people SET ignored = %s, updated_at = now() WHERE id = %s",
                          (bool(body["ignored"]), pid))
+            if not body["ignored"]:  # «учитывать» — значит, это человек, а не фон
+                conn.execute("UPDATE people SET kind = 'person', kind_auto = false WHERE id = %s", (pid,))
+        if "kind" in body and body["kind"] in (None, "person", "media", "crowd"):
+            conn.execute("UPDATE people SET kind = %s, kind_auto = false, updated_at = now() WHERE id = %s",
+                         (body["kind"], pid))
         if "note" in body:
             conn.execute("UPDATE people SET note = %s WHERE id = %s",
                          (crypto.seal(str(body.get("note") or "").strip()[:500] or None), pid))
@@ -374,7 +412,7 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
     events = conn.execute(
         f"""SELECT e.id, e.day, e.title, e.emoji, e.kind, e.started_at, e.ended_at, e.topics, e.photo_id, e.vivid,
                    e.summary,
-                   (SELECT count(*) FROM memories m JOIN conversations c ON c.id = m.conversation_id
+                   (SELECT count(*) FROM memories m JOIN conversations c ON c.id = m.conversation_id AND m.archived_at IS NULL
                      WHERE c.event_id = e.id) AS memories,
                    (SELECT count(*) FROM tasks t JOIN conversations c ON c.id = t.conversation_id
                      WHERE c.event_id = e.id AND t.status <> 'dismissed') AS tasks,

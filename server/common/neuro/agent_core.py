@@ -178,7 +178,7 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
         def has(*vals):
             return bool(ql) and any(v and ql in v.lower() for v in vals)
         mems = [m for m in conn.execute(
-            "SELECT created_at, text FROM memories ORDER BY created_at DESC LIMIT 3000").fetchall() if has(m["text"])][:10]
+            "SELECT created_at, text FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 3000").fetchall() if has(m["text"])][:10]
         convs = [c for c in conn.execute(
             """SELECT started_at, title, summary FROM conversations WHERE started_at > %s
                ORDER BY started_at DESC LIMIT 3000""", (since,)).fetchall() if has(c["title"], c["summary"])][:10]

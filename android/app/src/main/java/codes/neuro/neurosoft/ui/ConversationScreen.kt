@@ -40,6 +40,7 @@ fun ConversationScreen(id: Long) {
     val speakerLabel = stringResource(R.string.speaker)
     var who by remember { mutableStateOf<Segment?>(null) }
     var original by remember(id) { mutableStateOf(false) }
+    var showBackground by remember(id) { mutableStateOf(false) }
 
     fun reload() {
         scope.launch {
@@ -88,6 +89,8 @@ fun ConversationScreen(id: Long) {
     val once = d?.segments?.mapNotNull { s -> s.personId?.takeIf { d.people[it]?.transient == true } }?.distinct().orEmpty()
     val companion = stringResource(R.string.voice_companion)
     once.forEachIndexed { i, pid -> labels[pid] = if (once.size > 1) "$companion ${i + 1}" else companion }
+    val backgroundWord = stringResource(R.string.voice_background)
+    d?.people?.values?.filter { it.background && it.name == null }?.forEach { labels[it.id] = backgroundWord }
     fun label(s: Segment): String? = s.personId?.let { pid -> labels[pid]?.let { if (s.sure) it else "$it?" } }
         ?: s.speaker?.let { companion }
 
@@ -194,22 +197,21 @@ fun ConversationScreen(id: Long) {
                             T.smallStrong, c.lens, modifier = Modifier.quietTap { original = !original })
                     }
                 }
-                if (fixed > 0) {
-                    Txt(if (original) stringResource(R.string.transcript_original_note)
-                        else plural(R.plurals.transcript_fixed, fixed), T.caption, c.graphite,
-                        Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp))
-                }
                 if (d.segments.isEmpty()) {
                     Txt(stringResource(R.string.transcript_empty), T.small, c.graphite, Modifier.padding(horizontal = 22.dp))
-                } else if (d.people.values.any { it.name == null && !it.isOwner } || d.segments.any { it.personId != null && !it.sure }
-                    || d.segments.any { it.personId == null && it.speaker != null }) {
-                    Txt(stringResource(R.string.who_hint), T.caption, c.graphite,
-                        Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp))
+                }
+                // фон (реклама, телевизор, люди рядом) свёрнут — видна только речь участников
+                val noise = d.segments.count { s -> s.personId?.let { d.people[it] }?.background == true }
+                if (noise > 0) {
+                    Txt(stringResource(if (showBackground) R.string.background_hide else R.string.background_show, noise),
+                        T.smallStrong, c.lens, Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp)
+                            .quietTap { showBackground = !showBackground })
                 }
                 val byPerson = d.people.isNotEmpty()
                 Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     var last: String? = "\u0000"
-                    d.segments.forEach { s ->
+                    d.segments.filter { s -> showBackground || s.personId?.let { d.people[it] }?.background != true }
+                        .forEach { s ->
                         val ref = s.personId?.let { d.people[it] }
                         // «я» — справа, как в мессенджере; без голосов — чередуем по номеру спикера
                         val mine = if (byPerson) ref?.isOwner == true else (s.speaker ?: 0) % 2 == 1
@@ -229,7 +231,7 @@ fun ConversationScreen(id: Long) {
                                 }
                             }
                             Txt(if (original && s.raw != null) s.raw else s.text, T.body,
-                                if (ref?.ignored == true) c.faint else c.ink,
+                                if (ref?.background == true) c.faint else c.ink,
                                 Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(18.dp))
                                     .background(if (mine) c.paper else c.raised)
                                     .combinedClickable(onClick = {}, onLongClick = { if (s.id > 0) who = s })

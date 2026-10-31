@@ -25,6 +25,7 @@ BUILTIN_DIR = Path(__file__).resolve().parents[2] / "marketplace"
 ALLOW_HTTP = config.env_bool("ALLOW_HTTP_EXTENSIONS", False)
 MARKETPLACE_URL = config.env("MARKETPLACE_URL", "")
 MAX_RESULT = 6000
+EVENTS = ("conversation", "task", "memory", "day")
 
 
 class ExtensionError(ValueError):
@@ -45,9 +46,24 @@ def validate(m: dict) -> dict:
     hosts = (m.get("permissions") or {}).get("hosts") or []
     if not isinstance(hosts, list) or not all(isinstance(h, str) and h for h in hosts):
         raise ExtensionError("permissions.hosts — список доменов")
-    tools = m.get("tools")
-    if not isinstance(tools, list) or not tools:
-        raise ExtensionError("нужен хотя бы один инструмент в tools")
+    settings = m.get("settings") or []
+    for st in settings:
+        if not re.match(r"^[a-z0-9_]{1,32}$", str(st.get("key", ""))):
+            raise ExtensionError("settings[].key: a-z, 0-9, _")
+        if st.get("type") not in (None, "text", "url"):
+            raise ExtensionError("settings[].type: text | url")
+    tools = m.get("tools") or []
+    events = m.get("on") or {}
+    if not isinstance(tools, list) or not (tools or events or m.get("on_task")):
+        raise ExtensionError("нужен хотя бы один инструмент в tools или событие в on")
+    if not isinstance(events, dict) or any(e not in EVENTS for e in events):
+        raise ExtensionError("on: события " + ", ".join(EVENTS))
+    for name, spec in events.items():
+        if not isinstance(spec, dict) or bool(spec.get("http")) == bool(spec.get("webhook")):
+            raise ExtensionError(f"on.{name}: нужен ровно один из http или webhook")
+        for host in _template_hosts((spec.get("http") or spec.get("webhook"))["url"], m):
+            _check_host(host, hosts)
+    m["tools"] = tools
     names = set()
     for t in tools:
         if not TOOL_RE.match(str(t.get("name", ""))):
@@ -64,23 +80,51 @@ def validate(m: dict) -> dict:
         if bool(t.get("http")) == bool(t.get("webhook")):
             raise ExtensionError(f"{t['name']}: нужен ровно один из http или webhook")
         url = (t.get("http") or t.get("webhook") or {}).get("url", "")
-        for host in _template_hosts(url):
+        for host in _template_hosts(url, m):
             _check_host(host, hosts)
     hook = m.get("on_task")
     if hook is not None:
         if not isinstance(hook, dict) or bool(hook.get("http")) == bool(hook.get("webhook")):
             raise ExtensionError("on_task: нужен ровно один из http или webhook")
-        for host in _template_hosts((hook.get("http") or hook.get("webhook"))["url"]):
+        for host in _template_hosts((hook.get("http") or hook.get("webhook"))["url"], m):
             _check_host(host, hosts)
-    for s in m.get("settings") or []:
-        if not re.match(r"^[a-z0-9_]{1,32}$", str(s.get("key", ""))):
-            raise ExtensionError("settings[].key: a-z, 0-9, _")
     return m
 
 
-def _template_hosts(url_template: str) -> list[str]:
+def _user_url_key(url_template: str, m: dict) -> str | None:
+    """«{settings.url}» целиком, и эта настройка — адрес (type: url): адрес задаёт сам владелец, не модель."""
+    whole = PLACEHOLDER.fullmatch(url_template or "")
+    if not whole or not whole.group(1).startswith("settings."):
+        return None
+    key = whole.group(1)[9:]
+    return key if any(st.get("key") == key and st.get("type") == "url" for st in m.get("settings") or []) else None
+
+
+def check_user_url(url: str):
+    """Адрес из настроек (вебхук n8n, Make, свой сервер): только https (http — если разрешено на сервере)."""
+    parsed = urlparse(url or "")
+    if parsed.scheme not in ("https", "http") or (parsed.scheme == "http" and not ALLOW_HTTP) or not parsed.hostname:
+        raise ExtensionError("адрес должен начинаться с https://")
+
+
+def resolve_url(url_template: str, args: dict, settings: dict, m: dict) -> str:
+    """Готовый адрес запроса с проверкой домена (или адрес владельца из настроек)."""
+    key = _user_url_key(url_template, m)
+    if key:
+        url = str(settings.get(key) or "")
+        check_user_url(url)
+        return url
+    url = _render(url_template, args, settings, url_mode=True)
+    _check_host(_static_host(url), (m.get("permissions") or {}).get("hosts") or [])
+    return url
+
+
+def _template_hosts(url_template: str, m: dict | None = None) -> list[str]:
     """Все домены, куда может пойти запрос по шаблону. {app.locale} в домене разрешён (ru.wikipedia.org…):
-    его задаёт приложение, а не модель, и каждый вариант должен быть в permissions.hosts."""
+    его задаёт приложение, а не модель, и каждый вариант должен быть в permissions.hosts.
+    Адрес целиком из настройки type=url — его вводит владелец: домены не проверяем."""
+    if m is not None and _user_url_key(url_template, m):
+        return []
     if "{app.locale}" in (urlparse(url_template).netloc or ""):
         return [_static_host(url_template.replace("{app.locale}", code)) for code in i18n.LANGS]
     return [_static_host(url_template)]
@@ -161,6 +205,9 @@ def localize(m: dict, lang: str) -> dict:
                     for t in m.get("tools") or []]
     if m.get("on_task") and isinstance(tr.get("task_sync"), str):
         out["on_task"] = {**m["on_task"], "title": tr["task_sync"]}
+    ev = tr.get("events") or {}
+    if m.get("on") and isinstance(ev, dict):
+        out["on"] = {k: ({**v, "title": ev[k]} if isinstance(ev.get(k), str) else v) for k, v in m["on"].items()}
     sets = tr.get("settings") or {}
     out["settings"] = [{**s, **{k: v for k, v in (sets.get(s["key"]) or {}).items() if k in ("title", "hint")}}
                        for s in m.get("settings") or []]
@@ -177,8 +224,13 @@ def public_manifest(m: dict, lang: str | None = None) -> dict:
         "tools": [{"name": t["name"], "title": t.get("title") or t["name"], "description": t["description"]}
                   for t in m["tools"]],
         "task_sync": (m.get("on_task") or {}).get("title"),
+        # на какие события подписана и куда их шлёт (адрес из настроек — «ваш адрес»)
+        "events": [{"event": name, "title": spec.get("title"),
+                    "to_user_url": bool(_user_url_key((spec.get("http") or spec.get("webhook") or {}).get("url", ""), m))}
+                   for name, spec in (m.get("on") or {}).items()],
         "settings": [{"key": s["key"], "title": s.get("title") or s["key"], "secret": bool(s.get("secret")),
-                      "required": bool(s.get("required")), "hint": s.get("hint")} for s in m.get("settings") or []],
+                      "required": bool(s.get("required")), "hint": s.get("hint"), "type": s.get("type") or "text"}
+                     for s in m.get("settings") or []],
     }
 
 
@@ -263,19 +315,16 @@ def run_tool(row: dict, tool: dict, args: dict, context: dict | None = None) -> 
     m = row["manifest"]
     settings = {**(row.get("settings") or {}),
                 "app.locale": i18n.normalize((context or {}).get("locale") or i18n.DEFAULT)}
-    hosts = (m.get("permissions") or {}).get("hosts") or []
     try:
         if tool.get("http"):
             h = tool["http"]
-            url = _render(h["url"], args, settings, url_mode=True)
-            _check_host(_static_host(url), hosts)
+            url = resolve_url(h["url"], args, settings, m)
             method = (h.get("method") or "GET").upper()
             headers = {k: str(v) for k, v in _render(h.get("headers") or {}, args, settings).items()}
             body = _render(h.get("body"), args, settings) if h.get("body") is not None else None
             r = requests.request(method, url, headers=headers, json=body, timeout=15)
         else:
-            url = tool["webhook"]["url"]
-            _check_host(_static_host(url), hosts)
+            url = resolve_url(tool["webhook"]["url"], {}, settings, m)
             r = requests.post(url, json={"tool": tool["name"], "arguments": args, "settings": settings,
                                          "context": context or {}}, timeout=20)
         text = r.text

@@ -380,6 +380,7 @@ def main():
     log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE or "app")
     voices.warm_up()
     migrated = False
+    pruned = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -405,6 +406,14 @@ def main():
                     except Exception:  # noqa: BLE001
                         log.exception("voices: owner enrollment failed")
                     finalize_voices(conn)
+                    if not pruned:
+                        pruned = True
+                        try:
+                            n = voices.prune_background(conn)
+                            if n:
+                                log.info("voices: %d voices that never talked with the owner moved to background", n)
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: background prune failed")
                     if time.monotonic() - last_consolidate > 3600:
                         last_consolidate = time.monotonic()
                         try:

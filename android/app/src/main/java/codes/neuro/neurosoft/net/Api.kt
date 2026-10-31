@@ -36,7 +36,11 @@ data class ConversationItem(
 data class PersonRef(val id: Long, val name: String?, val number: Int, val isOwner: Boolean = false,
                      val ignored: Boolean = false,
                      /** Голос прозвучал в одном разговоре — «Собеседник», в «Людях» не показывается. */
-                     val transient: Boolean = false)
+                     val transient: Boolean = false,
+                     /** media — реклама, ТВ, объявления; crowd — люди рядом, не в разговоре; null/person — человек. */
+                     val kind: String? = null) {
+    val background: Boolean get() = ignored || kind == "media" || kind == "crowd"
+}
 
 data class Person(
     val ref: PersonRef,
@@ -835,6 +839,7 @@ object Api {
     private fun personRef(o: JSONObject) = PersonRef(
         id = o.getLong("id"), name = o.str("name"), number = o.optInt("number"),
         isOwner = o.optBoolean("is_owner"), ignored = o.optBoolean("ignored"), transient = o.optBoolean("transient"),
+        kind = o.str("kind"),
     )
 
     private fun person(o: JSONObject) = Person(

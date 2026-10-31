@@ -264,7 +264,8 @@ def material(conn, day: date) -> dict:
         "SELECT text, due, created_at FROM tasks WHERE created_at >= %s AND created_at < %s ORDER BY created_at",
         (start, end)).fetchall()
     memories = conn.execute(
-        "SELECT text, created_at FROM memories WHERE created_at >= %s AND created_at < %s ORDER BY created_at",
+        "SELECT text, created_at FROM memories WHERE created_at >= %s AND created_at < %s AND archived_at IS NULL "
+        "ORDER BY created_at",
         (start, end)).fetchall()
     questions = conn.execute(
         """SELECT question, answer, asked_at FROM questions WHERE asked_at >= %s AND asked_at < %s
@@ -389,6 +390,14 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
          crypto.seal_json(highlights), crypto.seal_json(places),
          json.dumps(stats), used[0] if used else None, content_hash),
     )
+    try:  # интеграции, подписанные на «итог дня»
+        from . import hooks  # noqa: PLC0415
+
+        hooks.emit(conn, "day", {"day": day.isoformat(), "title": str(result.get("title") or "")[:120],
+                                 "summary": str(result.get("summary") or "")[:3000],
+                                 "mood": str(result.get("mood") or "")[:40]})
+    except Exception:  # noqa: BLE001
+        log.exception("day %s: hook event failed", day)
     if used:  # стилизуем только выбранные к событиям фото
         conn.execute("UPDATE photos SET status = 'done' WHERE id = ANY(%s)", (used,))
     log.info("diary %s: %d highlights, %d photos", day, len(highlights), len(used))

@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: common:.
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
-        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py tests/test_tasks.py tests/test_tts.py tests/test_events.py tests/test_names.py tests/test_cleanup.py tests/test_geo.py tests/test_crypto.py
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py tests/test_tasks.py tests/test_tts.py tests/test_events.py tests/test_names.py tests/test_cleanup.py tests/test_geo.py tests/test_crypto.py tests/test_integrations.py
       - name: Voice model on real recordings
         working-directory: server
         env:

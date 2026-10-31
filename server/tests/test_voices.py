@@ -467,3 +467,63 @@ def test_whole_conversation_decides_and_dedupe_suggests(clean):
     assert voices.dedupe(conn)["merged"] == 1
     left = {r["id"] for r in conn.execute("SELECT id FROM people").fetchall()}
     assert (a["id"] in left) != (b["id"] in left)
+
+
+def test_background_voices_are_not_people(clean, monkeypatch):
+    """Шумное место: голос, который не отвечает владельцу (реклама, объявления, люди рядом), не становится
+    «Голосом N»; модель помечает фон и называет участника по имени из разговора."""
+    conn = clean
+    from agent import worker as agent
+    from neuro import llm, people, voices
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 3.0), (OWNER, 3.0), (ANNA, 3.0))
+    rows = run_chunk(conn, pcm, Timed(spans), minutes_ago=40)
+    owner_id, anna_id = rows[0]["person_id"], rows[1]["person_id"]
+    people.update_person(conn, owner_id, {"is_owner": True})
+
+    # второй разговор: владелец с Анной + диктор где-то рядом, ни разу не отвечает владельцу
+    talk, tspans = dialog((OWNER, 3.0), (ANNA, 3.0), (OWNER, 2.5))
+    t = len(talk) / 2 / SR
+    gap1, boris1, gap2, boris2 = silence(10), synth(**BORIS, sec=5.0, seed=11), silence(9), synth(**BORIS, sec=5.0, seed=12)
+    pcm2 = np.concatenate([np.frombuffer(talk, dtype=np.int16), gap1, boris1, gap2, boris2]).tobytes()
+    b1 = (t + 10, t + 15)
+    b2 = (b1[1] + 9, b1[1] + 14)
+    rows2 = run_chunk(conn, pcm2, Timed(tspans + [b1, b2]), minutes_ago=20)
+    assert rows2[1]["person_id"] == anna_id
+    assert rows2[-1]["person_id"] is None and rows2[-2]["person_id"] is None  # диктор — не человек
+    assert conn.execute("SELECT count(*) AS n FROM people").fetchone()["n"] == 2
+
+    # модель: «Голос 2» — участник, прямо назван по имени — подписываем сразу
+    conv2 = conn.execute("SELECT conversation_id FROM segments WHERE id = %s", (rows2[0]["id"],)).fetchone()[
+        "conversation_id"]
+    monkeypatch.setattr(llm, "configured", lambda: True)
+    monkeypatch.setattr(llm, "chat_json", lambda *a, **k: {
+        "title": "Встреча", "emoji": "☕", "summary": "Поговорили.", "tasks": [], "memories": [], "topics": [],
+        "speakers": [{"voice": "Голос 2", "kind": "person", "name": "Анна", "sure": True,
+                      "evidence": "Анна, привет!"}]})
+    conn.execute("UPDATE conversations SET status = 'processing' WHERE id = %s", (conv2,))
+    agent.summarize_one(conn, conv2)
+    assert conn.execute("SELECT name FROM people WHERE id = %s", (anna_id,)).fetchone()["name"] == "Анна"
+
+    # голос рекламы, уже попавший в люди: модель помечает его фоном — он пропадает из людей и расшифровки
+    ad = conn.execute("INSERT INTO people (number) VALUES (7) RETURNING id").fetchone()["id"]
+    conn.execute("UPDATE segments SET person_id = %s WHERE id = %s", (ad, rows2[-1]["id"]))
+    segs = conn.execute(people.SEGMENT_SELECT + " WHERE s.conversation_id = %s ORDER BY s.started_at", (conv2,)).fetchall()
+    people.apply_summary(conn, conv2, segs, {"speakers": [{"voice": "Голос 7", "kind": "media"}]}, [])
+    assert conn.execute("SELECT kind, kind_auto FROM people WHERE id = %s", (ad,)).fetchone() == \
+        {"kind": "media", "kind_auto": True}
+    segs = conn.execute(people.SEGMENT_SELECT + " WHERE s.conversation_id = %s ORDER BY s.started_at", (conv2,)).fetchall()
+    from neuro.assistant import transcript_text
+    assert "Голос 7" not in transcript_text(segs)
+    assert ad not in [p["id"] for p in people.list_people(conn)["people"]]
+    # владелец сказал «это человек» — модель больше не прячет
+    people.update_person(conn, ad, {"ignored": False})
+    people.apply_summary(conn, conv2, segs, {"speakers": [{"voice": "Голос 7", "kind": "media"}]}, [])
+    assert conn.execute("SELECT kind FROM people WHERE id = %s", (ad,)).fetchone()["kind"] == "person"
+
+    # разовая уборка: безымянный голос, ни разу не отвечавший владельцу, — в фон
+    noise = conn.execute("INSERT INTO people (number) VALUES (8) RETURNING id").fetchone()["id"]
+    conn.execute("UPDATE segments SET person_id = %s WHERE id = %s", (noise, rows2[-2]["id"]))
+    assert voices.prune_background(conn) == 1
+    assert conn.execute("SELECT kind FROM people WHERE id = %s", (noise,)).fetchone()["kind"] == "crowd"
+    assert conn.execute("SELECT kind FROM people WHERE id = %s", (anna_id,)).fetchone()["kind"] is None
+    assert voices.prune_background(conn) == 0  # только один раз

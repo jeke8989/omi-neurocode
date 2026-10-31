@@ -69,7 +69,7 @@ def _fragments(conn, day: date, final: bool) -> list[dict]:
     rows = conn.execute(
         f"""SELECT c.id, c.started_at, c.last_activity, c.title, c.summary, c.event_id, c.topics,
                    (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks,
-                   (SELECT count(*) FROM memories m WHERE m.conversation_id = c.id) AS memories,
+                   (SELECT count(*) FROM memories m WHERE m.conversation_id = c.id AND m.archived_at IS NULL) AS memories,
                    ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk) AS texts,
                    (SELECT array_agg(DISTINCT coalesce(p.name, CASE WHEN p.is_owner THEN 'владелец' END))
                       FROM segments s JOIN people p ON p.id = s.person_id
@@ -221,7 +221,8 @@ def refresh(conn, eid: int):
                         coalesce((SELECT array_agg(DISTINCT s.person_id) FROM segments s
                                   JOIN conversations c3 ON c3.id = s.conversation_id
                                   JOIN people p ON p.id = s.person_id
-                                  WHERE c3.event_id = %(id)s AND c3.trashed_at IS NULL AND NOT p.ignored), '{}') AS people,
+                                  WHERE c3.event_id = %(id)s AND c3.trashed_at IS NULL AND NOT p.ignored
+                                    AND coalesce(p.kind, 'person') = 'person'), '{}') AS people,
                         (SELECT ph.id FROM photos ph WHERE ph.status IN ('analyzed', 'done')
                            AND ph.taken_at BETWEEN min(c.started_at) - interval '15 minutes'
                                                AND max(c.last_activity) + interval '15 minutes'

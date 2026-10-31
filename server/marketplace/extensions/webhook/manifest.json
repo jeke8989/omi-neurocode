@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "id": "webhook",
+  "name": "Вебхук",
+  "icon": "🔗",
+  "version": "1.0.0",
+  "author": "Mnemo",
+  "description": "События Mnemo — на ваш адрес: n8n, Make, Zapier, Home Assistant или свой сервер.",
+  "permissions": {
+    "hosts": []
+  },
+  "settings": [
+    {
+      "key": "url",
+      "title": "Адрес вебхука",
+      "type": "url",
+      "required": true,
+      "hint": "https://… из n8n (Webhook), Make (Custom webhook), Zapier (Catch Hook) или свой"
+    },
+    {
+      "key": "secret",
+      "title": "Секрет подписи",
+      "secret": true,
+      "required": false,
+      "hint": "Необязательно: заголовок X-Mnemo-Signature = sha256 HMAC тела"
+    }
+  ],
+  "tools": [],
+  "on": {
+    "conversation": {
+      "title": "Новый разговор: название, итог, люди, задачи",
+      "webhook": {
+        "url": "{settings.url}"
+      }
+    },
+    "task": {
+      "title": "Новая задача",
+      "webhook": {
+        "url": "{settings.url}"
+      }
+    },
+    "memory": {
+      "title": "«Запомни это» и факты из разговоров",
+      "webhook": {
+        "url": "{settings.url}"
+      }
+    },
+    "day": {
+      "title": "Итог дня из дневника",
+      "webhook": {
+        "url": "{settings.url}"
+      }
+    }
+  },
+  "i18n": {
+    "en": {
+      "name": "Webhook",
+      "description": "Mnemo events to your address: n8n, Make, Zapier, Home Assistant or your own server.",
+      "settings": {
+        "url": {
+          "title": "Webhook address",
+          "hint": "https://… from n8n (Webhook), Make (Custom webhook), Zapier (Catch Hook) or your own"
+        },
+        "secret": {
+          "title": "Signing secret",
+          "hint": "Optional: X-Mnemo-Signature header = sha256 HMAC of the body"
+        }
+      },
+      "events": {
+        "conversation": "New conversation: title, summary, people, tasks",
+        "task": "New task",
+        "memory": "“Remember this” and facts from conversations",
+        "day": "Day summary from the diary"
+      }
+    },
+    "tr": {
+      "name": "Webhook",
+      "description": "Mnemo olayları adresinize: n8n, Make, Zapier, Home Assistant veya kendi sunucunuz.",
+      "settings": {
+        "url": {
+          "title": "Webhook adresi",
+          "hint": "n8n (Webhook), Make (Custom webhook), Zapier (Catch Hook) ya da kendi https://… adresiniz"
+        },
+        "secret": {
+          "title": "İmza anahtarı",
+          "hint": "İsteğe bağlı: X-Mnemo-Signature başlığı = gövdenin sha256 HMAC'i"
+        }
+      },
+      "events": {
+        "conversation": "Yeni konuşma: başlık, özet, kişiler, görevler",
+        "task": "Yeni görev",
+        "memory": "“Bunu hatırla” ve konuşmalardan bilgiler",
+        "day": "Günlükten gün özeti"
+      }
+    },
+    "es": {
+      "name": "Webhook",
+      "description": "Eventos de Mnemo a tu dirección: n8n, Make, Zapier, Home Assistant o tu propio servidor.",
+      "settings": {
+        "url": {
+          "title": "Dirección del webhook",
+          "hint": "https://… de n8n (Webhook), Make (Custom webhook), Zapier (Catch Hook) o el tuyo"
+        },
+        "secret": {
+          "title": "Secreto de firma",
+          "hint": "Opcional: cabecera X-Mnemo-Signature = sha256 HMAC del cuerpo"
+        }
+      },
+      "events": {
+        "conversation": "Nueva conversación: título, resumen, personas, tareas",
+        "task": "Nueva tarea",
+        "memory": "«Recuerda esto» y datos de las conversaciones",
+        "day": "Resumen del día del diario"
+      }
+    }
+  }
+}

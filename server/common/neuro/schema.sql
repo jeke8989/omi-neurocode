@@ -375,3 +375,27 @@ ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS context TEXT;
 -- Звук из памяти кулона (записан без телефона, забран позже): расшифровывается после живого
 ALTER TABLE audio_chunks ADD COLUMN IF NOT EXISTS offline BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS audio_chunks_queue_idx ON audio_chunks (status, offline, started_at);
+
+-- Голоса фона: media — реклама, объявления, ТВ, радио; crowd — посторонние рядом; person — владелец сказал «человек».
+-- Фон не показывается в людях, расшифровке для модели и итогах. kind_auto — решила модель (можно вернуть).
+ALTER TABLE people ADD COLUMN IF NOT EXISTS kind TEXT;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS kind_auto BOOLEAN NOT NULL DEFAULT false;
+
+-- События для интеграций (вебхуки, n8n, Make, свои плагины): очередь с повторами, содержимое зашифровано
+CREATE TABLE IF NOT EXISTS hook_events (
+    id          BIGSERIAL PRIMARY KEY,
+    ext_id      TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
+    event       TEXT NOT NULL,
+    payload     JSONB NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    error       TEXT,
+    next_at     TIMESTAMPTZ,
+    sent_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS hook_events_queue_idx ON hook_events (status, id);
+
+-- Память без мусора: архив (модель при перепроверке сочла записью не нужной — можно вернуть) и отметка проверки
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS reviewed BOOLEAN NOT NULL DEFAULT false;

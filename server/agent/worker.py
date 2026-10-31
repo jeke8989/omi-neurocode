@@ -10,7 +10,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, i18n, people, retention
+from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, retention
+from neuro import memory as memorylib
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
@@ -25,11 +26,12 @@ SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают рас
  "emoji": "одно эмодзи, которое лучше всего передаёт тему разговора",
  "summary": "о чём говорили и к чему пришли, 2–6 предложений; называй людей по именам, если они известны",
  "tasks": [{tasklib.SCHEMA}],
- "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"],
+ "memories": ["0–2 долгих факта, см. правила ниже; обычно пусто"],
  {people.SUMMARY_PEOPLE_FIELDS}}}
 {tasklib.RULES}
 Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "-", summary = "", списки пустые.
-{people.SUMMARY_PEOPLE_RULES}"""
+{people.SUMMARY_PEOPLE_RULES}
+{memorylib.RULES}"""
 
 REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кнопку «запомни это». Тебе дан фрагмент расшифровки перед нажатием
 (может содержать ошибки распознавания). Верни строго JSON:
@@ -142,6 +144,17 @@ def summarize_one(conn, conv_id: int):
             (crypto.seal(title), crypto.seal(summary), emoji, crypto.seal_list(topics), conv_id),
         )
     log.info("conversation %s: '%s', %d tasks, %d memories", conv_id, title, len(tasks), len(memories))
+    if summary:  # интеграции, подписанные на «новый разговор» (вебхук, n8n…)
+        try:
+            row = conn.execute("SELECT started_at, last_activity FROM conversations WHERE id = %s", (conv_id,)).fetchone()
+            who = sorted({people.speaker_label(s).rstrip("?") for s in segs
+                          if s.get("person_id") and not s.get("person_ignored") and s.get("person_kind") is None})
+            hooks.emit(conn, "conversation", {
+                "id": conv_id, "title": title, "summary": summary, "emoji": emoji,
+                "started_at": row["started_at"].isoformat(), "ended_at": row["last_activity"].isoformat(),
+                "topics": topics, "people": who, "tasks": [t.get("text") for t in tasks if t.get("text")]})
+        except Exception:  # noqa: BLE001
+            log.exception("conversation %s: hook event failed", conv_id)
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +372,8 @@ def sync_task_integrations(conn):
     """Лента задач -> подключённые сервисы. Каждая новая задача уходит во все включённые расширения
     с хуком on_task (Notion, GitHub Issues, Telegram и любые другие из маркетплейса)."""
     rows = conn.execute("SELECT id, manifest, settings, installed_at FROM extensions WHERE enabled").fetchall()
-    sinks = [r for r in rows if r["manifest"].get("on_task") and extensions.is_ready(r)]
+    sinks = [r for r in rows if (r["manifest"].get("on_task") or (r["manifest"].get("on") or {}).get("task"))
+             and extensions.is_ready(r)]
     if not sinks:
         return
     for sink in sinks:
@@ -370,14 +384,18 @@ def sync_task_integrations(conn):
                  AND (%s::text IS NULL OR t.target = %s)
                  AND NOT EXISTS (SELECT 1 FROM task_exports e WHERE e.task_id = t.id AND e.ext_id = %s)
                ORDER BY t.id LIMIT 10""",
-            (sink["installed_at"], sink["manifest"]["on_task"].get("only_target"),
-             sink["manifest"]["on_task"].get("only_target"), sink["id"])).fetchall()
+            (sink["installed_at"], (sink["manifest"].get("on_task") or {}).get("only_target"),
+             (sink["manifest"].get("on_task") or {}).get("only_target"), sink["id"])).fetchall()
         for t in tasks:
             args = {"text": t["text"], "due": t["due"] or "", "assignee": t["assignee"] or "",
                     "source": {"conversation": "из разговора", "button": "с кнопки", "agent": "от агента",
                                "voice": "голосом"}.get(t["source"], t["source"]),
                     "conversation": t["conversation"] or ""}
-            ok, ref = extensions.call_hook(sink, args)
+            if (sink["manifest"].get("on") or {}).get("task"):  # новый формат событий (вебхук, n8n…)
+                ok, ref = hooks.send(sink, "task", {"id": t["id"], **args})
+                ref = "" if ok else ref
+            else:
+                ok, ref = extensions.call_hook(sink, args)
             conn.execute(
                 """INSERT INTO task_exports (task_id, ext_id, ok, ref, error) VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (task_id, ext_id) DO NOTHING""",
@@ -408,6 +426,14 @@ def main():
                     process_events(conn)
                     export_tasks(conn)
                     sync_task_integrations(conn)
+                    try:
+                        memorylib.review_tick(conn)  # один раз: накопленная память — без мусора (в архив)
+                    except Exception:  # noqa: BLE001
+                        log.exception("memory review failed")
+                    try:
+                        hooks.deliver(conn)  # события для интеграций: разговоры, «запомни», итоги дня
+                    except Exception:  # noqa: BLE001
+                        log.exception("hook delivery failed")
                     try:
                         events.tick(conn)  # фрагменты -> события, мусор -> корзина, ночью — разбор дня
                     except Exception:  # noqa: BLE001

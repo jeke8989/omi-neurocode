@@ -31,8 +31,8 @@ def transcript_text(segs: list[dict], limit: int | None = None) -> str:
     Голоса с пометкой «не учитывать» (телевизор, радио) пропускаются."""
     lines = []
     for s in segs:
-        if s.get("person_ignored") or s.get("junk"):
-            continue
+        if s.get("person_ignored") or s.get("junk") or s.get("person_kind") in ("media", "crowd"):
+            continue  # телевизор, реклама, чужие разговоры рядом — не речь участников
         lines.append(f"[{fmt_time(s['started_at'])}] {speaker_label(s)}: {s['text']}")
     text = "\n".join(lines)
     limit = limit or config.LLM_MAX_CHARS
@@ -82,9 +82,13 @@ def insert_tasks(conn, conv_id, tasks: list[dict], source: str):
 
 
 def insert_memories(conn, conv_id, memories: list[str], source: str):
-    for m in memories:
-        conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s)",
-                     (conv_id, crypto.seal(m), source))
+    from . import hooks, memory  # noqa: PLC0415 — hooks тянет расширения
+
+    for m in memory.clean(conn, memories, source):  # без пустого и без повторов того, что уже в памяти
+        row = conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s) "
+                           "RETURNING id, created_at", (conv_id, crypto.seal(m), source)).fetchone()
+        hooks.emit(conn, "memory", {"id": row["id"], "text": m, "conversation_id": conv_id,
+                                    "created_at": row["created_at"].isoformat(), "source": source})
 
 
 # ---------------------------------------------------------------- конец вопроса по паузе
@@ -150,7 +154,7 @@ def build_context(conn, device_id: str) -> str:
     if tasks:
         parts.append("Открытые задачи:\n" + "\n".join(
             f"- {t['text']}" + (f" (срок: {t['due']})" if t["due"] else "") for t in tasks))
-    mems = conn.execute("SELECT text FROM memories ORDER BY created_at DESC LIMIT 15").fetchall()
+    mems = conn.execute("SELECT text FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 15").fetchall()
     if mems:
         parts.append("Запомненное:\n" + "\n".join(f"- {m['text']}" for m in mems))
     return "\n\n".join(parts)
