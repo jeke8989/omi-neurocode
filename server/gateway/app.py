@@ -25,8 +25,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_core, assistant, config, db, diary, extensions, i18n, llm, pairing, people, retention,
-                   voices)
+from neuro import (agent_core, assistant, claude_agent, config, db, diary, extensions, i18n, llm, pairing, people,
+                   retention, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -292,7 +292,22 @@ async def ws_audio(websocket: WebSocket):
 # REST API для приложения
 # ---------------------------------------------------------------------------
 async def health(request: Request):
-    return Json({"ok": True, "service": "neurosoft-gateway"})
+    return Json({"ok": True, "status": "ok", "service": "neurosoft-gateway"})
+
+
+async def health_full(request: Request):
+    """Разбивка по сервисам для мониторинга: api, db, claude. 200 — ok/degraded, 503 — база недоступна."""
+    services = {"api": True, "db": False, "claude": False}
+    try:
+        async with await aconnect() as conn:
+            await conn.execute("SELECT 1")
+        services["db"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    info = await anyio.to_thread.run_sync(lambda: claude_agent.service_info(timeout=1.5))
+    services["claude"] = bool(info.get("available"))
+    state = "ok" if all(services.values()) else "degraded" if services["db"] else "down"
+    return Json({"status": state, "services": services}, status_code=503 if state == "down" else 200)
 
 
 # одноразовый код подключения: не больше 10 попыток в минуту с одного адреса
@@ -793,9 +808,19 @@ async def api_chat(request: Request):
         level = str(body.get("level") or "auto")
         if not text:
             return Json({"error": "empty"}, status_code=400)
-        if level != "auto" and level not in agent_core.LEVELS:
-            return Json({"error": "level: auto | fast | tools | deep"}, status_code=400)
-        if not llm.configured():
+        if level != "auto" and level != "claude" and level not in agent_core.LEVELS:
+            return Json({"error": "level: auto | fast | tools | deep | claude"}, status_code=400)
+        if level == "claude":
+            def check():
+                with db.connect() as conn:
+                    return claude_agent.configured(conn), claude_agent.busy(conn)
+
+            ready, running = await _run_in_thread(check)
+            if not ready:
+                return Json({"error": "claude_token"}, status_code=400)
+            if running:
+                return Json({"error": "claude_busy"}, status_code=423)
+        elif not llm.configured():
             return Json({"error": "на сервере не задан ключ модели (OPENROUTER_API_KEY)"}, status_code=400)
         level = agent_core.route(text, "chat") if level == "auto" else level
 
@@ -831,7 +856,40 @@ async def api_chat_clear(request: Request):
         return _unauthorized()
     async with await aconnect() as conn:
         await conn.execute("DELETE FROM chat_messages")
+        await conn.execute("DELETE FROM settings WHERE key = %s", (claude_agent.SESSION_KEY,))  # Claude — с чистого листа
     return Json({"cleared": True})
+
+
+async def api_claude(request: Request):
+    """Режим чата «Claude»: токен (claude setup-token), модель, новая сессия, остановка, сведения о сервисе."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = {}
+    if request.method == "POST":
+        body = await _body(request)
+        if body is None:
+            return Json({"error": "bad json"}, status_code=400)
+        token = str(body.get("token") or "").strip()
+        if token and not claude_agent.TOKEN_RE.match(token):
+            return Json({"error": "token looks wrong: paste the whole line from claude setup-token"}, status_code=400)
+        if "model" in body and str(body["model"] or "") not in claude_agent.MODELS:
+            return Json({"error": "model: " + " | ".join(m or '""' for m in claude_agent.MODELS)}, status_code=400)
+
+    def work(conn):
+        if request.method == "DELETE":
+            claude_agent.set_token(conn, None)
+        elif request.method == "POST":
+            if body.get("token"):
+                claude_agent.set_token(conn, str(body["token"]).strip())
+            if "model" in body:
+                claude_agent.set_model(conn, str(body["model"] or ""))
+            if body.get("new_session"):
+                claude_agent.reset_session(conn)
+            if body.get("cancel"):
+                claude_agent.cancel()
+        return claude_agent.status(conn)
+
+    return Json(await _sync(work))
 
 
 # ---------------------------------------------------------------------------
@@ -1267,6 +1325,7 @@ async def lifespan(app):
 app = Starlette(
     routes=[
         Route("/health", health),
+        Route("/health/full", health_full),
         Route("/api/status", api_status),
         Route("/api/pair", api_pair, methods=["POST"]),
         Route("/api/conversations", api_conversations),
@@ -1281,6 +1340,7 @@ app = Starlette(
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
+        Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),
         Route("/api/extensions/install", api_extension_install, methods=["POST"]),
         Route("/api/extensions/{id}", api_extension, methods=["POST", "DELETE"]),

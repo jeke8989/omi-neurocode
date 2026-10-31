@@ -144,6 +144,13 @@ data class ChatMessage(val id: Long, val role: String, val text: String, val cha
                        val createdAt: String)
 data class ChatState(val messages: List<ChatMessage>, val runs: Map<Long, ChatRun>, val running: Boolean)
 
+/** Режим чата «Claude»: токен на сервере (сюда приходит только хвост), сервис claude и его репозиторий. */
+data class ClaudeInfo(
+    val configured: Boolean, val tokenHint: String?, val session: Boolean, val model: String, val models: List<String>,
+    val available: Boolean, val version: String?, val repo: String?, val head: String?, val dirty: Boolean,
+    val deployKey: String?, val busy: Boolean,
+)
+
 data class ExtSetting(val key: String, val title: String, val secret: Boolean, val required: Boolean,
                       val hint: String?, val filled: Boolean, val value: String?)
 data class ExtTool(val name: String, val title: String, val description: String)
@@ -376,6 +383,32 @@ object Api {
 
     suspend fun clearChat() {
         call("POST", "/api/chat/clear", JSONObject())
+    }
+
+    // ---------------------------------------------------------------- Claude Code
+    suspend fun claude(): ClaudeInfo = claudeInfo(JSONObject(call("GET", "/api/claude")))
+
+    suspend fun setClaude(token: String? = null, model: String? = null, newSession: Boolean = false,
+                          cancel: Boolean = false): ClaudeInfo {
+        val body = JSONObject()
+        if (!token.isNullOrBlank()) body.put("token", token.trim())
+        if (model != null) body.put("model", model)
+        if (newSession) body.put("new_session", true)
+        if (cancel) body.put("cancel", true)
+        return claudeInfo(JSONObject(call("POST", "/api/claude", body)))
+    }
+
+    suspend fun disconnectClaude(): ClaudeInfo = claudeInfo(JSONObject(call("DELETE", "/api/claude")))
+
+    private fun claudeInfo(o: JSONObject): ClaudeInfo {
+        val s = o.optJSONObject("service") ?: JSONObject()
+        return ClaudeInfo(
+            configured = o.optBoolean("configured"), tokenHint = o.str("token_hint"), session = o.optBoolean("session"),
+            model = o.optString("model"), models = o.optJSONArray("models").strings().ifEmpty { listOf("") },
+            available = s.optBoolean("available"), version = s.str("version"), repo = s.str("repo"),
+            head = s.str("head"), dirty = s.optBoolean("dirty"), deployKey = s.str("deploy_key"),
+            busy = s.optBoolean("busy"),
+        )
     }
 
     // ---------------------------------------------------------------- расширения

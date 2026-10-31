@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import config, extensions, i18n, llm, people
+from . import claude_agent, config, extensions, i18n, llm, people
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -204,11 +204,13 @@ def step(conn, run_id: int, kind: str, title: str, detail: str | None = None):
 
 
 def start_run(conn, question: str, level: str, channel: str, device_id: str | None) -> tuple[int, int]:
-    """Создаёт сообщение пользователя и запуск. Возвращает (run_id, message_id)."""
+    """Создаёт сообщение пользователя и запуск. Возвращает (run_id, message_id).
+    level: fast | tools | deep — агент Mnemo, claude — Claude Code CLI (claude_agent)."""
+    model = claude_agent.LABEL if level == "claude" else llm.resolve_model(conn, LEVELS[level]["task"])
     run = conn.execute(
         """INSERT INTO agent_runs (level, question, channel, device_id, model)
            VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-        (level, question, channel, device_id, llm.resolve_model(conn, LEVELS[level]["task"])),
+        (level, question, channel, device_id, model),
     ).fetchone()["id"]
     msg = conn.execute(
         "INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('user', %s, %s, %s) RETURNING id",
@@ -224,10 +226,25 @@ def history(conn, before_run: int, limit: int = 8) -> list[dict]:
     return [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
 
 
+def finish(conn, run_id: int, channel: str, status: str, answer: str) -> str:
+    """Итог запуска: статус и ответ в agent_runs, ответ — сообщением в чат."""
+    conn.execute("UPDATE agent_runs SET status = %s, answer = %s, finished_at = now() WHERE id = %s",
+                 (status, answer, run_id))
+    conn.execute("INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('assistant', %s, %s, %s)",
+                 (answer, channel, run_id))
+    return answer
+
+
 def execute(conn, run_id: int) -> str:
     """Выполняет запуск до конца. Безопасно вызывать в отдельном потоке со своим соединением."""
     run = conn.execute("SELECT * FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     level, channel, device_id = run["level"], run["channel"], run["device_id"]
+    if level == "claude":
+        try:
+            return claude_agent.execute(conn, run_id, step, finish)
+        except Exception:  # noqa: BLE001
+            log.exception("claude run %s failed", run_id)
+            return finish(conn, run_id, channel, "failed", i18n.t(i18n.lang(conn), "agent.failed"))
     cfg = LEVELS[level]
     model = run["model"]
     lang = i18n.lang(conn)
@@ -297,11 +314,7 @@ def execute(conn, run_id: int) -> str:
         log.exception("run %s failed", run_id)
         step(conn, run_id, "error", "⚠️ Ошибка: " + str(exc)[:200])
         answer, status = i18n.t(i18n.lang(conn), "agent.failed"), "failed"
-    conn.execute("UPDATE agent_runs SET status = %s, answer = %s, finished_at = now() WHERE id = %s",
-                 (status, answer, run_id))
-    conn.execute("INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('assistant', %s, %s, %s)",
-                 (answer, channel, run_id))
-    return answer
+    return finish(conn, run_id, channel, status, answer)
 
 
 def _short(text: str, n: int = 110) -> str:

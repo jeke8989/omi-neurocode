@@ -93,5 +93,11 @@ echo "Подключите приложение: Mnemo -> «Подключить
 docker compose exec -T gateway python -m neuro.pairing | sed 's/^/    /'
 echo "Новый код, если этот истёк:  docker compose exec gateway python -m neuro.pairing"
 echo
+key=$(docker compose exec -T claude cat /home/claude/.ssh/id_ed25519.pub 2>/dev/null || true)
+if [ -n "$key" ]; then
+  echo "Claude в чате: добавьте этот ключ в GitHub (Settings -> Deploy keys, Allow write access), чтобы он мог пушить:"
+  echo "    $key"
+  echo
+fi
 echo "Логи:      docker compose logs -f --tail 50"
 echo "Остановить: docker compose down   (данные сохранятся)"

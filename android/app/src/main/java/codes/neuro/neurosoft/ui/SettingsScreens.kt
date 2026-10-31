@@ -77,6 +77,7 @@ fun SettingsScreen() {
     val device by Core.device.collectAsState()
     val upload by Core.upload.collectAsState()
     val features by Repo.features.state.collectAsState()
+    val claude by Repo.claude.state.collectAsState()
     val lens = rememberLensState()
     val fmt = rememberFmt()
     val scope = rememberCoroutineScope()
@@ -86,7 +87,10 @@ fun SettingsScreen() {
     val batteryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         ignoringBattery = isIgnoringBattery(context)
     }
-    LaunchedEffect(Unit) { Repo.features.refresh() }
+    LaunchedEffect(Unit) {
+        Repo.features.refresh()
+        Repo.claude.refresh()
+    }
     val c = Mn.c
 
     if (confirmClear) {
@@ -130,6 +134,10 @@ fun SettingsScreen() {
                 subtitle = stringResource(R.string.ai_models_sub), onClick = { Nav.push(Route.Models) }) }
             item { ListRow(stringResource(R.string.integrations), icon = Icons.Puzzle, chevron = true,
                 subtitle = stringResource(R.string.integrations_sub), onClick = { Nav.push(Route.Extensions) }) }
+            item { ListRow(stringResource(R.string.claude_code), icon = Icons.Code, chevron = true,
+                subtitle = stringResource(R.string.claude_sub),
+                value = claude.data?.let { stringResource(if (it.configured) R.string.claude_on else R.string.claude_off) },
+                onClick = { Nav.push(Route.Claude) }) }
         }
 
         Group(stringResource(R.string.tab_people)) {

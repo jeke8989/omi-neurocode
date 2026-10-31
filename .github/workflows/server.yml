@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: common:.
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
-        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py
       - name: Voice model on real recordings
         working-directory: server
         env:
@@ -74,3 +74,26 @@ jobs:
         if: always()
         working-directory: server
         run: docker compose logs --tail 200
+
+  # После пуша в main (в том числе пуша Claude из чата приложения) — обновить сервер.
+  # Секреты репозитория: DEPLOY_SSH_KEY (ключ с command="…/ci-update.sh" на сервере), DEPLOY_KNOWN_HOSTS;
+  # переменная DEPLOY_HOST — IP сервера. Нет DEPLOY_HOST — шаг пропускается.
+  deploy:
+    needs: [tests, docker-e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_HOST != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-server
+      cancel-in-progress: false
+    steps:
+      - name: Update server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "root@$HOST" update

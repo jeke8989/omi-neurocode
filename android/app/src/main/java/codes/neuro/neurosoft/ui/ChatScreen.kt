@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ChatMessage
@@ -29,21 +30,26 @@ import codes.neuro.neurosoft.net.ChatRun
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val LEVELS = listOf("auto", "fast", "tools", "deep")
+// claude — не уровень агента Mnemo, а другой исполнитель: Claude Code на сервере (Настройки -> Claude Code)
+private val LEVELS = listOf("auto", "fast", "tools", "deep", "claude")
 
 @Composable
 private fun levelTitle(level: String): String = stringResource(when (level) {
     "fast" -> R.string.level_fast
     "tools" -> R.string.level_tools
     "deep" -> R.string.level_deep
+    "claude" -> R.string.level_claude
     else -> R.string.level_auto
 })
 
 @Composable
 fun ChatScreen(prefill: String?) {
     val res by Repo.chat.state.collectAsState()
+    val claude by Repo.claude.state.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
-    var level by rememberSaveable { mutableStateOf(0) }
+    var level by rememberSaveable { mutableStateOf(LEVELS.indexOf(Core.prefs.chatLevel).coerceAtLeast(0)) }
+    val claudeMode = LEVELS[level] == "claude"
+    val claudeMissing = claudeMode && claude.data?.configured == false
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Throwable?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -55,6 +61,10 @@ fun ChatScreen(prefill: String?) {
     fun send(text: String) {
         val t = text.trim()
         if (t.isEmpty() || sending) return
+        if (claudeMissing) {
+            Nav.push(Route.Claude)
+            return
+        }
         sending = true
         error = null
         scope.launch {
@@ -70,6 +80,7 @@ fun ChatScreen(prefill: String?) {
         }
     }
 
+    LaunchedEffect(claudeMode) { if (claudeMode) Repo.claude.refresh() }
     LaunchedEffect(Unit) {
         if (prefill != null && !prefillSent) {
             prefillSent = true
@@ -138,8 +149,11 @@ fun ChatScreen(prefill: String?) {
             }
         }
         Composer(
-            input = input, onInput = { input = it }, level = level, onLevel = { level = it },
-            sending = sending, error = error, onSend = { send(input) },
+            input = input, onInput = { input = it }, level = level, onLevel = {
+                level = it
+                Core.prefs.chatLevel = LEVELS[it]
+            },
+            sending = sending, error = error, claudeMissing = claudeMissing, onSend = { send(input) },
         )
     }
 }
@@ -222,7 +236,12 @@ private fun Working(run: ChatRun?) {
             Lens(LensState.THINKING, 34.dp)
             Spacer(Modifier.width(6.dp))
             Txt(stringResource(R.string.working) + (run?.let { ", " + levelTitle(it.level).lowercase() } ?: ""),
-                T.smallStrong)
+                T.smallStrong, modifier = Modifier.weight(1f))
+            if (run?.level == "claude") {
+                val scope = rememberCoroutineScope()
+                Txt(stringResource(R.string.claude_stop), T.smallStrong, c.red, Modifier.padding(horizontal = 8.dp)
+                    .quietTap { scope.launch { try { Api.setClaude(cancel = true) } catch (_: Exception) {} } })
+            }
         }
         run?.steps?.filter { it.kind != "result" && it.kind != "level" }?.takeLast(5)?.forEach { s ->
             Txt(s.title, T.caption, c.graphite, Modifier.padding(start = 40.dp, top = 3.dp), maxLines = 2)
@@ -233,12 +252,16 @@ private fun Working(run: ChatRun?) {
 @Composable
 private fun Composer(
     input: String, onInput: (String) -> Unit, level: Int, onLevel: (Int) -> Unit, sending: Boolean,
-    error: Throwable?, onSend: () -> Unit,
+    error: Throwable?, claudeMissing: Boolean, onSend: () -> Unit,
 ) {
     val c = Mn.c
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
         if (error != null) {
             Txt(errorText(error), T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+        if (claudeMissing) {
+            Txt(stringResource(R.string.claude_connect_hint), T.smallStrong, c.lens,
+                Modifier.padding(horizontal = 20.dp, vertical = 4.dp).quietTap { Nav.push(Route.Claude) })
         }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {

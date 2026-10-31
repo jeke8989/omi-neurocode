@@ -24,6 +24,7 @@
 | ✅ **Лента задач** | Задачи собираются сами из разговоров, кнопки и агента. Каждая новая задача уходит в подключённые сервисы (Notion, GitHub Issues…). |
 | 📔 **Дневник жизни** | Каждый день собирается история: настроение, хайлайты, места по геолокации, фото дня в выбранном ИИ-стиле. Фото отбираются под события, а не все подряд. Каждая часть отключается в настройках. |
 | 🧩 **Маркетплейс** | Расширения в виде одного `manifest.json`: декларативные HTTP-инструменты и интеграции задач. Каждое ограничено своим списком доменов. Формат описан в [server/marketplace/README.md](server/marketplace/README.md). |
+| 🧑‍💻 **Claude в чате** | Режим «Claude» в чате: сообщения уходят в Claude Code CLI на вашем сервере (токен из `claude setup-token` вводится в приложении). Claude работает в копии этого репозитория: правит код, коммитит и по просьбе «залей» пушит в GitHub. Дальше CI сам обновляет сервер и собирает APK. |
 | 🤖 **Модели** | Один ключ OpenRouter на всё. В приложении для каждой задачи выбирается своя модель, видны живые цены и расход за 30 дней. |
 
 ## Модели по умолчанию (цены OpenRouter на 30.10.2026)
@@ -56,6 +57,14 @@ curl -fsSL https://raw.githubusercontent.com/jeke8989/omi-neurocode/main/server/
 
 Полезное: `docker compose logs -f --tail 50`, `docker compose up -d --build` (обновление), `docker compose down` (остановка; данные сохраняются).
 
+### Claude в чате и автообновление
+
+1. На компьютере: `claude setup-token`, затем в приложении Настройки → Claude Code → вставить токен. Токен хранится только в базе сервера, в приложение не возвращается. В чате выберите режим «Claude».
+2. Контейнер `claude` держит рабочую копию репозитория (том `claude-work`) и свой deploy-ключ (том `claude-home`). Его публичная часть видна в Настройки → Claude Code и в конце `deploy.sh`; добавьте её в GitHub: репозиторий → Settings → Deploy keys → *Allow write access*. Ключей сервера (OpenRouter, база) в этом контейнере нет.
+3. Автообновление: после пуша в `main` с изменениями в `server/` задача `deploy` в `.github/workflows/server.yml` (после тестов и e2e) заходит на сервер и запускает `server/ci-update.sh`. Нужны секреты репозитория `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` и переменная `DEPLOY_HOST`. На сервере ключ CI ограничен в `authorized_keys`: `command="/opt/mnemo/server/ci-update.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding`. Изменения в `android/` собирают новый APK в Releases.
+
+Пуш в `main` = выкат на сервер. Поэтому Claude пушит только по явной просьбе, а тесты в CI идут до выката.
+
 ## Приложение
 
 APK собирается в GitHub Actions при каждом изменении `android/`: вкладка **Actions** → *Android APK* → артефакт, либо **Releases**. Новые версии ставятся поверх старых.
@@ -74,7 +83,7 @@ APK собирается в GitHub Actions при каждом изменени�
 
 ```
 android/   приложение Mnemo (Kotlin, Jetpack Compose; дизайн — DESIGN.md, шрифт Golos Text)
-server/    gateway · stt · agent · Postgres (docker compose), тесты, маркетплейс
+server/    gateway · stt · agent · claude · Postgres (docker compose), тесты, маркетплейс
 .github/   сборка APK, тесты сервера и e2e в Docker
 ```
 

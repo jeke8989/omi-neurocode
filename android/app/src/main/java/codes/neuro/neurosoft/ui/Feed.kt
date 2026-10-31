@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ChatState
+import codes.neuro.neurosoft.net.ClaudeInfo
 import codes.neuro.neurosoft.net.ConversationItem
 import codes.neuro.neurosoft.net.DayInfo
 import codes.neuro.neurosoft.net.DiaryInfo
@@ -51,6 +52,7 @@ object Repo {
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
     val chat = Cached<ChatState> { Api.chat() }
+    val claude = Cached<ClaudeInfo> { Api.claude() }
     val people = Cached<PeopleInfo> { Api.people() }
     val graph = Cached<Graph> { Api.graph(365) }
     private val byDay = HashMap<String, Cached<List<ConversationItem>>>()
@@ -87,6 +89,7 @@ sealed interface Route {
     data class Person(val id: Long) : Route
     data object VoicesSettings : Route
     data object AudioKeep : Route
+    data object Claude : Route
     data object Server : Route
 }
 

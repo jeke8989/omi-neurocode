@@ -66,6 +66,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("button_actions", true)
         set(value) = sp.edit().putBoolean("button_actions", value).apply()
 
+    /** Режим чата: auto | fast | tools | deep — агент Mnemo, claude — Claude Code на сервере. */
+    var chatLevel: String
+        get() = sp.getString("chat_level", "auto") ?: "auto"
+        set(value) = sp.edit().putString("chat_level", value).apply()
+
     /** Двойное нажатие: remember — «запомни это», pause — пауза/продолжить запись, off — ничего. */
     var doubleTap: String
         get() = sp.getString("double_tap", "remember") ?: "remember"

@@ -62,6 +62,7 @@ private fun Screen(route: Route) {
         is Route.Person -> PersonScreen(route.id)
         Route.VoicesSettings -> VoicesSettingsScreen()
         Route.AudioKeep -> AudioKeepScreen()
+        Route.Claude -> ClaudeScreen()
         Route.Server -> ServerScreen()
     }
 }

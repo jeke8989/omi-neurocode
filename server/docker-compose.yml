@@ -1,4 +1,4 @@
-# NeuroSoft: 3 сервиса (gateway, stt, agent) + Postgres.
+# NeuroSoft: gateway, stt, agent, claude (Claude Code CLI для чата) + Postgres и autoheal.
 # Отдельный проект docker compose — не трогает Jarvis и другие контейнеры на сервере.
 name: neurosoft
 
@@ -38,6 +38,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    labels:
+      - "autoheal=true"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 15s
@@ -73,9 +75,42 @@ services:
       db:
         condition: service_healthy
 
+  # Claude Code CLI для режима «Claude» в чате. Нарочно без .env: ключей сервера здесь нет,
+  # только рабочая копия репозитория и deploy-ключ для git push (~/.ssh в томе claude-home).
+  claude:
+    build:
+      context: .
+      dockerfile: claude/Dockerfile
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      CLAUDE_REPO_URL: ${CLAUDE_REPO_URL:-https://github.com/jeke8989/omi-neurocode.git}
+      CLAUDE_PUSH_URL: ${CLAUDE_PUSH_URL:-git@github.com:jeke8989/omi-neurocode.git}
+      CLAUDE_BRANCH: ${CLAUDE_BRANCH:-main}
+      CLAUDE_MAX_MIN: ${CLAUDE_MAX_MIN:-30}
+    volumes:
+      - claude-home:/home/claude
+      - claude-work:/work
+    mem_limit: 2g
+    labels:
+      - "autoheal=true"
+
+  # перезапускает контейнеры с меткой autoheal=true, если их healthcheck стал unhealthy
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 10
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 15
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   pgdata:
   audio:
   photos:
   voices:
   whisper-models:
+  claude-home:
+  claude-work:
