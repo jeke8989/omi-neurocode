@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 
 from neuro import config, db, i18n, llm, retention, voices
-from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, speech_ms
+from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, voice_ms
 
 log = logging.getLogger("neuro.stt")
 MAX_ATTEMPTS = 5
@@ -168,6 +168,15 @@ UPDATE audio_chunks SET status = 'pending', locked_at = NULL
 WHERE status = 'processing' AND locked_at < now() - interval '15 minutes'
 """
 
+# Кусок не расшифровался 5 раз подряд (сеть, лимит провайдера) — не теряем его: раз в час ещё попытка,
+# всего до 12, пока звук хранится на сервере.
+RETRY_FAILED_SQL = """
+UPDATE audio_chunks SET status = 'pending', not_before = NULL
+WHERE status = 'failed' AND path IS NOT NULL AND attempts < 12
+  AND coalesce(error, '') NOT LIKE 'audio file is missing%%'
+  AND locked_at < now() - interval '1 hour'
+"""
+
 FIND_CONVERSATION_SQL = """
 SELECT id FROM conversations
 WHERE device_id = %(device)s
@@ -305,7 +314,7 @@ def process(conn, stt, chunk: dict):
         mark(conn, chunk["id"], "empty")
         log.info("chunk %s: silence", chunk["id"])
         return
-    if config.SPEECH_MIN_MS > 0 and speech_ms(pcm) < config.SPEECH_MIN_MS:
+    if config.SPEECH_MIN_MS > 0 and voice_ms(pcm) < config.SPEECH_MIN_MS:
         mark(conn, chunk["id"], "empty")
         log.info("chunk %s: no speech (%.0fs of quiet or steady noise), skipped", chunk["id"], len(pcm) / 2 / SAMPLE_RATE)
         return
@@ -358,7 +367,13 @@ def main():
                 while True:
                     if time.monotonic() - last_requeue > 60:
                         conn.execute(REQUEUE_STUCK_SQL)
+                        conn.execute(RETRY_FAILED_SQL)
                         last_requeue = time.monotonic()
+                    try:
+                        if voices.enroll_owner(conn):
+                            log.info("voices: owner voice updated from button questions")
+                    except Exception:  # noqa: BLE001
+                        log.exception("voices: owner enrollment failed")
                     if time.monotonic() - last_consolidate > 600:
                         last_consolidate = time.monotonic()
                         try:

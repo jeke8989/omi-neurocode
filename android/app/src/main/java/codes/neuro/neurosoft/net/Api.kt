@@ -249,6 +249,58 @@ object Api {
         }
     }
 
+    /** Запрос к серверу без ключа (подключение): код ответа и тело. */
+    private suspend fun open(method: String, url: String, body: JSONObject? = null): Pair<Int, JSONObject> =
+        withContext(Dispatchers.IO) {
+            val request = try {
+                Request.Builder().url(url).method(method, body?.toString()?.toRequestBody(json)).build()
+            } catch (e: IllegalArgumentException) {
+                throw ApiException(ApiException.Kind.NOT_CONFIGURED, e.message)
+            }
+            try {
+                client.newCall(request).execute().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    r.code to (try { JSONObject(text) } catch (e: Exception) { JSONObject() })
+                }
+            } catch (e: IOException) {
+                throw ApiException(ApiException.Kind.NETWORK, e.message ?: e.javaClass.simpleName)
+            }
+        }
+
+    /** Первый телефон подключается без кода. null — сервер уже подключён к другому телефону. */
+    suspend fun pairAuto(serverUrl: String, name: String): String? {
+        val (code, o) = open("POST", serverUrl.trimEnd('/') + "/api/pair/auto", JSONObject().put("name", name))
+        return when (code) {
+            200 -> o.optString("token").ifBlank { null }
+            409 -> null
+            404, 405 -> throw ApiException(ApiException.Kind.NOT_FOUND)
+            429 -> throw ApiException(ApiException.Kind.PAIR_LOCKED)
+            else -> throw ApiException(ApiException.Kind.SERVER, "$code")
+        }
+    }
+
+    /** Новый телефон просит доступ у уже подключённого. Возвращает id запроса. */
+    suspend fun pairRequest(serverUrl: String, name: String): String {
+        val (code, o) = open("POST", serverUrl.trimEnd('/') + "/api/pair/request", JSONObject().put("name", name))
+        if (code != 200) throw ApiException(if (code == 404) ApiException.Kind.NOT_FOUND else ApiException.Kind.SERVER, "$code")
+        return o.optString("id")
+    }
+
+    /** Ответ на запрос: pending | approved (+ключ) | rejected | expired | unknown. */
+    suspend fun pairRequestStatus(serverUrl: String, id: String): Pair<String, String?> {
+        val (code, o) = open("GET", serverUrl.trimEnd('/') + "/api/pair/request/" + id)
+        if (code != 200) throw ApiException(ApiException.Kind.SERVER, "$code")
+        return o.optString("status") to o.optString("token").ifBlank { null }
+    }
+
+    /** Кто просит подключиться к серверу (видят уже подключённые телефоны). */
+    suspend fun pairRequests(): List<Pair<String, String>> =
+        JSONObject(call("GET", "/api/pair/requests")).optJSONArray("items").map { it.optString("id") to it.optString("name") }
+
+    suspend fun answerPairRequest(id: String, approve: Boolean) {
+        call("POST", "/api/pair/requests/$id", JSONObject().put("approve", approve))
+    }
+
     suspend fun status(): ServerStatus {
         val o = JSONObject(call("GET", "/api/status"))
         val chunks = o.optJSONObject("chunks") ?: JSONObject()

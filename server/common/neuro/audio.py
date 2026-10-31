@@ -230,6 +230,27 @@ def speech_ms(pcm: bytes, min_rms: float = 180.0, ratio: float = 2.5) -> int:
     return int((rms > max(noise * ratio, min_rms)).sum()) * 20
 
 
+def voice_ms(pcm: bytes) -> int:
+    """Сколько миллисекунд речи в куске — по нейросетевому детектору речи Silero (входит в faster-whisper).
+
+    Громкость плохо отличает речь от шума: в кафе или когда собеседник говорит тише владельца кулона
+    его речь не набирает нужной громкости, и кусок раньше выбрасывался целиком. Silero слышит именно
+    голос. Если faster-whisper не установлен (тесты, облачная расшифровка без него) — мягкий порог по громкости.
+    """
+    try:
+        import numpy as np
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except Exception:  # noqa: BLE001
+        return speech_ms(pcm, min_rms=120.0, ratio=1.8)
+    audio = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16).astype(np.float32) / 32768.0
+    try:
+        stamps = get_speech_timestamps(audio, VadOptions(threshold=0.35, min_speech_duration_ms=200,
+                                                         min_silence_duration_ms=300, speech_pad_ms=0))
+    except Exception:  # noqa: BLE001 — другая версия faster-whisper
+        return speech_ms(pcm, min_rms=120.0, ratio=1.8)
+    return int(sum(t["end"] - t["start"] for t in stamps) * 1000 / SAMPLE_RATE)
+
+
 def pcm_rms(pcm: bytes) -> float:
     import numpy as np
 

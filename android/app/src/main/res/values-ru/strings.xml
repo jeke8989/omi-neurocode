@@ -105,6 +105,7 @@
     <string name="delete_conversation">Удалить разговор</string>
     <string name="delete_conversation_q">Удалить разговор?</string>
     <string name="delete_conversation_text">Расшифровка и итоги удалятся с сервера. Задачи останутся.</string>
+    <string name="deny">Отклонить</string>
     <string name="device_id">ID устройства</string>
     <string name="device_info">Информация об устройстве</string>
     <string name="device_name">Название</string>
@@ -240,7 +241,7 @@
     <string name="live_server_offline">Нет связи с сервером</string>
     <string name="live_server_offline_text">Записи сохраняются в телефоне и догрузятся сами</string>
     <string name="live_server_pair">Подключите сервер</string>
-    <string name="live_server_pair_text">Запись копится в телефоне. Введите код с сервера — и всё отправится</string>
+    <string name="live_server_pair_text">Подключаюсь автоматически. Записи копятся в телефоне и уйдут, как только сервер подключится</string>
     <string name="live_speaking">Отвечаю в наушник</string>
     <string name="live_talk_today">Сегодня в разговорах %1$s</string>
     <string name="live_thinking">Думаю…</string>
@@ -309,6 +310,7 @@
     <string name="owner_q">Это ваш голос?</string>
     <string name="owner_q_text">Он звучит громче всех и есть почти в каждом разговоре — так обычно слышен владелец кулона</string>
     <string name="packets_lost">Потеряно пакетов</string>
+    <string name="pair_auto_connecting">Подключаюсь к серверу…</string>
     <string name="pair_bad">Неверный код. Проверьте цифры</string>
     <string name="pair_bt_off">Включите Bluetooth, чтобы найти кулон</string>
     <string name="pair_choose">Выберите кулон</string>
@@ -322,10 +324,17 @@
     <string name="pair_locked">Слишком много попыток. Выпустите новый код на сервере</string>
     <string name="pair_not_found">Кулон не найден</string>
     <string name="pair_not_found_text">Включите кулон долгим нажатием и положите рядом с телефоном.</string>
+    <string name="pair_offline">Сервер пока не отвечает, пробую снова</string>
+    <string name="pair_or_code">Или введите код с сервера:</string>
+    <string name="pair_rejected">Подключение отклонили на другом телефоне</string>
+    <string name="pair_request_text">Этот телефон получит доступ ко всем записям, расшифровкам и голосам. Разрешайте, только если это ваш телефон.</string>
+    <string name="pair_request_title">Подключить «%1$s»?</string>
     <string name="pair_searching">Ищу кулон</string>
     <string name="pair_searching_text">Включите его и положите рядом с телефоном. Mnemo подключится сам.</string>
     <string name="pair_step_install">Установите или обновите сервер: в конце он покажет код</string>
     <string name="pair_step_new">Новый код, если старый истёк</string>
+    <string name="pair_waiting">Ждём разрешения на другом телефоне</string>
+    <string name="pair_waiting_text">Сервер уже подключён к другому телефону. Откройте на нём Mnemo и нажмите «Разрешить».</string>
     <string name="pair_where">Где взять код</string>
     <string name="pause_recording">Приостановить запись</string>
     <string name="pause_sub">Кнопка-вопрос продолжит работать</string>

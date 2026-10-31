@@ -80,7 +80,8 @@ EVENT_SETTLE_SEC = env_int("EVENT_SETTLE_SEC", 60)        # ждать, пока
 KEEP_AUDIO_DAYS = env_int("KEEP_AUDIO_DAYS", 3)
 
 # --- Голосовой вопрос по кнопке ---
-ASK_MAX_SEC = env_float("ASK_MAX_SEC", 15.0)           # максимум длины вопроса
+ASK_MAX_SEC = env_float("ASK_MAX_SEC", 15.0)           # максимум длины вопроса, если он заканчивается по паузе
+ASK_PRESS_MAX_SEC = env_float("ASK_PRESS_MAX_SEC", 125.0)  # вопрос до второго нажатия: страховка, если не нажали
 ASK_END_SILENCE_MS = env_int("ASK_END_SILENCE_MS", 1200)  # пауза, после которой вопрос считается законченным
 ASK_CONTEXT_MIN = env_int("ASK_CONTEXT_MIN", 15)       # сколько минут недавнего разговора давать ассистенту
 ASK_TIMEOUT_SEC = env_int("ASK_TIMEOUT_SEC", 25)

@@ -314,14 +314,77 @@ async def health_full(request: Request):
 _pair_hits: dict[str, list[float]] = {}
 
 
-async def api_pair(request: Request):
-    """Приложение меняет одноразовый код (deploy.sh или `python -m neuro.pairing`) на ключ доступа."""
+def _pair_limited(request: Request) -> bool:
     ip = request.client.host if request.client else "?"
     now = time.monotonic()
     hits = [t for t in _pair_hits.get(ip, []) if now - t < 60]
-    if len(hits) >= 10:
-        return Json({"error": "too many attempts, wait a minute"}, status_code=429)
     _pair_hits[ip] = hits + [now]
+    return len(hits) >= 10
+
+
+async def _pair_sync(fn, *args):
+    def work():
+        with db.connect() as conn:
+            return fn(conn, *args)
+    return await anyio.to_thread.run_sync(work)
+
+
+async def api_pair_auto(request: Request):
+    """Первый телефон после установки сервера получает ключ без кода (дальше — только с разрешения)."""
+    if _pair_limited(request):
+        return Json({"error": "too many attempts, wait a minute"}, status_code=429)
+    if not config.API_TOKEN:
+        return Json({"error": "API_TOKEN is empty"}, status_code=500)
+    if await _pair_sync(pairing.auto):
+        log.info("first app connected automatically from %s", request.client.host if request.client else "?")
+        return Json({"token": config.API_TOKEN, "name": "Mnemo"})
+    return Json({"error": "paired"}, status_code=409)
+
+
+async def api_pair_request(request: Request):
+    """Новый телефон: создать запрос (POST) или узнать ответ (GET /api/pair/request/{id})."""
+    if _pair_limited(request):
+        return Json({"error": "too many attempts, wait a minute"}, status_code=429)
+    rid = request.path_params.get("id")
+    if rid is None:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        new_id = await _pair_sync(pairing.create_request, str((body or {}).get("name") or ""),
+                                  request.client.host if request.client else None)
+        if new_id is None:
+            return Json({"error": "too many requests"}, status_code=429)
+        return Json({"id": new_id, "status": "pending"})
+    status = await _pair_sync(pairing.request_status, rid)
+    if status == "approved" and config.API_TOKEN:
+        await _pair_sync(pairing.deliver, rid)
+        return Json({"status": "approved", "token": config.API_TOKEN})
+    return Json({"status": status})
+
+
+async def api_pair_requests(request: Request):
+    """Подключённый телефон: кто просит доступ (GET) и ответ (POST /api/pair/requests/{id} {"approve"})."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    rid = request.path_params.get("id")
+    if rid is None:
+        return Json({"items": await _pair_sync(pairing.pending_requests)})
+    try:
+        body = await request.json()
+    except ValueError:
+        return Json({"error": "bad json"}, status_code=400)
+    ok = await _pair_sync(pairing.answer_request, rid, bool((body or {}).get("approve")))
+    if not ok:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"ok": True})
+
+
+async def api_pair(request: Request):
+    """Приложение меняет одноразовый код (deploy.sh или `python -m neuro.pairing`) на ключ доступа."""
+    ip = request.client.host if request.client else "?"
+    if _pair_limited(request):
+        return Json({"error": "too many attempts, wait a minute"}, status_code=429)
     try:
         body = await request.json()
     except ValueError:
@@ -569,10 +632,12 @@ async def ws_ask(websocket: WebSocket):
             return
         codec = int(start.get("codec") or 21)
         client_id = str(start.get("id") or "") or None
+        # press — вопрос заканчивается только повторным нажатием (паузы не обрывают), auto — по паузе
+        press = str(start.get("mode") or "press") != "auto"
         await websocket.send_json({"type": "listening"})
 
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + config.ASK_MAX_SEC
+        deadline = loop.time() + (config.ASK_PRESS_MAX_SEC if press else config.ASK_MAX_SEC)
         endpointer = assistant.Endpointer()
         pcm = bytearray()
         reason = "max"
@@ -580,8 +645,8 @@ async def ws_ask(websocket: WebSocket):
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
-            # если речь уже была и кадры перестали идти (кулон замолчал) — вопрос закончен
-            wait = min(remaining, 1.5 if endpointer.started else remaining)
+            # если речь уже была и кадры перестали идти (кулон замолчал или отключился) — вопрос закончен
+            wait = min(remaining, (10.0 if press else 1.5) if endpointer.started else remaining)
             try:
                 msg = await asyncio.wait_for(websocket.receive(), timeout=wait)
             except asyncio.TimeoutError:
@@ -595,7 +660,7 @@ async def ws_ask(websocket: WebSocket):
                 except BatchError:
                     continue
                 pcm += chunk
-                if endpointer.feed(chunk):
+                if endpointer.feed(chunk) and not press:
                     reason = "silence"
                     break
             elif msg.get("text"):
@@ -765,6 +830,11 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
         return {"type": "answer", "question": "", "error": True, "answer": i18n.t(lang, "voice.failed")}
     if not question:
         return {"type": "answer", "question": "", "answer": i18n.t(lang, "voice.not_heard")}
+    # вопрос по кнопке — точно голос владельца: STT дообучит по нему отпечаток «Я»
+    try:
+        await anyio.to_thread.run_sync(voices.queue_owner_sample, pcm)
+    except Exception:  # noqa: BLE001
+        log.warning("cannot keep owner voice sample", exc_info=True)
 
     level = agent_core.route(question, "voice")
 
@@ -1346,6 +1416,11 @@ app = Starlette(
         Route("/health/full", health_full),
         Route("/api/status", api_status),
         Route("/api/pair", api_pair, methods=["POST"]),
+        Route("/api/pair/auto", api_pair_auto, methods=["POST"]),
+        Route("/api/pair/request", api_pair_request, methods=["POST"]),
+        Route("/api/pair/request/{id}", api_pair_request),
+        Route("/api/pair/requests", api_pair_requests),
+        Route("/api/pair/requests/{id}", api_pair_requests, methods=["POST"]),
         Route("/api/conversations", api_conversations),
         Route("/api/days", api_days),
         Route("/api/search", api_search),

@@ -105,6 +105,7 @@
     <string name="delete_conversation">Eliminar conversación</string>
     <string name="delete_conversation_q">¿Eliminar la conversación?</string>
     <string name="delete_conversation_text">La transcripción y el resumen se borrarán del servidor. Las tareas se quedan.</string>
+    <string name="deny">Rechazar</string>
     <string name="device_id">ID del dispositivo</string>
     <string name="device_info">Información del dispositivo</string>
     <string name="device_name">Nombre</string>
@@ -240,7 +241,7 @@
     <string name="live_server_offline">Servidor no disponible</string>
     <string name="live_server_offline_text">Las grabaciones se guardan en el teléfono y se subirán después</string>
     <string name="live_server_pair">Conecta tu servidor</string>
-    <string name="live_server_pair_text">Las grabaciones se guardan en el teléfono. Introduce el código de tu servidor y se subirá todo</string>
+    <string name="live_server_pair_text">Conectando automáticamente. Las grabaciones se guardan en el teléfono y se subirán al conectar el servidor</string>
     <string name="live_speaking">Respondiendo en tus auriculares</string>
     <string name="live_talk_today">Hoy en conversaciones: %1$s</string>
     <string name="live_thinking">Pensando…</string>
@@ -309,6 +310,7 @@
     <string name="owner_q">¿Es tu voz?</string>
     <string name="owner_q_text">Es la más fuerte y aparece en casi todas las conversaciones: así suele oírse quien lleva el colgante</string>
     <string name="packets_lost">Paquetes perdidos</string>
+    <string name="pair_auto_connecting">Conectando con el servidor…</string>
     <string name="pair_bad">Código incorrecto. Revisa los dígitos</string>
     <string name="pair_bt_off">Activa el Bluetooth para encontrar el colgante</string>
     <string name="pair_choose">Elige tu colgante</string>
@@ -322,10 +324,17 @@
     <string name="pair_locked">Demasiados intentos. Genera un código nuevo en el servidor</string>
     <string name="pair_not_found">Colgante no encontrado</string>
     <string name="pair_not_found_text">Enciende el colgante con una pulsación larga y déjalo cerca del teléfono.</string>
+    <string name="pair_offline">El servidor aún no responde, lo intento de nuevo</string>
+    <string name="pair_or_code">O introduce el código del servidor:</string>
+    <string name="pair_rejected">La conexión se rechazó en el otro teléfono</string>
+    <string name="pair_request_text">Este teléfono tendrá acceso a todas las grabaciones, transcripciones y voces. Permítelo solo si es tu teléfono.</string>
+    <string name="pair_request_title">¿Conectar «%1$s»?</string>
     <string name="pair_searching">Buscando tu colgante</string>
     <string name="pair_searching_text">Enciéndelo y déjalo cerca del teléfono. Mnemo se conectará solo.</string>
     <string name="pair_step_install">Instala o actualiza el servidor: al final muestra el código</string>
     <string name="pair_step_new">Un código nuevo si el anterior caducó</string>
+    <string name="pair_waiting">Esperando permiso en el otro teléfono</string>
+    <string name="pair_waiting_text">El servidor ya está conectado a otro teléfono. Abre Mnemo en él y pulsa «Permitir».</string>
     <string name="pair_where">Dónde conseguir el código</string>
     <string name="pause_recording">Pausar grabación</string>
     <string name="pause_sub">El botón de preguntas seguirá funcionando</string>

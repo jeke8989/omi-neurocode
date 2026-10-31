@@ -77,6 +77,17 @@ class VoiceAssistant(
     private var tapTs = 0L
     private val pre = ArrayList<ByteArray>()
     private val watchdog = Runnable { timedOut() }
+    // вопрос идёт до второго нажатия: через 90 с — тихий сигнал «я ещё слушаю», через 2 мин — конец
+    private val listenWarn = Runnable { synchronized(this) { if (_state.value.phase == Phase.LISTENING) tone(ToneGenerator.TONE_PROP_BEEP2) } }
+    private val listenLimit = Runnable { synchronized(this) { if (_state.value.phase == Phase.LISTENING) sendStop() } }
+
+    /** Когда закончился последний озвученный ответ: звук с кулона в это время не пишем (это голос Mnemo). */
+    @Volatile var lastSpokeAt = 0L
+        private set
+
+    /** Mnemo сейчас говорит (или только что закончил): кулон слышит динамик, а не людей. */
+    fun speakingNow(): Boolean =
+        _state.value.phase == Phase.SPEAKING || System.currentTimeMillis() - lastSpokeAt < SPEECH_TAIL_MS
 
     fun init() {
         tts = TextToSpeech(app) { status ->
@@ -200,7 +211,11 @@ class VoiceAssistant(
         }
         ws = client.newWebSocket(request, Listener(my))
         main.removeCallbacks(watchdog)
-        main.postDelayed(watchdog, 45_000)
+        main.postDelayed(watchdog, LISTEN_LIMIT_MS + 45_000)
+        main.removeCallbacks(listenWarn)
+        main.removeCallbacks(listenLimit)
+        main.postDelayed(listenWarn, LISTEN_WARN_MS)
+        main.postDelayed(listenLimit, LISTEN_LIMIT_MS)
     }
 
     private fun sendStop() {
@@ -212,7 +227,7 @@ class VoiceAssistant(
             synchronized(this@VoiceAssistant) {
                 if (my != session) return
                 webSocket.send(JSONObject().put("type", "start").put("id", "q_$tapTs").put("codec", codec())
-                    .put("lang", Lang.code(prefs)).toString())
+                    .put("lang", Lang.code(prefs)).put("mode", "press").toString())
                 pre.forEach { webSocket.send(it.toByteString()) }
                 pre.clear()
                 open = true
@@ -229,6 +244,10 @@ class VoiceAssistant(
                 if (my != session) return
                 when (msg.optString("type")) {
                     "heard" -> {
+                        main.removeCallbacks(listenWarn)
+                        main.removeCallbacks(listenLimit)
+                        main.removeCallbacks(watchdog)
+                        main.postDelayed(watchdog, 45_000)
                         update { it.copy(phase = Phase.THINKING) }
                         tone(ToneGenerator.TONE_PROP_ACK)
                     }
@@ -275,6 +294,8 @@ class VoiceAssistant(
 
     private fun fail(text: String, offline: Boolean) {
         main.removeCallbacks(watchdog)
+        main.removeCallbacks(listenWarn)
+        main.removeCallbacks(listenLimit)
         session++ // старые ответы этого вопроса больше не нужны
         ws?.cancel()
         ws = null
@@ -304,6 +325,7 @@ class VoiceAssistant(
     }
 
     private fun spoken() {
+        lastSpokeAt = System.currentTimeMillis()
         abandonFocus()
         update { if (it.phase == Phase.SPEAKING) it.copy(phase = Phase.IDLE) else it }
     }
@@ -337,5 +359,12 @@ class VoiceAssistant(
 
     private fun update(f: (State) -> State) {
         _state.value = f(_state.value)
+    }
+
+    companion object {
+        const val LISTEN_WARN_MS = 90_000L
+        const val LISTEN_LIMIT_MS = 120_000L
+        /** Хвост после ответа: динамик ещё звучит, а «готово» уже пришло. */
+        const val SPEECH_TAIL_MS = 800L
     }
 }

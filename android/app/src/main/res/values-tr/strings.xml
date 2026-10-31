@@ -105,6 +105,7 @@
     <string name="delete_conversation">Konuşmayı sil</string>
     <string name="delete_conversation_q">Konuşma silinsin mi?</string>
     <string name="delete_conversation_text">Döküm ve özet sunucudan silinir. Görevler kalır.</string>
+    <string name="deny">Reddet</string>
     <string name="device_id">Cihaz kimliği</string>
     <string name="device_info">Cihaz bilgisi</string>
     <string name="device_name">Ad</string>
@@ -240,7 +241,7 @@
     <string name="live_server_offline">Sunucuya ulaşılamıyor</string>
     <string name="live_server_offline_text">Kayıtlar telefonda saklanır ve sonra yüklenir</string>
     <string name="live_server_pair">Sunucunuzu bağlayın</string>
-    <string name="live_server_pair_text">Kayıtlar telefonda birikiyor. Sunucudaki kodu girin, hepsi gönderilsin</string>
+    <string name="live_server_pair_text">Otomatik bağlanıyorum. Kayıtlar telefonda birikir, sunucu bağlanınca gönderilir</string>
     <string name="live_speaking">Kulaklıkta cevaplıyorum</string>
     <string name="live_talk_today">Bugün konuşma: %1$s</string>
     <string name="live_thinking">Düşünüyorum…</string>
@@ -309,6 +310,7 @@
     <string name="owner_q">Bu sizin sesiniz mi?</string>
     <string name="owner_q_text">En yüksek ses bu ve neredeyse her konuşmada var; kolye sahibi genelde böyle duyulur</string>
     <string name="packets_lost">Kayıp paket</string>
+    <string name="pair_auto_connecting">Sunucuya bağlanıyorum…</string>
     <string name="pair_bad">Kod yanlış. Rakamları kontrol edin</string>
     <string name="pair_bt_off">Kolyeyi bulmak için Bluetooth\'u açın</string>
     <string name="pair_choose">Kolyenizi seçin</string>
@@ -322,10 +324,17 @@
     <string name="pair_locked">Çok fazla deneme. Sunucuda yeni kod oluşturun</string>
     <string name="pair_not_found">Kolye bulunamadı</string>
     <string name="pair_not_found_text">Kolyeyi uzun basarak açın ve telefona yakın tutun.</string>
+    <string name="pair_offline">Sunucu henüz yanıt vermiyor, tekrar deniyorum</string>
+    <string name="pair_or_code">Ya da sunucudaki kodu girin:</string>
+    <string name="pair_rejected">Bağlantı diğer telefonda reddedildi</string>
+    <string name="pair_request_text">Bu telefon tüm kayıtlara, dökümlere ve seslere erişebilecek. Yalnızca sizin telefonunuzsa izin verin.</string>
+    <string name="pair_request_title">“%1$s” bağlansın mı?</string>
     <string name="pair_searching">Kolyeniz aranıyor</string>
     <string name="pair_searching_text">Açın ve telefona yakın tutun. Mnemo kendiliğinden bağlanır.</string>
     <string name="pair_step_install">Sunucuyu kurun veya güncelleyin: sonunda kodu gösterir</string>
     <string name="pair_step_new">Eskisinin süresi dolduysa yeni kod</string>
+    <string name="pair_waiting">Diğer telefonda onay bekleniyor</string>
+    <string name="pair_waiting_text">Sunucu zaten başka bir telefona bağlı. Orada Mnemo\'yu açıp «İzin ver»e dokunun.</string>
     <string name="pair_where">Kod nereden alınır</string>
     <string name="pause_recording">Kaydı duraklat</string>
     <string name="pause_sub">Soru düğmesi çalışmaya devam eder</string>

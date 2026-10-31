@@ -300,3 +300,12 @@ ALTER TABLE segments ADD COLUMN IF NOT EXISTS embedding REAL[];
 CREATE INDEX IF NOT EXISTS segments_person_idx ON segments (person_id, started_at);
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES people(id) ON DELETE SET NULL;
+
+-- Запросы на подключение нового телефона: подтверждаются на уже подключённом телефоне
+CREATE TABLE IF NOT EXISTS pair_requests (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    ip          TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

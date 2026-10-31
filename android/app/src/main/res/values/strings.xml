@@ -106,6 +106,7 @@
     <string name="delete_conversation">Delete conversation</string>
     <string name="delete_conversation_q">Delete this conversation?</string>
     <string name="delete_conversation_text">The transcript and summary will be deleted from the server. Tasks stay.</string>
+    <string name="deny">Deny</string>
     <string name="device_id">Device ID</string>
     <string name="device_info">Device info</string>
     <string name="device_name">Name</string>
@@ -241,7 +242,7 @@
     <string name="live_server_offline">Server unreachable</string>
     <string name="live_server_offline_text">Recordings are saved on the phone and will upload later</string>
     <string name="live_server_pair">Connect your server</string>
-    <string name="live_server_pair_text">Recordings are kept on the phone. Enter the code from your server and everything will upload</string>
+    <string name="live_server_pair_text">Connecting automatically. Recordings are kept on the phone and upload once the server is connected</string>
     <string name="live_speaking">Answering in your headphones</string>
     <string name="live_talk_today">Talking today: %1$s</string>
     <string name="live_thinking">Thinking…</string>
@@ -310,6 +311,7 @@
     <string name="owner_q">Is this your voice?</string>
     <string name="owner_q_text">It\'s the loudest and appears in almost every conversation, which is how the pendant\'s owner usually sounds</string>
     <string name="packets_lost">Packets lost</string>
+    <string name="pair_auto_connecting">Connecting to the server…</string>
     <string name="pair_bad">Wrong code. Check the digits</string>
     <string name="pair_bt_off">Turn on Bluetooth to find the pendant</string>
     <string name="pair_choose">Choose your pendant</string>
@@ -323,10 +325,17 @@
     <string name="pair_locked">Too many attempts. Issue a new code on the server</string>
     <string name="pair_not_found">Pendant not found</string>
     <string name="pair_not_found_text">Turn the pendant on with a long press and keep it near the phone.</string>
+    <string name="pair_offline">The server isn\'t answering yet, retrying</string>
+    <string name="pair_or_code">Or enter the code from the server:</string>
+    <string name="pair_rejected">The connection was denied on the other phone</string>
+    <string name="pair_request_text">This phone will get access to all recordings, transcripts and voices. Allow only if it\'s your phone.</string>
+    <string name="pair_request_title">Connect “%1$s”?</string>
     <string name="pair_searching">Looking for your pendant</string>
     <string name="pair_searching_text">Turn it on and keep it near the phone. Mnemo connects on its own.</string>
     <string name="pair_step_install">Install or update the server; it shows the code at the end</string>
     <string name="pair_step_new">A new code if the old one expired</string>
+    <string name="pair_waiting">Waiting for approval on the other phone</string>
+    <string name="pair_waiting_text">The server is already connected to another phone. Open Mnemo there and tap Allow.</string>
     <string name="pair_where">Where to get the code</string>
     <string name="pause_recording">Pause recording</string>
     <string name="pause_sub">The question button keeps working</string>

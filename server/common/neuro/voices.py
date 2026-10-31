@@ -472,6 +472,82 @@ def identify(conn, voices: list[LocalVoice], pcm: bytes, turns: list[Turn]) -> d
     return out
 
 
+# ======================================================================= голос владельца по кнопке
+OWNER_DIR = VOICE_DIR / "owner"
+
+
+def queue_owner_sample(pcm: bytes):
+    """Gateway: звук вопроса по кнопке (это всегда владелец) — в очередь на дообучение (в gateway нет модели)."""
+    if len(pcm) < SAMPLE_RATE * 2 * 2:  # меньше 2 с — мало
+        return
+    OWNER_DIR.mkdir(parents=True, exist_ok=True)
+    files = sorted(OWNER_DIR.glob("*.pcm"))
+    for old in files[:-20]:  # очередь не растёт, если STT долго не работал
+        old.unlink(missing_ok=True)
+    tmp = OWNER_DIR / f"{time.time_ns()}.part"
+    tmp.write_bytes(pcm[: SAMPLE_RATE * 2 * 30])
+    tmp.replace(tmp.with_suffix(".pcm"))
+
+
+def owner_embedding(pcm: bytes) -> tuple[np.ndarray | None, float]:
+    """Отпечаток по речевым отрезкам вопроса (паузы и шум отбрасываются)."""
+    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
+    regions = speech_regions(x, min_ms=300)
+    speech = np.concatenate([x[s:e] for s, e in regions]) if regions else np.zeros(0, dtype=np.int16)
+    if len(speech) < SAMPLE_RATE * 1.5 and len(x) and float(np.sqrt(np.mean(x.astype(np.float64) ** 2))) > 300:
+        speech = x  # говорили без пауз: фон не отличить от речи, берём весь вопрос
+    sec = len(speech) / SAMPLE_RATE
+    if sec < 1.5:
+        return None, sec
+    return model().embed(speech), sec
+
+
+def enroll_owner(conn) -> int:
+    """STT: дообучить «Я» по вопросам с кнопки. Владельца ещё нет — им становится похожий голос
+    или новый человек. Возвращает число учтённых вопросов."""
+    if not OWNER_DIR.exists():
+        return 0
+    done = 0
+    for f in sorted(OWNER_DIR.glob("*.pcm"))[:10]:
+        try:
+            pcm = f.read_bytes()
+            emb, sec = owner_embedding(pcm)
+            if emb is not None and enabled(conn):
+                owner = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
+                if owner is None:
+                    person, sim = best_person(conn, emb)
+                    if person is not None and sim >= thresholds().match:
+                        pid = person["id"]
+                    else:
+                        number = conn.execute("SELECT coalesce(max(number), 0) + 1 AS n FROM people").fetchone()["n"]
+                        pid = conn.execute(
+                            """INSERT INTO people (number, first_seen, last_seen) VALUES (%s, now(), now())
+                               RETURNING id""", (number,)).fetchone()["id"]
+                    conn.execute("UPDATE people SET is_owner = true, ignored = false, updated_at = now() WHERE id = %s",
+                                 (pid,))
+                    confirm_person(conn, pid)
+                    log.info("voices: owner found by button question (person %s)", pid)
+                else:
+                    pid = owner["id"]
+                    row = conn.execute("SELECT centroid, samples FROM people WHERE id = %s", (pid,)).fetchone()
+                    # кнопку мог нажать и кто-то другой: чужой голос «Я» не портит
+                    if row["centroid"] and row["samples"] >= 3 and len(row["centroid"]) == len(emb) \
+                            and cosine(emb, row["centroid"]) < thresholds().maybe:
+                        f.unlink(missing_ok=True)
+                        continue
+                add_voiceprint(conn, pid, emb, sec, confirmed=True)
+                if not sample_path(pid).exists():
+                    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
+                    save_sample(pid, x)
+                done += 1
+        except Unavailable:
+            break
+        except Exception:  # noqa: BLE001
+            log.exception("voices: owner sample %s failed", f.name)
+        f.unlink(missing_ok=True)
+    return done
+
+
 def embed_span(pcm: bytes, start: float, end: float) -> np.ndarray | None:
     """Отпечаток отдельной фразы (для правки «эта фраза — другого человека»)."""
     if end - start < MIN_EMBED_SEC:

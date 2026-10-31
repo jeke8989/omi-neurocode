@@ -382,3 +382,28 @@ def test_people_http_api(clean):
     assert r.status_code == 200
     assert client.get(f"/api/people/{owner_id}").status_code == 404
     assert client.post("/api/people/forget").json() == {"forgotten": 0}
+
+
+def test_button_question_teaches_owner_voice(clean):
+    conn = clean
+    from neuro import voices
+    for f in voices.OWNER_DIR.glob("*.pcm") if voices.OWNER_DIR.exists() else []:
+        f.unlink()
+    # был разговор: голоса безымянные
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5))
+    rows = run_chunk(conn, pcm, Timed(spans))
+    owner_voice = rows[0]["person_id"]
+    # вопрос по кнопке голосом владельца -> этот человек становится «Я»
+    voices.queue_owner_sample(synth(**OWNER, sec=3, seed=11).tobytes())
+    assert voices.enroll_owner(conn) == 1
+    owner = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
+    assert owner["id"] == owner_voice
+    # чужой голос по кнопке не портит «Я», когда отпечаток уже устоялся
+    for i in range(3):
+        voices.queue_owner_sample(synth(**OWNER, sec=3, seed=20 + i).tobytes())
+    voices.enroll_owner(conn)
+    before = conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (owner_voice,)).fetchone()["n"]
+    voices.queue_owner_sample(synth(**BORIS, sec=3, seed=30).tobytes())
+    voices.enroll_owner(conn)
+    after = conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (owner_voice,)).fetchone()["n"]
+    assert after == before

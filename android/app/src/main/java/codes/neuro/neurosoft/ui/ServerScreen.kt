@@ -1,7 +1,12 @@
 package codes.neuro.neurosoft.ui
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,9 +52,36 @@ fun ServerScreen() {
         return if (t.isEmpty() || t.startsWith("http://") || t.startsWith("https://")) t else "http://$t"
     }
 
+    val pairing by Core.pairing.collectAsState()
+    LaunchedEffect(Unit) { if (!prefs.serverConfigured || upload.error == "auth") Core.autoConnect(manual = true) }
+
     SettingsPage(stringResource(R.string.server_connect_title)) {
         Txt(stringResource(R.string.server_connect_intro), T.small, c.graphite,
             Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        // подключение без кода: первый телефон — сам, следующий — с разрешения на подключённом
+        val auto = when (pairing.phase) {
+            "connecting" -> stringResource(R.string.pair_auto_connecting)
+            "waiting" -> stringResource(R.string.pair_waiting)
+            "rejected" -> stringResource(R.string.pair_rejected)
+            "offline" -> stringResource(R.string.pair_offline)
+            else -> null
+        }
+        if (auto != null && !(prefs.serverConfigured && upload.connected)) {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (pairing.phase == "connecting" || pairing.phase == "waiting") {
+                        Spinner(18.dp)
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Txt(auto, T.bodyStrong, if (pairing.phase == "rejected") c.red else c.ink)
+                }
+                if (pairing.phase == "waiting") {
+                    Txt(stringResource(R.string.pair_waiting_text), T.caption, c.graphite, Modifier.padding(top = 6.dp))
+                }
+            }
+            Txt(stringResource(R.string.pair_or_code), T.caption, c.graphite,
+                Modifier.padding(start = 22.dp, end = 22.dp, top = 10.dp))
+        }
         if (prefs.serverConfigured && upload.connected) {
             Txt(stringResource(R.string.server_connected_to, prefs.serverUrl), T.smallStrong, c.lens,
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp))

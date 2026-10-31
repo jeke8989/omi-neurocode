@@ -109,6 +109,8 @@ object Core {
     private val frameLock = Any()
     private val frames = ArrayList<ByteArray>()
     private var batchStartedAt = 0L
+    // пачки, закрытые раньше секунды (перед паузой на голос Mnemo), чтобы время кадров не съехало
+    private val closedBatches = ArrayList<Pair<List<ByteArray>, Long>>()
     private val bleBytes = AtomicLong()
 
     @Volatile private var codec = OmiProtocol.CODEC_OPUS_FS320
@@ -136,6 +138,7 @@ object Core {
         uploader = Uploader(spool, prefs, ::deviceId, ::helloInfo) { s ->
             _upload.value = s
             if (s.connected) syncLanguage()
+            if (s.error == "auth") autoConnect() // ключ на сервере сменили — подключаемся заново
             updateNotification()
         }
         ble = OmiBle(app, bleListener)
@@ -163,6 +166,7 @@ object Core {
         createNotificationChannel()
         uploader.start()
         scope.launch { batchLoop() }
+        if (!prefs.serverConfigured) autoConnect()
     }
 
     @Volatile private var foreground = false
@@ -207,13 +211,74 @@ object Core {
         syncLanguage()
     }
 
-    /** Подключили сервер по коду: сразу переподключаемся и отправляем накопленное. */
+    /** Подключили сервер: сразу переподключаемся и отправляем накопленное. */
     fun connectServer(url: String, token: String) {
         prefs.setServer(url, token)
         uploader.reconnectNow()
         syncedLanguage = null
         syncLanguage()
         updateNotification()
+        _pairing.value = PairState("connected")
+    }
+
+    // ------------------------------------------------------------------ подключение без кода
+    /** idle | connecting | waiting (ждём разрешения на другом телефоне) | rejected | offline | connected */
+    data class PairState(val phase: String = "idle", val requestId: String? = null)
+
+    private val _pairing = MutableStateFlow(PairState())
+    val pairing: StateFlow<PairState> = _pairing
+    @Volatile private var pairJob: kotlinx.coroutines.Job? = null
+    @Volatile private var pairStoppedAt = 0L
+
+    private fun phoneName(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+
+    /**
+     * Первый телефон получает ключ сам; если сервер уже подключён к другому телефону — просим разрешения
+     * там и ждём ответа. Запускается, когда ключа нет или сервер его не принимает (ключ сменили).
+     */
+    fun autoConnect(manual: Boolean = false) {
+        if (pairJob?.isActive == true) return
+        // отказали — не засыпаем другой телефон запросами: снова только через 10 минут или вручную
+        if (!manual && _pairing.value.phase == "rejected" && System.currentTimeMillis() - pairStoppedAt < 600_000) return
+        pairJob = scope.launch {
+            val url = prefs.serverUrl.ifBlank { prefs.defaultServerUrl }
+            if (url.isBlank()) return@launch
+            var requestId: String? = null
+            var wait = 5_000L
+            while (!prefs.serverConfigured || _upload.value.error == "auth") {
+                try {
+                    if (requestId == null) {
+                        _pairing.value = PairState("connecting")
+                        val token = Api.pairAuto(url, phoneName())
+                        if (token != null) {
+                            connectServer(url, token)
+                            return@launch
+                        }
+                        requestId = Api.pairRequest(url, phoneName())
+                    }
+                    _pairing.value = PairState("waiting", requestId)
+                    val (status, token) = Api.pairRequestStatus(url, requestId)
+                    when {
+                        status == "approved" && token != null -> {
+                            connectServer(url, token)
+                            return@launch
+                        }
+                        status == "rejected" -> {
+                            pairStoppedAt = System.currentTimeMillis()
+                            _pairing.value = PairState("rejected")
+                            return@launch
+                        }
+                        status != "pending" -> requestId = null // истёк — попросим снова
+                    }
+                    wait = 4_000L
+                } catch (e: Exception) {
+                    _pairing.value = PairState("offline", requestId)
+                    wait = (wait * 2).coerceAtMost(60_000L)
+                }
+                delay(wait)
+            }
+            _pairing.value = PairState("connected")
+        }
     }
 
     private fun syncLanguage() {
@@ -384,8 +449,14 @@ object Core {
         frameBytes.addAndGet(frame.size.toLong())
         frameCount.incrementAndGet()
         val now = System.currentTimeMillis()
+        // пока Mnemo отвечает вслух, кулон слышит динамик телефона — это не разговор, в запись не идёт
+        val ownVoice = voice.speakingNow()
         synchronized(frameLock) {
-            if (!_paused.value) {
+            if (ownVoice && frames.isNotEmpty()) {
+                closedBatches.add(ArrayList(frames) to batchStartedAt)
+                frames.clear()
+            }
+            if (!_paused.value && !ownVoice) {
                 if (frames.isEmpty()) batchStartedAt = now - 20
                 frames.add(frame)
             }
@@ -408,16 +479,17 @@ object Core {
         while (true) {
             delay(1_000)
             assembler.flushStale()
-            val pair = synchronized(frameLock) {
-                if (frames.isEmpty()) null
-                else {
-                    val copy = ArrayList(frames)
+            val batches = synchronized(frameLock) {
+                val out = ArrayList(closedBatches)
+                closedBatches.clear()
+                if (frames.isNotEmpty()) {
+                    out.add(ArrayList(frames) to batchStartedAt)
                     frames.clear()
-                    copy to batchStartedAt
                 }
+                out
             }
             val today = LocalDate.now().toString()
-            if (pair != null) {
+            for (pair in batches) {
                 try {
                     spool.writeAudio(codec, pair.second, pair.first)
                     uploader.kick()
