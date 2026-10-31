@@ -212,6 +212,15 @@ diag() {
      || ', из памяти кулона всего ' || (SELECT count(*) FROM audio_chunks WHERE offline)
      FROM audio_chunks WHERE status IN ('pending', 'processing')"
   echo "::notice title=Очередь расшифровки::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qq" 2>/dev/null | tr '\n' ' ' || true)"
+  # голоса и память: сколько спрятано в фон и в архив (только счётчики)
+  local qp
+  qp="SELECT 'людей ' || count(*) FILTER (WHERE kind IS NULL OR kind = 'person') || ', фон: реклама/ТВ '
+     || count(*) FILTER (WHERE kind = 'media') || ', люди рядом ' || count(*) FILTER (WHERE kind = 'crowd')
+     || '; память: ' || (SELECT count(*) FROM memories WHERE archived_at IS NULL) || ', в архиве '
+     || (SELECT count(*) FROM memories WHERE archived_at IS NOT NULL) || ', не проверено '
+     || (SELECT count(*) FROM memories WHERE NOT reviewed AND source <> 'button' AND archived_at IS NULL)
+     FROM people"
+  echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
   q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')
