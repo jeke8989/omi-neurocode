@@ -149,10 +149,29 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
     return out
 
 
+def _key(text: str) -> str:
+    return re.sub(r"\W+", " ", (text or "").lower()).strip()
+
+
+def _removed(conn, conv_id: int | None) -> list[str]:
+    """Задачи этого разговора, которые владелец удалил (смахнул) — их не создаём снова."""
+    if conv_id is None:
+        return []
+    return [_key(r["text"]) for r in conn.execute(
+        "SELECT text FROM tasks WHERE conversation_id = %s AND status = 'dismissed'", (conv_id,)).fetchall()]
+
+
 def save(conn, conv_id: int | None, tasks: list[dict], source: str) -> dict:
-    """Новые задачи — вставить; «та же самая» (same_as) — обновить срок и уверенность существующей."""
+    """Новые задачи — вставить; «та же самая» (same_as) — обновить срок и уверенность существующей.
+    Удалённые владельцем задачи этого разговора повторно не появляются."""
+    import difflib  # noqa: PLC0415
+
     created, updated = 0, 0
+    removed = _removed(conn, conv_id)
     for t in tasks:
+        k = _key(t["text"])
+        if any(k == r or difflib.SequenceMatcher(None, k, r).ratio() > 0.8 for r in removed):
+            continue
         if t.get("same_as"):
             row = conn.execute("SELECT id, status FROM tasks WHERE id = %s AND status IN ('open', 'suggested')",
                                (t["same_as"],)).fetchone()

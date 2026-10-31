@@ -113,7 +113,8 @@ def group_day(conn, day: date, final: bool = False) -> dict:
             lines.append("Уже собранные события дня:")
             lines += [f"событие {e['id']} «{e['title']}» {_t(e['started_at'])}–{_t(e['ended_at'])}: фрагменты "
                       + ", ".join(f"#{x}" for x in e["fragments"]) for e in existing]
-        result = llm.chat_json(conn, "summary", GROUP_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)), "\n".join(lines))
+        result = llm.chat_json(conn, "summary", GROUP_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)), "\n".join(lines),
+                               usage="events")
     else:
         result = {"events": _by_gap(frags), "junk": []}
     return _apply(conn, day, result, by_id, {e["id"] for e in existing}, final)
@@ -231,7 +232,7 @@ def review_tasks(conn, day: date) -> dict:
     if not rows or not llm.configured():
         return {"reviewed": 0}
     text = "\n".join(f"{r['id']}: {r['text']} | доказательство: {r['evidence'] or '—'}" for r in rows)
-    result = llm.chat_json(conn, "summary", REVIEW_SYSTEM, text)
+    result = llm.chat_json(conn, "summary", REVIEW_SYSTEM, text, usage="review")
     ids = {r["id"] for r in rows}
     changed = 0
     for d in result.get("decisions") or []:

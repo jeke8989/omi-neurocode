@@ -267,7 +267,8 @@ def quick_tasks(conn):
         done_until = seg["started_at"] + timedelta(seconds=45)
         try:
             result = llm.chat_json(conn, "remember", tasklib.QUICK_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
-                                   tasklib.context(conn, seg["started_at"]) + "\n\n" + transcript_text(window))
+                                   tasklib.context(conn, seg["started_at"]) + "\n\n" + transcript_text(window),
+                                   usage="quick_task")
         except Exception:  # noqa: BLE001
             log.exception("quick task from segment %s failed", seg["id"])
             continue

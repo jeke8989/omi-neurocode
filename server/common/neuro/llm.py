@@ -85,8 +85,10 @@ def _headers() -> dict:
     return h
 
 
-def chat_json(conn, task: str, system: str, user: str, timeout: float = 180, fast: bool = False) -> dict:
-    """Запрос к модели задачи; ответ — JSON-объект. fast=True просит минимум «размышлений» (для голоса)."""
+def chat_json(conn, task: str, system: str, user: str, timeout: float = 180, fast: bool = False,
+              usage: str | None = None) -> dict:
+    """Запрос к модели задачи; ответ — JSON-объект. fast=True просит минимум «размышлений» (для голоса).
+    usage — под каким именем записать расход (например, events: модель «итогов», но учёт отдельно)."""
     model = resolve_model(conn, task)
     body: dict = {
         "model": model,
@@ -114,7 +116,7 @@ def chat_json(conn, task: str, system: str, user: str, timeout: float = 180, fas
         data = r.json()
         if "choices" not in data:
             raise RuntimeError(f"LLM {model}: unexpected response {str(data)[:300]}")
-        record_usage(conn, task, model, data.get("usage"))
+        record_usage(conn, usage or task, model, data.get("usage"))
         content = data["choices"][0]["message"].get("content") or ""
         log.info("%s via %s: %.1fs", task, model, time.monotonic() - t0)
         return parse_json(content)

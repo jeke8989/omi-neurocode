@@ -172,6 +172,20 @@ diag() {
   echo "::notice title=Ресурсы::диск свободно $(free_mb) МБ из $(df -Pm / | awk 'NR==2{print $2}') МБ, память доступно ${mem} МБ"
   echo "::notice title=Ошибки в логах::$ex"
   echo "::notice title=Health::$(curl -sS -m 5 "http://127.0.0.1:${PORT:-8090}/health/full" 2>&1 | head -c 400 || true)"
+  # расход ИИ — только цифры по задачам и моделям, без содержимого
+  local q
+  q="SELECT task || ' ' || model || ' вызовов=' || count(*) || ' вход=' || coalesce(sum(prompt_tokens),0)
+     || ' выход=' || coalesce(sum(completion_tokens),0) || ' $=' || round(coalesce(sum(cost),0)::numeric, 3)
+     FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY task, model ORDER BY sum(cost) DESC NULLS LAST LIMIT 15"
+  echo "::notice title=ИИ за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
+  q="SELECT to_char(created_at AT TIME ZONE 'Europe/Moscow', 'MM-DD') || ' $' || round(sum(cost)::numeric, 3)
+     || ' (' || count(*) || ')' FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1 ORDER BY 1"
+  echo "::notice title=ИИ по дням::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
+  q="SELECT 'разговоров=' || count(*) || ' фраз=' || (SELECT count(*) FROM segments WHERE started_at > now() - interval '7 days')
+     || ' вопросов=' || (SELECT count(*) FROM questions WHERE asked_at > now() - interval '7 days')
+     || ' задач=' || (SELECT count(*) FROM tasks WHERE created_at > now() - interval '7 days')
+     FROM conversations WHERE started_at > now() - interval '7 days'"
+  echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 

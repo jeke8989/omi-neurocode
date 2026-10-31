@@ -63,3 +63,19 @@ def test_assignee_labels_never_leak(conn):  # noqa: F811
     ], {}, None)
     assert [t["text"] for t in out] == ["Купить билеты", "Посмотреть сайт"]
     assert all(t["assignee"] is None for t in out)  # «Спикер 1» и «Владелец» — служебные подписи
+
+
+def test_removed_task_is_not_created_again(conn):  # noqa: F811
+    from neuro import tasks as tasklib
+    conn.execute("TRUNCATE conversations, tasks RESTART IDENTITY CASCADE")
+    cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status)
+                          VALUES ('d', now(), now(), 'done') RETURNING id""").fetchone()["id"]
+    conn.execute("""INSERT INTO tasks (conversation_id, text, status, source)
+                    VALUES (%s, 'Купить билеты на концерт', 'dismissed', 'conversation')""", (cid,))
+    base = {"kind": "mine", "person_id": None, "assignee": None, "due": None, "due_at": None, "confidence": 0.9,
+            "evidence": "куплю", "status": "open", "same_as": None, "target": "notion"}
+    res = tasklib.save(conn, cid, [{**base, "text": "Купить билеты на концерт."},
+                                   {**base, "text": "Позвонить Анне"}], "conversation")
+    assert res == {"created": 1, "updated": 0}
+    texts = [r["text"] for r in conn.execute("SELECT text FROM tasks WHERE status = 'open'").fetchall()]
+    assert texts == ["Позвонить Анне"]
