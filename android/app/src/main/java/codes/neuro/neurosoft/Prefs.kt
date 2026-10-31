@@ -105,7 +105,7 @@ class Prefs(context: Context) {
     /** Про какие предложенные задачи уже спросили в уведомлении. */
     var askedTasks: Set<Long>
         get() = (sp.getString("asked_tasks", "") ?: "").split(',').mapNotNull { it.toLongOrNull() }.toSet()
-        set(value) = sp.edit().putString("asked_tasks", value.takeLast(200).joinToString(",")).apply()
+        set(value) = sp.edit().putString("asked_tasks", value.toList().takeLast(200).joinToString(",")).apply()
 
     /** Утром — уведомление с итогами вчерашнего дня. */
     var morningSummary: Boolean
