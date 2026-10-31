@@ -14,10 +14,19 @@ data class Outage(val from: Long, val to: Long)
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("neurosoft", Context.MODE_PRIVATE)
 
-    /** Сервер и ключ зашиты в сборку (neurosoft.properties) — пользователь их не вводит. */
-    val serverUrl: String get() = BuildConfig.SERVER_URL.trim().trimEnd('/')
-    val token: String get() = BuildConfig.API_TOKEN.trim()
+    /**
+     * Сервер: адрес по умолчанию зашит в сборку, ключ доступа приложение получает один раз по коду
+     * подключения (репозиторий публичный — ключ в APK не кладём). Ключ из сборки — только для своих
+     * частных сборок (переменная MNEMO_API_TOKEN).
+     */
+    val serverUrl: String get() = (sp.getString("server_url", null) ?: BuildConfig.SERVER_URL).trim().trimEnd('/')
+    val token: String get() = (sp.getString("api_token", null) ?: BuildConfig.API_TOKEN).trim()
     val serverConfigured: Boolean get() = serverUrl.isNotBlank() && token.isNotBlank()
+    val defaultServerUrl: String get() = BuildConfig.SERVER_URL.trim().trimEnd('/')
+
+    fun setServer(url: String, token: String) {
+        sp.edit().putString("server_url", url.trim().trimEnd('/')).putString("api_token", token.trim()).apply()
+    }
 
     var deviceAddress: String?
         get() = sp.getString("device_address", null)

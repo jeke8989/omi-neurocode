@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 
 /** Ошибка API. kind — для понятного текста на языке приложения, detail — подробности. */
 class ApiException(val kind: Kind, val detail: String? = null) : Exception(detail ?: kind.name) {
-    enum class Kind { NOT_CONFIGURED, NETWORK, AUTH, NOT_FOUND, SERVER, DIARY_OFF }
+    enum class Kind { NOT_CONFIGURED, NETWORK, AUTH, NOT_FOUND, SERVER, DIARY_OFF, PAIR_BAD, PAIR_EXPIRED, PAIR_LOCKED }
 }
 
 data class ConversationItem(
@@ -212,6 +212,34 @@ object Api {
                 throw ApiException(ApiException.Kind.NETWORK, e.message ?: e.javaClass.simpleName)
             }
         }
+
+    /**
+     * Одноразовый код подключения -> ключ доступа. Вызывается без ключа, по введённому адресу.
+     * Ошибки: NOT_FOUND — сервер старый или адрес не тот; PAIR_BAD / PAIR_EXPIRED / PAIR_LOCKED.
+     */
+    suspend fun pair(serverUrl: String, code: String): String = withContext(Dispatchers.IO) {
+        val request = try {
+            Request.Builder().url(serverUrl.trim().trimEnd('/') + "/api/pair")
+                .post(JSONObject().put("code", code).toString().toRequestBody(json)).build()
+        } catch (e: IllegalArgumentException) {
+            throw ApiException(ApiException.Kind.NOT_CONFIGURED, e.message)
+        }
+        try {
+            client.newCall(request).execute().use { r ->
+                val text = r.body?.string().orEmpty()
+                when (r.code) {
+                    200 -> JSONObject(text).optString("token").ifBlank { throw ApiException(ApiException.Kind.SERVER, "empty") }
+                    403 -> throw ApiException(ApiException.Kind.PAIR_BAD)
+                    410 -> throw ApiException(ApiException.Kind.PAIR_EXPIRED)
+                    423, 429 -> throw ApiException(ApiException.Kind.PAIR_LOCKED)
+                    404, 405 -> throw ApiException(ApiException.Kind.NOT_FOUND)
+                    else -> throw ApiException(ApiException.Kind.SERVER, "${r.code}")
+                }
+            }
+        } catch (e: IOException) {
+            throw ApiException(ApiException.Kind.NETWORK, e.message ?: e.javaClass.simpleName)
+        }
+    }
 
     suspend fun status(): ServerStatus {
         val o = JSONObject(call("GET", "/api/status"))

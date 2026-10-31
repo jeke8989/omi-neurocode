@@ -190,9 +190,11 @@ fun SettingsScreen() {
         }
 
         Group(stringResource(R.string.about)) {
-            item { ListRow(stringResource(R.string.server), icon = Icons.Cloud,
+            item { ListRow(stringResource(R.string.server), icon = Icons.Cloud, chevron = true,
+                onClick = { Nav.push(Route.Server) },
                 value = stringResource(when {
-                    !Core.prefs.serverConfigured -> R.string.server_not_built_in
+                    !Core.prefs.serverConfigured -> R.string.server_not_connected
+                    upload.error == "auth" -> R.string.server_reconnect
                     upload.connected -> R.string.server_online
                     upload.resting -> R.string.server_batched
                     upload.connecting -> R.string.server_connecting

@@ -394,6 +394,9 @@ private fun LiveStrip() {
         !Permissions.bluetoothGranted(context) || missing.isNotEmpty() && !running ->
             Strip(stringResource(R.string.live_permissions), stringResource(R.string.live_permissions_text),
                 stringResource(R.string.allow), { permissions.launch(Permissions.required()) }, warn = true)
+        !Core.prefs.serverConfigured || upload.error == "auth" -> Strip(stringResource(R.string.live_server_pair),
+            stringResource(R.string.live_server_pair_text), stringResource(R.string.connect), { Nav.push(Route.Server) },
+            warn = true)
         !running -> Strip(stringResource(R.string.live_off), stringResource(R.string.live_off_text),
             stringResource(R.string.turn_on), { Core.startCapture(context) })
         voice.phase == VoiceAssistant.Phase.LISTENING -> Strip(stringResource(R.string.live_listening), null)

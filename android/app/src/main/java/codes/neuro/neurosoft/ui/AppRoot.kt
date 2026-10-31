@@ -61,5 +61,6 @@ private fun Screen(route: Route) {
         Route.Memories -> MemoriesScreen()
         is Route.Person -> PersonScreen(route.id)
         Route.VoicesSettings -> VoicesSettingsScreen()
+        Route.Server -> ServerScreen()
     }
 }

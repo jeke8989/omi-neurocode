@@ -207,6 +207,15 @@ object Core {
         syncLanguage()
     }
 
+    /** Подключили сервер по коду: сразу переподключаемся и отправляем накопленное. */
+    fun connectServer(url: String, token: String) {
+        prefs.setServer(url, token)
+        uploader.reconnectNow()
+        syncedLanguage = null
+        syncLanguage()
+        updateNotification()
+    }
+
     private fun syncLanguage() {
         val code = Lang.code(prefs)
         if (syncedLanguage == code || !prefs.serverConfigured) return

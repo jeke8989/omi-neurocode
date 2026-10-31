@@ -25,7 +25,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm, people, voices
+from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm, pairing, people, voices
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -292,6 +292,36 @@ async def ws_audio(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 async def health(request: Request):
     return Json({"ok": True, "service": "neurosoft-gateway"})
+
+
+# одноразовый код подключения: не больше 10 попыток в минуту с одного адреса
+_pair_hits: dict[str, list[float]] = {}
+
+
+async def api_pair(request: Request):
+    """Приложение меняет одноразовый код (deploy.sh или `python -m neuro.pairing`) на ключ доступа."""
+    ip = request.client.host if request.client else "?"
+    now = time.monotonic()
+    hits = [t for t in _pair_hits.get(ip, []) if now - t < 60]
+    if len(hits) >= 10:
+        return Json({"error": "too many attempts, wait a minute"}, status_code=429)
+    _pair_hits[ip] = hits + [now]
+    try:
+        body = await request.json()
+    except ValueError:
+        return Json({"error": "bad json"}, status_code=400)
+    code = str((body or {}).get("code") or "")
+
+    def work():
+        with db.connect() as conn:
+            return pairing.redeem(conn, code)
+
+    result = await anyio.to_thread.run_sync(work)
+    if result == "ok" and config.API_TOKEN:
+        log.info("app paired from %s", ip)
+        return Json({"token": config.API_TOKEN, "name": "Mnemo"})
+    status = {"bad": 403, "expired": 410, "locked": 423}.get(result, 500)
+    return Json({"error": result if config.API_TOKEN else "API_TOKEN is empty"}, status_code=status)
 
 
 async def api_status(request: Request):
@@ -1223,6 +1253,7 @@ app = Starlette(
     routes=[
         Route("/health", health),
         Route("/api/status", api_status),
+        Route("/api/pair", api_pair, methods=["POST"]),
         Route("/api/conversations", api_conversations),
         Route("/api/days", api_days),
         Route("/api/search", api_search),

@@ -380,6 +380,9 @@ fun errorText(e: Throwable?): String = when ((e as? ApiException)?.kind) {
     ApiException.Kind.NOT_FOUND -> stringResource(R.string.err_not_found)
     ApiException.Kind.DIARY_OFF -> stringResource(R.string.err_diary_off)
     ApiException.Kind.SERVER -> stringResource(R.string.err_server, (e as ApiException).detail ?: "")
+    ApiException.Kind.PAIR_BAD -> stringResource(R.string.pair_bad)
+    ApiException.Kind.PAIR_EXPIRED -> stringResource(R.string.pair_expired)
+    ApiException.Kind.PAIR_LOCKED -> stringResource(R.string.pair_locked)
     null -> e?.message ?: stringResource(R.string.err_unknown)
 }
 
@@ -392,7 +395,12 @@ fun ErrorBlock(e: Throwable?, onRetry: () -> Unit, modifier: Modifier = Modifier
     ) {
         Icon(Icons.Cloud, null, tint = Mn.c.faint, modifier = Modifier.size(36.dp))
         Txt(errorText(e), T.body, Mn.c.graphite, align = TextAlign.Center)
-        SecondaryButton(stringResource(R.string.retry), onRetry, small = true, icon = Icons.Refresh)
+        val kind = (e as? ApiException)?.kind
+        if (kind == ApiException.Kind.NOT_CONFIGURED || kind == ApiException.Kind.AUTH) {
+            PrimaryButton(stringResource(R.string.server_connect), { Nav.push(Route.Server) }, icon = Icons.Link)
+        } else {
+            SecondaryButton(stringResource(R.string.retry), onRetry, small = true, icon = Icons.Refresh)
+        }
     }
 }
 
