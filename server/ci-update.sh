@@ -203,6 +203,14 @@ diag() {
     | awk '{n++; s+=$1; if ($1>m) m=$1} END {if (n) printf "ждали в среднем %.1f с, максимум %.1f с", s/n/1000, m/1000}' || true)
   q="SELECT status || '=' || count(*) FROM agent_runs WHERE channel = 'voice' AND created_at > now() - interval '7 days'
      GROUP BY status ORDER BY 1"
+  # очередь расшифровки: живой звук и запись из памяти кулона (только длительности)
+  q="SELECT 'живое ' || round(coalesce(sum(duration_ms) FILTER (WHERE NOT offline), 0) / 60000.0, 1) || ' мин'
+     || ', из памяти кулона ' || round(coalesce(sum(duration_ms) FILTER (WHERE offline), 0) / 60000.0, 1) || ' мин'
+     || ', самое старое живое ждёт ' || coalesce(round(extract(epoch FROM now() - min(created_at) FILTER (WHERE NOT offline)) / 60)::text, '0') || ' мин'
+     || '; за час расшифровано ' || (SELECT count(*) FROM audio_chunks WHERE status IN ('done', 'empty') AND created_at > now() - interval '1 hour')
+     || ', из памяти кулона всего ' || (SELECT count(*) FROM audio_chunks WHERE offline)
+     FROM audio_chunks WHERE status IN ('pending', 'processing')"
+  echo "::notice title=Очередь расшифровки::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
   q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')

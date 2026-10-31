@@ -102,6 +102,12 @@ class AudioSpool(private val dir: File) {
         (dir.listFiles { f -> f.name.endsWith(".bin") || f.name.endsWith(".json") } ?: emptyArray())
             .sortedBy { order(it) }
 
+    /**
+     * Порядок выгрузки: сначала живое (звук, кнопка, геолокация — по времени), потом запись из памяти кулона.
+     * Иначе большая старая запись задерживала бы то, что вы говорите сейчас.
+     */
+    fun uploadOrder(): List<File> = pending().sortedBy { if (it.name.contains("_o.")) 1 else 0 }
+
     fun stats(): Pair<Int, Long> {
         val files = dir.listFiles { f -> !f.name.endsWith(".tmp") } ?: return 0 to 0L
         return files.size to files.sumOf { it.length() }

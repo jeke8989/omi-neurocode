@@ -371,3 +371,7 @@ ALTER TABLE day_events ADD COLUMN IF NOT EXISTS vivid REAL;
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS agent TEXT NOT NULL DEFAULT 'mnemo';
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS context TEXT;
 ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS context TEXT;
+
+-- Звук из памяти кулона (записан без телефона, забран позже): расшифровывается после живого
+ALTER TABLE audio_chunks ADD COLUMN IF NOT EXISTS offline BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS audio_chunks_queue_idx ON audio_chunks (status, offline, started_at);

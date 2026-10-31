@@ -359,6 +359,7 @@
     <string name="now_signed_as">Сейчас подписано: %1$s</string>
     <string name="now_since">С %1$s, переподключаюсь сам</string>
     <string name="off">Выкл.</string>
+    <string name="offline_backlog">Расшифровываю запись из памяти кулона: ещё %1$s. Новое — в первую очередь</string>
     <string name="offline_checking">Проверяю память кулона</string>
     <string name="offline_footer">Когда телефон далеко или Bluetooth выключен, кулон пишет звук в свою память. Как только связь вернётся, Mnemo заберёт запись, и разговоры встанут на своё место в дне.</string>
     <string name="offline_left">Осталось около %1$s звука</string>
@@ -366,6 +367,7 @@
     <string name="offline_recovered">Забрано всего: %1$s</string>
     <string name="offline_synced">Всё забрано</string>
     <string name="offline_syncing">Забираю запись с кулона</string>
+    <string name="offline_syncing_live">Заодно забираю запись с кулона: ещё около %1$s</string>
     <string name="offline_title">Записи без телефона</string>
     <string name="offline_unsupported">Прошивка кулона не умеет отдавать записи</string>
     <string name="offline_update_fw">Обновите прошивку кулона до 3.0.20 или новее в приложении Omi</string>

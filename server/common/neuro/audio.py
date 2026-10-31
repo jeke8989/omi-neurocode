@@ -273,6 +273,10 @@ class FinishedChunk:
     start_ms: int
     duration_ms: int
     path: str
+    offline: bool = False  # из памяти кулона (записано без телефона): расшифровывается после живого звука
+
+
+OFFLINE_TAG = "-off"  # в имени файла: кусок из памяти кулона
 
 
 class ChunkWriter:
@@ -282,7 +286,8 @@ class ChunkWriter:
     Если сервис упадёт, при старте незакрытые .part подбираются recover_orphans().
     """
 
-    def __init__(self, audio_dir: str, device_id: str, max_sec: float, gap_sec: float):
+    def __init__(self, audio_dir: str, device_id: str, max_sec: float, gap_sec: float, offline: bool = False):
+        self.offline = offline
         self.dir = Path(audio_dir) / device_id
         self.dir.mkdir(parents=True, exist_ok=True)
         self.device_id = device_id
@@ -336,11 +341,12 @@ class ChunkWriter:
     def _open(self, start_ms: int):
         self._start_ms = start_ms
         self._bytes = 0
-        self._path = self.dir / f"{start_ms}.pcm.part"
+        tag = OFFLINE_TAG if self.offline else ""
+        self._path = self.dir / f"{start_ms}{tag}.pcm.part"
         # если файл с таким именем уже есть (повтор), дописываем в новый
         n = 1
         while self._path.exists() or self._path.with_suffix("").exists():
-            self._path = self.dir / f"{start_ms}-{n}.pcm.part"
+            self._path = self.dir / f"{start_ms}{tag}-{n}.pcm.part"
             n += 1
         self._fh = open(self._path, "wb")
 
@@ -355,7 +361,7 @@ class ChunkWriter:
             part.unlink(missing_ok=True)
             return None
         part.rename(final)
-        return FinishedChunk(self.device_id, self._start_ms, self._bytes // BYTES_PER_MS, str(final))
+        return FinishedChunk(self.device_id, self._start_ms, self._bytes // BYTES_PER_MS, str(final), self.offline)
 
 
 def recover_orphans(audio_dir: str) -> list[FinishedChunk]:
@@ -378,4 +384,5 @@ def recover_orphans(audio_dir: str) -> list[FinishedChunk]:
 def chunk_from_path(path: Path) -> FinishedChunk:
     stem = path.name.split(".")[0]
     start_ms = int(stem.split("-")[0])
-    return FinishedChunk(path.parent.name, start_ms, path.stat().st_size // BYTES_PER_MS, str(path))
+    return FinishedChunk(path.parent.name, start_ms, path.stat().st_size // BYTES_PER_MS, str(path),
+                         OFFLINE_TAG in stem)

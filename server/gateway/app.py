@@ -91,16 +91,17 @@ def _clamp(value: str | None, default: int, lo: int, hi: int) -> int:
 
 
 INSERT_CHUNK = """
-INSERT INTO audio_chunks (device_id, started_at, duration_ms, path)
-VALUES (%s, to_timestamp(%s / 1000.0), %s, %s)
+INSERT INTO audio_chunks (device_id, started_at, duration_ms, path, offline)
+VALUES (%s, to_timestamp(%s / 1000.0), %s, %s, %s)
 ON CONFLICT (path) WHERE path IS NOT NULL DO NOTHING
 """
 
 
 async def register_chunks(conn, chunks: list[FinishedChunk]):
     for c in chunks:
-        await conn.execute(INSERT_CHUNK, (c.device_id, c.start_ms, c.duration_ms, c.path))
-        log.info("chunk ready device=%s start=%s dur=%sms", c.device_id, c.start_ms, c.duration_ms)
+        await conn.execute(INSERT_CHUNK, (c.device_id, c.start_ms, c.duration_ms, c.path, c.offline))
+        log.info("chunk ready device=%s start=%s dur=%sms%s", c.device_id, c.start_ms, c.duration_ms,
+                 " offline" if c.offline else "")
 
 
 async def reconcile_files(recover: bool):
@@ -186,7 +187,8 @@ async def handle_batch(conn, device: str, decoder: FrameDecoder, data: bytes) ->
     async with lock:
         w = writers.get(key)
         if w is None:
-            w = writers[key] = ChunkWriter(config.AUDIO_DIR, device, config.CHUNK_MAX_SEC, config.CHUNK_GAP_SEC)
+            w = writers[key] = ChunkWriter(config.AUDIO_DIR, device, config.CHUNK_MAX_SEC, config.CHUNK_GAP_SEC,
+                                           offline=batch.offline)
         finished = await anyio.to_thread.run_sync(w.write, batch.ts_ms, pcm)
     if batch.offline and finished:
         log.info("device=%s: %d offline chunk(s) from the pendant memory", device, len(finished))
@@ -415,6 +417,11 @@ async def api_status(request: Request):
         chunks = await (await conn.execute(
             "SELECT status, count(*) AS n FROM audio_chunks GROUP BY status"
         )).fetchall()
+        # очередь расшифровки: живой звук идёт первым, запись из памяти кулона — за ним
+        queue = await (await conn.execute(
+            """SELECT coalesce(sum(duration_ms) FILTER (WHERE NOT offline), 0) / 1000 AS live_sec,
+                      coalesce(sum(duration_ms) FILTER (WHERE offline), 0) / 1000 AS offline_sec
+               FROM audio_chunks WHERE status IN ('pending', 'processing')""")).fetchone()
         devices = await (await conn.execute(
             "SELECT device_id, last_seen, last_audio, info FROM devices ORDER BY last_seen DESC NULLS LAST"
         )).fetchall()
@@ -425,6 +432,7 @@ async def api_status(request: Request):
         )).fetchone()
     return Json({
         "chunks": {r["status"]: r["n"] for r in chunks},
+        "queue": {"live_sec": int(queue["live_sec"]), "offline_sec": int(queue["offline_sec"])},
         "devices": devices,
         **counts,
         "stt_provider": config.STT_PROVIDER,

@@ -55,6 +55,8 @@ class Cached<T>(private val loader: suspend () -> T) {
 object Repo {
     val days = Cached { Api.days() }
     val tasks = Cached { Api.tasks("all").also { codes.neuro.neurosoft.Core.onTasks(it) } }
+    /** Состояние сервера: очередь расшифровки (живое / из памяти кулона). */
+    val serverStatus = Cached { Api.status() }
     /** Удалённые задачи (последние сверху) — посмотреть, что смахнули, и вернуть. */
     val removedTasks = Cached { Api.tasks("dismissed").take(60) }
     val diary = Cached { Api.diary() }

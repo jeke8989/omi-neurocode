@@ -359,6 +359,7 @@
     <string name="now_signed_as">Etiqueta actual: %1$s</string>
     <string name="now_since">Desde las %1$s, reconectando solo</string>
     <string name="off">Desactivado</string>
+    <string name="offline_backlog">Transcribiendo la grabación guardada del colgante: quedan %1$s. Lo nuevo va primero</string>
     <string name="offline_checking">Revisando la memoria del colgante</string>
     <string name="offline_footer">Cuando el teléfono está lejos o el Bluetooth está apagado, el colgante graba en su memoria. Al reconectarse, Mnemo recoge la grabación y las conversaciones quedan en su lugar del día.</string>
     <string name="offline_left">Quedan unos %1$s de audio</string>
@@ -366,6 +367,7 @@
     <string name="offline_recovered">Recogido en total: %1$s</string>
     <string name="offline_synced">Todo recogido</string>
     <string name="offline_syncing">Recogiendo la grabación del colgante</string>
+    <string name="offline_syncing_live">También recojo la grabación del colgante: quedan unos %1$s</string>
     <string name="offline_title">Grabaciones sin el teléfono</string>
     <string name="offline_unsupported">El firmware del colgante no puede entregar grabaciones</string>
     <string name="offline_update_fw">Actualiza el firmware del colgante a 3.0.20 o posterior en la app de Omi</string>

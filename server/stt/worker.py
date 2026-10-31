@@ -154,7 +154,8 @@ UPDATE audio_chunks SET status = 'processing', locked_at = now(), attempts = att
 WHERE id = (
     SELECT id FROM audio_chunks
     WHERE status = 'pending' AND (not_before IS NULL OR not_before <= now())
-    ORDER BY started_at
+    -- сначала живой звук (то, что вы говорите сейчас), запись из памяти кулона — когда живого нет
+    ORDER BY offline, started_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )

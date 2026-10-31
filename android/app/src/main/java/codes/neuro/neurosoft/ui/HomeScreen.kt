@@ -411,6 +411,15 @@ private fun LiveStrip() {
         if (Permissions.bluetoothGranted(context) && device.address != null) Core.startCapture(context)
     }
     val now = System.currentTimeMillis()
+    // сколько записи из памяти кулона ещё ждёт расшифровки на сервере (новое расшифровывается первым)
+    val server by Repo.serverStatus.state.collectAsState()
+    val backlog = server.data?.queueOfflineSec ?: 0
+    LaunchedEffect(device.offline.phase, backlog > 0) {
+        while (device.offline.phase == OfflineSync.Phase.SYNCING || backlog > 0 || server.data == null) {
+            Repo.serverStatus.refresh()
+            delay(20_000)
+        }
+    }
 
     val strip: Strip? = when {
         device.address == null -> Strip(stringResource(R.string.live_no_device), stringResource(R.string.live_no_device_text),
@@ -430,9 +439,6 @@ private fun LiveStrip() {
             voice.progress ?: voice.question, stringResource(R.string.voice_stop), { Core.voice.cancel() })
         voice.phase == VoiceAssistant.Phase.SPEAKING -> Strip(stringResource(R.string.live_speaking), voice.question,
             stringResource(R.string.voice_stop), { Core.voice.cancel() })
-        // кулон отдаёт то, что записал без телефона
-        device.offline.phase == OfflineSync.Phase.SYNCING -> Strip(stringResource(R.string.offline_syncing),
-            stringResource(R.string.offline_left, fmt.duration(device.offline.pending / 10)))
         device.state == ConnState.BLUETOOTH_OFF -> Strip(stringResource(R.string.state_bluetooth_off),
             stringResource(R.string.live_bt_off_text), warn = true)
         device.state != ConnState.CONNECTED -> Strip(
@@ -447,10 +453,15 @@ private fun LiveStrip() {
             else stringResource(R.string.live_server_offline_text), warn = true)
         upload.connected && upload.pendingFiles > 5 -> Strip(stringResource(R.string.live_catching_up),
             stringResource(R.string.live_queue_left, fmt.bytes(upload.pendingBytes)))
-        state == LensState.RECORDING -> Strip(stringResource(R.string.live_recording),
+        state == LensState.RECORDING -> Strip(stringResource(R.string.live_recording), when {
+            // параллельно с живой записью: кулон отдаёт то, что записал без телефона, или сервер её расшифровывает
+            device.offline.phase == OfflineSync.Phase.SYNCING ->
+                stringResource(R.string.offline_syncing_live, fmt.duration(device.offline.pending / 10))
+            backlog >= 60 -> stringResource(R.string.offline_backlog, fmt.duration(backlog.toLong()))
             // полезное время — речь в разговорах за сегодня (считает сервер), а не время работы микрофона
-            todaySpeech?.let { stringResource(R.string.live_talk_today, fmt.duration(it.toLong())) }
-                ?: stringResource(R.string.live_quiet_note))
+            else -> todaySpeech?.let { stringResource(R.string.live_talk_today, fmt.duration(it.toLong())) }
+                ?: stringResource(R.string.live_quiet_note)
+        })
         else -> Strip(stringResource(R.string.live_connected), stringResource(R.string.live_connected_text))
     }
     if (strip == null) return

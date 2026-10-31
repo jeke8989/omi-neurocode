@@ -236,6 +236,9 @@ data class ServerStatus(
     val sttProvider: String,
     val llmConfigured: Boolean,
     val chunksPending: Int,
+    /** Очередь расшифровки на сервере, секунды звука: живой — первым, из памяти кулона — за ним. */
+    val queueLiveSec: Int = 0,
+    val queueOfflineSec: Int = 0,
 )
 
 /** REST API своего сервера (gateway). */
@@ -387,6 +390,8 @@ object Api {
             sttProvider = o.optString("stt_provider"),
             llmConfigured = o.optBoolean("llm_configured"),
             chunksPending = chunks.optInt("pending") + chunks.optInt("processing"),
+            queueLiveSec = o.optJSONObject("queue")?.optInt("live_sec") ?: 0,
+            queueOfflineSec = o.optJSONObject("queue")?.optInt("offline_sec") ?: 0,
         )
     }
 

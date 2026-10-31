@@ -53,11 +53,14 @@ WHERE c.status = 'open'
   AND c.updated_at < now() - c.attempts * interval '2 minutes'
   -- итоги — после того как STT решил, кто говорил (имена в итогах), но не дольше 10 минут
   AND (c.voices_done OR c.last_activity < now() - interval '10 minutes')
+  -- ждём только звук, который может относиться к этому разговору (пересекается с ним по времени),
+  -- старая запись из памяти кулона в очереди не держит свежие разговоры
   AND NOT EXISTS (
       SELECT 1 FROM audio_chunks a
       WHERE a.device_id = c.device_id AND a.status IN ('pending', 'processing')
-        AND a.started_at <= c.last_activity + %(gap)s * interval '1 second')
-ORDER BY c.last_activity
+        AND a.started_at <= c.last_activity + %(gap)s * interval '1 second'
+        AND a.started_at + a.duration_ms * interval '1 millisecond' >= c.started_at - %(gap)s * interval '1 second')
+ORDER BY c.last_activity DESC  -- свежие разговоры — первыми
 LIMIT 5
 """
 
@@ -171,8 +174,8 @@ def process_events(conn):
                 start, end = ev["ts"] - timedelta(seconds=config.REMEMBER_WINDOW_SEC), ev["ts"] + timedelta(seconds=3)
             waiting = conn.execute(
                 """SELECT 1 FROM audio_chunks WHERE device_id = %s AND status IN ('pending', 'processing')
-                   AND started_at <= %s LIMIT 1""",
-                (ev["device_id"], end),
+                   AND started_at <= %s AND started_at + duration_ms * interval '1 millisecond' >= %s LIMIT 1""",
+                (ev["device_id"], end, start),  # только звук этого окна, не старая запись из памяти кулона
             ).fetchone()
             if waiting and ev["created_at"] > now - timedelta(minutes=30):
                 continue

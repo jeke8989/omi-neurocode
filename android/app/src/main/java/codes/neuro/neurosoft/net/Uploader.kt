@@ -162,7 +162,7 @@ class Uploader(
 
     private fun sendPending() {
         val socket = ws ?: return
-        for (f in spool.pending()) {
+        for (f in spool.uploadOrder()) {
             if (inflight.size >= MAX_INFLIGHT) break
             val id = AudioSpool.ackId(f)
             if (inflight.containsKey(id)) continue

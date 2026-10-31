@@ -360,6 +360,7 @@
     <string name="now_signed_as">Currently labeled: %1$s</string>
     <string name="now_since">Since %1$s, reconnecting automatically</string>
     <string name="off">Off</string>
+    <string name="offline_backlog">Transcribing the pendant\'s stored recording: %1$s left. New speech goes first</string>
     <string name="offline_checking">Checking the pendant\'s memory</string>
     <string name="offline_footer">When the phone is far away or Bluetooth is off, the pendant records into its own memory. Once it reconnects, Mnemo collects the recording and the conversations land in their place in the day.</string>
     <string name="offline_left">About %1$s of audio left</string>
@@ -367,6 +368,7 @@
     <string name="offline_recovered">Collected in total: %1$s</string>
     <string name="offline_synced">Everything collected</string>
     <string name="offline_syncing">Collecting the pendant\'s recording</string>
+    <string name="offline_syncing_live">Also collecting the pendant\'s recording: about %1$s left</string>
     <string name="offline_title">Recordings without the phone</string>
     <string name="offline_unsupported">The pendant\'s firmware can\'t hand over recordings</string>
     <string name="offline_update_fw">Update the pendant firmware to 3.0.20 or later in the Omi app</string>

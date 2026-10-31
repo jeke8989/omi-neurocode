@@ -23,6 +23,8 @@ import java.nio.ByteOrder
 class OfflineSync(
     private val send: (ByteArray) -> Boolean,
     private val sink: Sink,
+    /** Сколько пакетов живого звука потеряно (FrameAssembler): растёт — значит, мешаем живому потоку. */
+    private val livePacketsLost: () -> Long = { 0L },
 ) {
     interface Sink {
         /** Кадры Opus, записанные начиная с startMs (UTC, мс). */
@@ -60,6 +62,10 @@ class OfflineSync(
     private var recovered = 0L
 
     private val timeout = Runnable { synchronized(this) { if (active) fail("timeout") } }
+    // живой звук важнее: читаем порциями с паузами; если живые пакеты теряются — порции меньше, паузы длиннее
+    private var batch = START_BATCH
+    private var pauseMs = MIN_PAUSE_MS
+    private var lostAtBatch = 0L
 
     fun state() = state
 
@@ -80,6 +86,9 @@ class OfflineSync(
         if (active) return
         active = true
         notReady = 0
+        batch = START_BATCH
+        pauseMs = MIN_PAUSE_MS
+        lostAtBatch = livePacketsLost()
         info()
     }
 
@@ -117,8 +126,11 @@ class OfflineSync(
                 if (unread == 0L) {
                     done()
                 } else {
-                    Log.i(TAG, "pendant has $unread offline records")
-                    read(readSeq, minOf(unread, BATCH_RECORDS))
+                    publish(state.copy(phase = Phase.SYNCING, pending = unread))
+                    // пауза между порциями — окно для живого звука
+                    main.removeCallbacks(timeout)
+                    main.postDelayed({ synchronized(this) { if (active) read(readSeq, minOf(unread, batch)) } },
+                        if (records > 0) pauseMs else 0L)
                 }
             }
             NOTIFY_ACK -> {
@@ -172,6 +184,15 @@ class OfflineSync(
     }
 
     private fun read(start: Long, count: Long) {
+        val lost = livePacketsLost()
+        if (lost > lostAtBatch) {  // живые пакеты терялись, пока читали прошлую порцию
+            batch = maxOf(MIN_BATCH, batch / 2)
+            pauseMs = minOf(MAX_PAUSE_MS, pauseMs * 2)
+        } else {
+            batch = minOf(MAX_BATCH, batch + batch / 2)
+            pauseMs = maxOf(MIN_PAUSE_MS, pauseMs / 2)
+        }
+        lostAtBatch = lost
         publish(state.copy(phase = Phase.SYNCING, pending = (writeSeq - start).coerceAtLeast(0)))
         val cmd = ByteBuffer.allocate(13).order(ByteOrder.BIG_ENDIAN).put(OP_READ).putLong(start)
             .putInt(count.toInt()).array()
@@ -271,7 +292,11 @@ class OfflineSync(
         const val RECORD = HEADER + BLOCK
         const val FRAME_MS = 20L
         const val FRAMES_PER_FILE = 250          // 5 с звука на файл очереди
-        const val BATCH_RECORDS = 3_000L         // ≈5 минут звука за одно чтение
+        const val START_BATCH = 300L             // ≈30 с звука за одно чтение
+        const val MIN_BATCH = 100L
+        const val MAX_BATCH = 1_200L
+        const val MIN_PAUSE_MS = 700L
+        const val MAX_PAUSE_MS = 8_000L
         const val JUMP_MS = 3_000L               // разрыв во времени больше — новый кусок
         const val MIN_EPOCH = 1_704_067_200L     // 2024-01-01: раньше — часы кулона не были выставлены
 

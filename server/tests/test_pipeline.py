@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+from pathlib import Path
 import os
 import tempfile
 import time
@@ -117,7 +118,7 @@ def test_full_pipeline(conn, monkeypatch):
         path = os.path.join(AUDIO_DIR, DEVICE, f"{start_ms}.pcm")
         with open(path, "wb") as f:
             f.write(b"\x00\x00" * 16000)
-        conn.execute(gw.INSERT_CHUNK, (DEVICE, start_ms, 1000, path))
+        conn.execute(gw.INSERT_CHUNK, (DEVICE, start_ms, 1000, path, False))
         stt.process(conn, fake, conn.execute(stt.CLAIM_SQL).fetchone())
 
     add_chunk(t0 + 33_000)
@@ -261,5 +262,26 @@ def test_offline_batches_from_pendant_memory(conn):
     live, off = chunks
     assert live.start_ms == now_ms and live.duration_ms == 2000  # живой поток не разорвался
     assert off.start_ms == past and off.duration_ms == 2000 and off.device_id == DEVICE
-    rows = conn.execute("SELECT duration_ms FROM audio_chunks WHERE path = ANY(%s)", ([live.path, off.path],)).fetchall()
-    assert [r["duration_ms"] for r in rows] == [2000, 2000]
+    rows = conn.execute("SELECT duration_ms, offline FROM audio_chunks WHERE path = ANY(%s) ORDER BY offline",
+                        ([live.path, off.path],)).fetchall()
+    assert [(r["duration_ms"], r["offline"]) for r in rows] == [(2000, False), (2000, True)]
+    assert off.path.split("/")[-1].startswith(f"{past}-off") and gw.chunk_from_path(Path(off.path)).offline
+
+    # расшифровка: живой звук первым, хотя запись из памяти кулона старше
+    from stt import worker as stt
+    conn.execute("UPDATE audio_chunks SET status = 'done' WHERE path <> ALL(%s)", ([live.path, off.path],))
+    first = conn.execute(stt.CLAIM_SQL).fetchone()
+    second = conn.execute(stt.CLAIM_SQL).fetchone()
+    assert first["path"] == live.path and second["path"] == off.path
+    conn.execute("UPDATE audio_chunks SET status = 'pending' WHERE path = %s", (off.path,))
+
+    # старая запись из памяти кулона в очереди не держит итоги свежего разговора
+    from agent import worker as agent
+    cid = conn.execute(
+        """INSERT INTO conversations (device_id, started_at, last_activity, status, voices_done)
+           VALUES (%s, now() - interval '20 minutes', now() - interval '15 minutes', 'open', true) RETURNING id""",
+        (DEVICE,)).fetchone()["id"]
+    conn.execute("UPDATE conversations SET updated_at = now() - interval '1 hour' WHERE id = %s", (cid,))
+    ready = conn.execute(agent.READY_CONVERSATIONS_SQL, {"idle": 60, "gap": 120}).fetchall()
+    assert cid in [r["id"] for r in ready]
+    conn.execute("DELETE FROM conversations WHERE id = %s", (cid,))

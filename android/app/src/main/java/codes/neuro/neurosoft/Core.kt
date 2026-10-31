@@ -145,7 +145,7 @@ object Core {
             updateNotification()
         }
         ble = OmiBle(app, bleListener)
-        offline = OfflineSync({ ble.storageWrite(it) }, offlineSink)
+        offline = OfflineSync({ ble.storageWrite(it) }, offlineSink) { assembler.lostPackets }
         offline.restore(prefs.offlineSyncAt, prefs.offlineRecoveredSec)
         _device.update { it.copy(offline = offline.state()) }
         scanner = OmiScanner(app)

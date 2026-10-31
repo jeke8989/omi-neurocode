@@ -359,6 +359,7 @@
     <string name="now_signed_as">Şu anki etiket: %1$s</string>
     <string name="now_since">Başlangıç %1$s, kendiliğinden yeniden bağlanıyor</string>
     <string name="off">Kapalı</string>
+    <string name="offline_backlog">Kolye hafızasındaki kayıt yazıya dökülüyor: %1$s kaldı. Yeni konuşmalar önce</string>
     <string name="offline_checking">Kolyenin hafızası kontrol ediliyor</string>
     <string name="offline_footer">Telefon uzaktayken veya Bluetooth kapalıyken kolye sesi kendi hafızasına kaydeder. Bağlantı geri gelince Mnemo kaydı alır ve konuşmalar günün içinde yerini alır.</string>
     <string name="offline_left">Yaklaşık %1$s ses kaldı</string>
@@ -366,6 +367,7 @@
     <string name="offline_recovered">Toplam alınan: %1$s</string>
     <string name="offline_synced">Hepsi alındı</string>
     <string name="offline_syncing">Kolyedeki kayıt alınıyor</string>
+    <string name="offline_syncing_live">Kolyedeki kayıt da alınıyor: yaklaşık %1$s kaldı</string>
     <string name="offline_title">Telefonsuz kayıtlar</string>
     <string name="offline_unsupported">Kolye yazılımı kayıtları aktaramıyor</string>
     <string name="offline_update_fw">Kolye yazılımını Omi uygulamasından 3.0.20 veya daha yeni bir sürüme güncelleyin</string>
