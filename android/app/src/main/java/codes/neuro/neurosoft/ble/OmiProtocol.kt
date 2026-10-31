@@ -36,6 +36,10 @@ object OmiProtocol {
     val HAPTIC_SERVICE: UUID = UUID.fromString("cab1ab95-2ea5-4f4d-bb56-874b72cfc984")
     val HAPTIC: UUID = UUID.fromString("cab1ab96-2ea5-4f4d-bb56-874b72cfc984")
 
+    // Хранилище кулона: записи, сделанные без телефона (прошивка 3.0.20+: кольцевой буфер, см. OfflineSync)
+    val STORAGE_SERVICE: UUID = UUID.fromString("30295780-4301-eabd-2904-2849adfeae43")
+    val STORAGE_DATA: UUID = UUID.fromString("30295781-4301-eabd-2904-2849adfeae43")
+
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     // Кодеки (характеристика AUDIO_CODEC). CV1 на прошивке 3.x отдаёт 21: Opus, 16 кГц, кадр 20 мс.

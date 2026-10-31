@@ -27,8 +27,11 @@ OPUS_CODECS = (CODEC_OPUS, CODEC_OPUS_FS320)
 #   u8  кодек кулона
 #   u64 время захвата первого кадра, мс unix (little-endian) — оно же id пакета
 #   далее кадры: u16 длина (LE) + байты кадра Opus
+# Версия 2 — то же, но звук записан кулоном без телефона и забран из его памяти позже: он ложится на своё
+# время отдельно от живого потока (свой ChunkWriter), id пакета — «<время>_o».
 # ---------------------------------------------------------------------------
 BATCH_VERSION = 1
+BATCH_VERSION_OFFLINE = 2
 _HEADER = struct.Struct("<BBQ")
 _LEN = struct.Struct("<H")
 
@@ -42,17 +45,18 @@ class Batch:
     codec: int
     ts_ms: int
     frames: list[bytes]
+    offline: bool = False
 
     @property
     def batch_id(self) -> str:
-        return f"{self.ts_ms}_a"
+        return f"{self.ts_ms}_o" if self.offline else f"{self.ts_ms}_a"
 
 
 def parse_batch(data: bytes) -> Batch:
     if len(data) < _HEADER.size:
         raise BatchError("batch too short")
     version, codec, ts_ms = _HEADER.unpack_from(data, 0)
-    if version != BATCH_VERSION:
+    if version not in (BATCH_VERSION, BATCH_VERSION_OFFLINE):
         raise BatchError(f"unsupported batch version {version}")
     frames: list[bytes] = []
     off = _HEADER.size
@@ -65,11 +69,11 @@ def parse_batch(data: bytes) -> Batch:
             raise BatchError("truncated frame")
         frames.append(bytes(data[off:off + n]))
         off += n
-    return Batch(codec=codec, ts_ms=ts_ms, frames=frames)
+    return Batch(codec=codec, ts_ms=ts_ms, frames=frames, offline=version == BATCH_VERSION_OFFLINE)
 
 
-def build_batch(codec: int, ts_ms: int, frames: list[bytes]) -> bytes:
-    out = bytearray(_HEADER.pack(BATCH_VERSION, codec, ts_ms))
+def build_batch(codec: int, ts_ms: int, frames: list[bytes], offline: bool = False) -> bytes:
+    out = bytearray(_HEADER.pack(BATCH_VERSION_OFFLINE if offline else BATCH_VERSION, codec, ts_ms))
     for f in frames:
         out += _LEN.pack(len(f))
         out += f

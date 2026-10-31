@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import codes.neuro.neurosoft.ble.ConnState
 import codes.neuro.neurosoft.ble.FoundDevice
 import codes.neuro.neurosoft.ble.FrameAssembler
+import codes.neuro.neurosoft.ble.OfflineSync
 import codes.neuro.neurosoft.ble.OmiBle
 import codes.neuro.neurosoft.ble.OmiProtocol
 import codes.neuro.neurosoft.ble.OmiScanner
@@ -66,6 +67,8 @@ data class DeviceStatus(
     /** Средний размер кадра Opus: в тишине кадры заметно меньше (кодек с переменным битрейтом). */
     val avgFrameBytes: Int = 0,
     val heardTodayMs: Long = 0,
+    /** Записи, сделанные кулоном без телефона: забираем после подключения. */
+    val offline: OfflineSync.State = OfflineSync.State(),
 )
 
 /**
@@ -142,6 +145,9 @@ object Core {
             updateNotification()
         }
         ble = OmiBle(app, bleListener)
+        offline = OfflineSync({ ble.storageWrite(it) }, offlineSink)
+        offline.restore(prefs.offlineSyncAt, prefs.offlineRecoveredSec)
+        _device.update { it.copy(offline = offline.state()) }
         scanner = OmiScanner(app)
         voice = VoiceAssistant(app, ::res, prefs, ::deviceId, { codec }) { ts ->
             // нет связи: вопрос записан вместе со всем звуком, агент ответит в чате, когда сеть появится
@@ -581,12 +587,33 @@ object Core {
         _device.update { it.copy(state = state, disconnectedSince = since) }
     }
 
+    private lateinit var offline: OfflineSync
+
+    private val offlineSink = object : OfflineSync.Sink {
+        override fun onOfflineAudio(startMs: Long, frames: List<ByteArray>) {
+            spool.writeOffline(codec, startMs, frames)
+            uploader.kick()
+        }
+
+        override fun onOfflineState(state: OfflineSync.State) {
+            _device.update { it.copy(offline = state) }
+            if (state.lastSyncAt > 0) prefs.offlineSyncAt = state.lastSyncAt
+            prefs.offlineRecoveredSec = state.recoveredSec
+            updateNotification()
+        }
+    }
+
     private val bleListener = object : OmiBle.Listener {
         override fun onConnectionState(state: ConnState) {
             if (state != ConnState.CONNECTED) assembler.reset()
             onConnectionChanged(state)
             updateNotification()
+            // кулон снова на связи: забрать то, что он записал без телефона
+            if (state == ConnState.CONNECTED) offline.start(_device.value.firmware, "storage" in _device.value.caps)
+            else offline.stop()
         }
+
+        override fun onStorage(value: ByteArray) = offline.onData(value)
 
         override fun onCodec(codec: Int) {
             this@Core.codec = codec

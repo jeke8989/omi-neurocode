@@ -46,8 +46,10 @@ class OmiBle(private val context: Context, private val listener: Listener) {
         fun onLedDim(percent: Int) {}
         fun onMicGain(level: Int) {}
         fun onCharging(charging: Boolean) {}
-        /** Что умеет этот кулон: "haptic", "led", "gain", "charging". */
+        /** Что умеет этот кулон: "haptic", "led", "gain", "charging", "storage". */
         fun onCapabilities(caps: Set<String>) {}
+        /** Ответы и данные хранилища кулона (записи без телефона). */
+        fun onStorage(value: ByteArray) {}
     }
 
     private sealed class Op {
@@ -101,6 +103,12 @@ class OmiBle(private val context: Context, private val listener: Listener) {
         enqueue(Op.Write(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN,
             byteArrayOf(level.coerceIn(0, OmiProtocol.MIC_GAIN_MAX).toByte())))
         enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.MIC_GAIN))
+    }
+
+    /** Команда хранилищу кулона (выполняется по очереди с остальными операциями). */
+    fun storageWrite(value: ByteArray): Boolean {
+        main.post { enqueue(Op.Write(OmiProtocol.STORAGE_SERVICE, OmiProtocol.STORAGE_DATA, value)) }
+        return true
     }
 
     fun disconnect() = main.post {
@@ -184,6 +192,11 @@ class OmiBle(private val context: Context, private val listener: Listener) {
             caps += "charging"
             enqueue(Op.Read(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.CHARGING))
             enqueue(Op.Notify(OmiProtocol.SETTINGS_SERVICE, OmiProtocol.CHARGING))
+        }
+        // хранилище: подписка до первой команды, иначе кулон прерывает передачу
+        if (has(OmiProtocol.STORAGE_SERVICE, OmiProtocol.STORAGE_DATA)) {
+            caps += "storage"
+            enqueue(Op.Notify(OmiProtocol.STORAGE_SERVICE, OmiProtocol.STORAGE_DATA))
         }
         listener.onCapabilities(caps)
         if (has(OmiProtocol.TIME_SYNC_SERVICE, OmiProtocol.TIME_SYNC_WRITE)) {
@@ -289,6 +302,7 @@ class OmiBle(private val context: Context, private val listener: Listener) {
             OmiProtocol.BUTTON_TRIGGER -> if (value.isNotEmpty()) listener.onButton(value[0].toInt() and 0xFF)
             OmiProtocol.BATTERY_LEVEL -> if (value.isNotEmpty()) listener.onBattery(value[0].toInt() and 0xFF)
             OmiProtocol.CHARGING -> if (value.isNotEmpty()) listener.onCharging(value[0].toInt() != 0)
+            OmiProtocol.STORAGE_DATA -> listener.onStorage(value)
         }
     }
 

@@ -180,12 +180,16 @@ async def handle_batch(conn, device: str, decoder: FrameDecoder, data: bytes) ->
         log.error("device=%s batch=%s dropped: %s", device, bid, exc)
         return {"type": "ack", "id": bid, "error": str(exc)}
 
-    lock = writer_locks.setdefault(device, asyncio.Lock())
+    # запись из памяти кулона (сделана без телефона) — своя «лента», чтобы не рвать живой поток
+    key = f"{device}#offline" if batch.offline else device
+    lock = writer_locks.setdefault(key, asyncio.Lock())
     async with lock:
-        w = writers.get(device)
+        w = writers.get(key)
         if w is None:
-            w = writers[device] = ChunkWriter(config.AUDIO_DIR, device, config.CHUNK_MAX_SEC, config.CHUNK_GAP_SEC)
+            w = writers[key] = ChunkWriter(config.AUDIO_DIR, device, config.CHUNK_MAX_SEC, config.CHUNK_GAP_SEC)
         finished = await anyio.to_thread.run_sync(w.write, batch.ts_ms, pcm)
+    if batch.offline and finished:
+        log.info("device=%s: %d offline chunk(s) from the pendant memory", device, len(finished))
 
     await register_chunks(conn, finished)
     await conn.execute(

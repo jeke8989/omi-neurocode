@@ -44,6 +44,7 @@ import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.Permissions
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.ble.ConnState
+import codes.neuro.neurosoft.ble.OfflineSync
 import codes.neuro.neurosoft.net.ConversationItem
 import codes.neuro.neurosoft.net.DiaryDay
 import codes.neuro.neurosoft.voice.VoiceAssistant
@@ -429,6 +430,9 @@ private fun LiveStrip() {
             voice.progress ?: voice.question, stringResource(R.string.voice_stop), { Core.voice.cancel() })
         voice.phase == VoiceAssistant.Phase.SPEAKING -> Strip(stringResource(R.string.live_speaking), voice.question,
             stringResource(R.string.voice_stop), { Core.voice.cancel() })
+        // кулон отдаёт то, что записал без телефона
+        device.offline.phase == OfflineSync.Phase.SYNCING -> Strip(stringResource(R.string.offline_syncing),
+            stringResource(R.string.offline_left, fmt.duration(device.offline.pending / 10)))
         device.state == ConnState.BLUETOOTH_OFF -> Strip(stringResource(R.string.state_bluetooth_off),
             stringResource(R.string.live_bt_off_text), warn = true)
         device.state != ConnState.CONNECTED -> Strip(

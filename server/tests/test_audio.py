@@ -41,7 +41,7 @@ def test_batch_roundtrip_and_decode():
 def test_parse_rejects_garbage():
     import pytest
     from neuro.audio import BatchError
-    for bad in (b"", b"\x01\x15", b"\x02" + b"\x00" * 9, build_batch(21, 1, [b"abc"])[:-1]):
+    for bad in (b"", b"\x01\x15", b"\x03" + b"\x00" * 9, build_batch(21, 1, [b"abc"])[:-1]):  # 3 — неизвестная версия
         with pytest.raises(BatchError):
             parse_batch(bad)
 

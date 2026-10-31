@@ -76,6 +76,15 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_level", "auto") ?: "auto"
         set(value) = sp.edit().putString("chat_level", value).apply()
 
+    /** Записи кулона без телефона: когда забирали в последний раз и сколько секунд звука забрали всего. */
+    var offlineSyncAt: Long
+        get() = sp.getLong("offline_sync_at", 0L)
+        set(value) = sp.edit().putLong("offline_sync_at", value).apply()
+
+    var offlineRecoveredSec: Long
+        get() = sp.getLong("offline_recovered_sec", 0L)
+        set(value) = sp.edit().putLong("offline_recovered_sec", value).apply()
+
     /** Уведомления внутри приложения (JSON, см. Inbox) и когда их смотрели в последний раз. */
     var inbox: String
         get() = sp.getString("inbox", "[]") ?: "[]"

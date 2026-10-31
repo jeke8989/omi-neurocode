@@ -59,6 +59,31 @@ class AudioSpool(private val dir: File) {
         return name
     }
 
+    private var lastOfflineId = 0L
+
+    /**
+     * Звук, который кулон записал без телефона (см. OfflineSync): тот же формат, но версия 2 — сервер кладёт
+     * его на своё время отдельно от живого потока. Файл <время>_o.bin.
+     */
+    @Synchronized
+    fun writeOffline(codec: Int, ts: Long, frames: List<ByteArray>): String {
+        val id = if (ts <= lastOfflineId) lastOfflineId + 1 else ts
+        lastOfflineId = id
+        val size = 10 + frames.sumOf { 2 + it.size }
+        val buf = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(2.toByte())
+        buf.put(codec.toByte())
+        buf.putLong(id)
+        for (f in frames) {
+            buf.putShort(f.size.toShort())
+            buf.put(f)
+        }
+        val name = "${id}_o.bin"
+        atomicWrite(name, buf.array())
+        enforceLimit()
+        return name
+    }
+
     fun writeEvent(event: String, value: Int?, ts: Long, extra: Map<String, Any?> = emptyMap()): String {
         val id = nextId(ts)
         val json = JSONObject()

@@ -229,3 +229,37 @@ def test_full_pipeline(conn, monkeypatch):
     agent.cleanup(conn)
     assert conn.execute("SELECT count(*) AS n FROM audio_chunks WHERE path IS NOT NULL").fetchone()["n"] == 0
     assert not any(f.endswith(".pcm") for _, _, fs in os.walk(AUDIO_DIR) for f in fs)
+
+
+def test_offline_batches_from_pendant_memory(conn):
+    """Запись из памяти кулона (сделана без телефона) приходит позже живого звука: ложится на своё время,
+    своим куском, и не рвёт живой поток."""
+    from gateway import app as gw
+    from neuro.audio import FrameDecoder, parse_batch
+
+    now_ms = int(time.time() * 1000)
+    past = now_ms - 3600 * 1000
+    frames = opus_frames(tone(1.0))
+    assert parse_batch(build_batch(CODEC_OPUS_FS320, past, frames, offline=True)).batch_id == f"{past}_o"
+
+    async def part():
+        aconn = await gw.aconnect()
+        await aconn.execute("INSERT INTO devices (device_id) VALUES (%s) ON CONFLICT DO NOTHING", (DEVICE,))
+        dec = FrameDecoder()
+        live1 = await gw.handle_batch(aconn, DEVICE, dec, build_batch(CODEC_OPUS_FS320, now_ms, frames))
+        off1 = await gw.handle_batch(aconn, DEVICE, dec, build_batch(CODEC_OPUS_FS320, past, frames, offline=True))
+        live2 = await gw.handle_batch(aconn, DEVICE, dec, build_batch(CODEC_OPUS_FS320, now_ms + 1000, frames))
+        off2 = await gw.handle_batch(aconn, DEVICE, dec, build_batch(CODEC_OPUS_FS320, past + 1000, frames, offline=True))
+        again = await gw.handle_batch(aconn, DEVICE, dec, build_batch(CODEC_OPUS_FS320, past, frames, offline=True))
+        chunks = [w.finalize() for w in (gw.writers[DEVICE], gw.writers[f"{DEVICE}#offline"])]
+        await gw.register_chunks(aconn, chunks)
+        await aconn.close()
+        return live1, off1, live2, off2, again, chunks
+
+    live1, off1, live2, off2, again, chunks = run(part())
+    assert off1["id"] == f"{past}_o" and live1["id"] == f"{now_ms}_a" and again["duplicate"] is True
+    live, off = chunks
+    assert live.start_ms == now_ms and live.duration_ms == 2000  # живой поток не разорвался
+    assert off.start_ms == past and off.duration_ms == 2000 and off.device_id == DEVICE
+    rows = conn.execute("SELECT duration_ms FROM audio_chunks WHERE path = ANY(%s)", ([live.path, off.path],)).fetchall()
+    assert [r["duration_ms"] for r in rows] == [2000, 2000]

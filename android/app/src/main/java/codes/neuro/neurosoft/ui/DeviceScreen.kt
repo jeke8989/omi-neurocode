@@ -30,6 +30,7 @@ import codes.neuro.neurosoft.BuildConfig
 import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.ble.ConnState
+import codes.neuro.neurosoft.ble.OfflineSync
 import codes.neuro.neurosoft.ble.OmiProtocol
 import kotlin.math.roundToInt
 
@@ -152,6 +153,30 @@ fun DeviceScreen() {
                             icon = Icons.BluetoothOff, iconTint = c.amber, value = fmt.timeMs(o.from))
                     }
                 }
+            }
+        }
+
+        // ---------------------------------------------------------- записи без телефона
+        Group(stringResource(R.string.offline_title), footer = stringResource(R.string.offline_footer)) {
+            val o = device.offline
+            item {
+                ListRow(
+                    stringResource(when (o.phase) {
+                        OfflineSync.Phase.SYNCING -> R.string.offline_syncing
+                        OfflineSync.Phase.CHECKING -> R.string.offline_checking
+                        OfflineSync.Phase.UNSUPPORTED -> R.string.offline_unsupported
+                        else -> if (o.lastSyncAt > 0) R.string.offline_synced else R.string.offline_never
+                    }),
+                    icon = Icons.Cloud, iconTint = if (o.phase == OfflineSync.Phase.UNSUPPORTED) c.amber else c.graphite,
+                    subtitle = when {
+                        o.phase == OfflineSync.Phase.SYNCING -> stringResource(R.string.offline_left,
+                            fmt.duration(o.pending / 10))
+                        o.phase == OfflineSync.Phase.UNSUPPORTED -> stringResource(R.string.offline_update_fw)
+                        o.recoveredSec > 0 -> stringResource(R.string.offline_recovered, fmt.duration(o.recoveredSec))
+                        else -> null
+                    },
+                    value = if (o.lastSyncAt > 0 && o.phase == OfflineSync.Phase.IDLE) fmt.timeMs(o.lastSyncAt) else null,
+                )
             }
         }
 
