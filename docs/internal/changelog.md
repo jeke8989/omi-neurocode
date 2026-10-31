@@ -19,7 +19,8 @@
 **Автообновление сервера из CI**
 - Что: задача `deploy` в `.github/workflows/server.yml` после тестов и e2e по SSH запускает
   `server/ci-update.sh` (сборка, ожидание, пока Claude допишет ответ, перезапуск, проверка `/health`).
-  Ключ CI на сервере ограничен `command=`. Добавлен `autoheal`.
+  Ключ CI на сервере ограничен `command=`. Добавлен `autoheal` — профиль compose (`COMPOSE_PROFILES=autoheal`
+  в `.env`); на сервере рядом с Jarvis выключен, там уже работает свой autoheal с той же меткой.
 - Откат: удалить переменную `DEPLOY_HOST` в настройках репозитория (задача пропускается) или строку ключа
   из `/root/.ssh/authorized_keys`.
 

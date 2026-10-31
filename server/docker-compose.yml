@@ -95,9 +95,11 @@ services:
     labels:
       - "autoheal=true"
 
-  # перезапускает контейнеры с меткой autoheal=true, если их healthcheck стал unhealthy
+  # перезапускает контейнеры с меткой autoheal=true, если их healthcheck стал unhealthy.
+  # Профиль autoheal (COMPOSE_PROFILES в .env): если на сервере уже есть свой autoheal (например, у Jarvis), выключите.
   autoheal:
     image: willfarrell/autoheal:1.2.0
+    profiles: ["autoheal"]
     restart: always
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
