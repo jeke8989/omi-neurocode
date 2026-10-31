@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, diary, extensions, i18n, people, retention
+from neuro import agent_core, diary, events, extensions, i18n, people, retention
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
@@ -399,6 +399,10 @@ def main():
                     process_events(conn)
                     export_tasks(conn)
                     sync_task_integrations(conn)
+                    try:
+                        events.tick(conn)  # фрагменты -> события, мусор -> корзина, ночью — разбор дня
+                    except Exception:  # noqa: BLE001
+                        log.exception("events tick failed")
                     if llm.configured():
                         diary.tick(conn)
                     if time.monotonic() - last_cleanup > 600:

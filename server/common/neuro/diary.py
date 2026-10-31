@@ -224,9 +224,15 @@ def style_photo(conn, photo: dict, style: str):
 def material(conn, day: date) -> dict:
     start, end = day_bounds(day)
     convs = conn.execute(
-        """SELECT id, started_at, last_activity, title, summary FROM conversations
-           WHERE started_at >= %s AND started_at < %s AND status = 'done' ORDER BY started_at""",
+        """SELECT id, started_at, last_activity, title, summary, event_id FROM conversations
+           WHERE started_at >= %s AND started_at < %s AND status = 'done' AND trashed_at IS NULL
+           ORDER BY started_at""",
         (start, end)).fetchall()
+    events = conn.execute(
+        """SELECT e.id, e.started_at, e.ended_at, e.title, e.emoji, e.kind, e.summary,
+                  coalesce((SELECT array_agg(coalesce(p.name, CASE WHEN p.is_owner THEN 'я' END))
+                            FROM people p WHERE p.id = ANY(e.people) AND (p.name IS NOT NULL OR p.is_owner)), '{}') AS names
+           FROM day_events e WHERE e.day = %s ORDER BY e.started_at""", (day,)).fetchall()
     tasks = conn.execute(
         "SELECT text, due, created_at FROM tasks WHERE created_at >= %s AND created_at < %s ORDER BY created_at",
         (start, end)).fetchall()
@@ -256,8 +262,8 @@ def material(conn, day: date) -> dict:
                 if v["start"] - timedelta(minutes=15) <= p["taken_at"] <= v["end"] + timedelta(minutes=15):
                     p["event"] = f"место {v['name'] or 'без названия'}"
                     break
-    return {"day": day, "conversations": convs, "tasks": tasks, "memories": memories, "questions": questions,
-            "visits": vs, "photos": photos, "points": len(points)}
+    return {"day": day, "conversations": convs, "events": events, "tasks": tasks, "memories": memories,
+            "questions": questions, "visits": vs, "photos": photos, "points": len(points)}
 
 
 def _t(dt) -> str:
@@ -270,10 +276,17 @@ def material_text(m: dict, max_photos: int) -> str:
     if m["visits"]:
         lines.append("Места:")
         lines += [f"- {_t(v['start'])}–{_t(v['end'])} {v['name'] or 'место без названия'}" for v in m["visits"]]
-    if m["conversations"]:
+    if m.get("events"):
+        # события дня — уже собранные из фрагментов, по ним сводка получается связной
+        lines.append("События:")
+        lines += [f"- {_t(e['started_at'])}–{_t(e['ended_at'])} {e['emoji'] or ''} «{e['title']}» ({e['kind']})"
+                  + (f", с кем: {', '.join(n for n in e['names'] if n)}" if e.get("names") else "")
+                  + f": {e['summary'] or ''}" for e in m["events"]]
+    loose = [c for c in m["conversations"] if not c.get("event_id")] if m.get("events") else m["conversations"]
+    if loose:
         lines.append("Разговоры:")
         lines += [f"- {_t(c['started_at'])}–{_t(c['last_activity'])} «{c['title']}»: {c['summary'] or ''}"
-                  for c in m["conversations"]]
+                  for c in loose]
     if m["questions"]:
         lines.append("Вопросы ассистенту:")
         lines += [f"- {_t(q['asked_at'])} {q['question']} → {q['answer']}" for q in m["questions"]]
@@ -391,7 +404,9 @@ def tick(conn):
         _safe_generate(conn, today)
     y = today - timedelta(days=1)
     yrow = conn.execute("SELECT generated_at FROM diary_days WHERE day = %s", (y,)).fetchone()
-    if not yrow or (yrow["generated_at"] and yrow["generated_at"] < day_bounds(today)[0]):
+    # финальная сводка вчера — после ночного разбора событий (он в 03:00 сам ставит её в очередь)
+    if (not yrow or (yrow["generated_at"] and yrow["generated_at"] < day_bounds(today)[0])) \
+            and now.astimezone(TZ).hour >= 5:
         _safe_generate(conn, y)
 
 

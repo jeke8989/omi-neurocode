@@ -441,14 +441,15 @@ async def api_conversations(request: Request):
     async with await aconnect() as conn:
         rows = await (await conn.execute(
             """SELECT c.id, c.device_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary,
-                      c.emoji, c.topics, greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
+                      c.emoji, c.topics, c.event_id,
+                      greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
                       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id) AS tasks_count,
                       """ + people.participants_sql("c") + """ AS people,
                       (SELECT left(string_agg(x.text, ' '), 240) FROM
                           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id
                            ORDER BY s.started_at LIMIT 6) x) AS preview
                FROM conversations c
-               WHERE (%s::date IS NULL OR (c.started_at AT TIME ZONE %s)::date = %s::date)
+               WHERE (%s::date IS NULL OR (c.started_at AT TIME ZONE %s)::date = %s::date) AND c.trashed_at IS NULL
                ORDER BY c.started_at DESC
                LIMIT %s OFFSET %s""",
             (day, config.TZ, day, limit, offset),
@@ -466,7 +467,7 @@ async def api_days(request: Request):
                       coalesce(sum(greatest(0, extract(epoch FROM c.last_activity - c.started_at))), 0)::int
                           AS seconds
                FROM conversations c
-               WHERE c.started_at > now() - interval '60 days'
+               WHERE c.started_at > now() - interval '60 days' AND c.trashed_at IS NULL
                GROUP BY 1 ORDER BY 1 DESC""", (config.TZ,))).fetchall()
         # время собственно речи (сумма фраз), без пауз и тишины — «полезные разговоры» за день
         speech = await (await conn.execute(
@@ -1410,6 +1411,63 @@ async def api_tts(request: Request):
     return Response(data, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
 
 
+EVENT_FRAGMENTS_SQL = """
+SELECT c.id, c.event_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary, c.emoji,
+       greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
+       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count
+FROM conversations c
+"""
+
+
+def _events_day(conn, day: str) -> dict:
+    events = conn.execute(
+        """SELECT e.id, e.day, e.started_at, e.ended_at, e.title, e.emoji, e.kind, e.summary, e.topics, e.photo_id,
+                  e.status, """ + people.event_people_sql("e") + """ AS people
+           FROM day_events e WHERE e.day = %s ORDER BY e.started_at DESC""", (day,)).fetchall()
+    frags = conn.execute(
+        EVENT_FRAGMENTS_SQL + """ WHERE c.trashed_at IS NULL AND (c.started_at AT TIME ZONE %s)::date = %s
+                                ORDER BY c.started_at DESC""", (config.TZ, day)).fetchall()
+    by_event: dict = {}
+    loose = []
+    for f in frags:
+        (by_event.setdefault(f["event_id"], []) if f["event_id"] else loose).append(f)
+    for e in events:
+        e["fragments"] = by_event.get(e["id"], [])
+    return {"day": day, "events": events, "loose": loose}
+
+
+async def api_events(request: Request):
+    """События дня (фрагменты, собранные в ситуации) и ещё не разобранные фрагменты."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    day = request.query_params.get("day") or date.today().isoformat()
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        return Json({"error": "day: YYYY-MM-DD"}, status_code=400)
+    return Json(await _sync(_events_day, day))
+
+
+async def api_trash(request: Request):
+    """Корзина: что ассистент счёл мусором (7 дней), и возврат фрагмента обратно."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    cid = request.path_params.get("id")
+
+    def work(conn):
+        if cid is not None:
+            res = conn.execute("UPDATE conversations SET trashed_at = NULL, junk_reason = NULL WHERE id = %s",
+                               (cid,))
+            return {"restored": res.rowcount}
+        return {"items": conn.execute(
+            """SELECT c.id, c.started_at, c.last_activity AS ended_at, c.title, c.emoji, c.junk_reason, c.trashed_at,
+                      (SELECT left(string_agg(x.text, ' '), 200) FROM (SELECT s.text FROM segments s
+                        WHERE s.conversation_id = c.id ORDER BY s.started_at LIMIT 4) x) AS preview
+               FROM conversations c WHERE c.trashed_at IS NOT NULL ORDER BY c.started_at DESC LIMIT 200""").fetchall()}
+
+    return Json(await _sync(work))
+
+
 async def api_graph(request: Request):
     """«Созвездие»: люди, темы и разговоры за N дней (по умолчанию 90)."""
     if not _authorized(request.headers, request.query_params):
@@ -1491,6 +1549,9 @@ app = Starlette(
         Route("/api/segments/{id:int}/person", api_segment_person, methods=["POST"]),
         Route("/api/segments/{id:int}/audio", api_segment_audio),
         Route("/api/graph", api_graph),
+        Route("/api/events", api_events),
+        Route("/api/trash", api_trash),
+        Route("/api/conversations/{id:int}/restore", api_trash, methods=["POST"]),
         Route("/api/tts", api_tts, methods=["POST"]),
         WebSocketRoute("/ws/audio", ws_audio),
         WebSocketRoute("/ws/ask", ws_ask),

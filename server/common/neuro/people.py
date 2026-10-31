@@ -326,6 +326,13 @@ def participants_sql(alias: str = "c") -> str:
                      GROUP BY p.id ORDER BY sec DESC LIMIT 6) x), '[]'::json)"""
 
 
+def event_people_sql(alias: str = "e") -> str:
+    """Люди события (видимые: названные, владелец или встречавшиеся не один раз)."""
+    return f"""coalesce((SELECT json_agg(json_build_object('id', p.id, 'name', p.name, 'number', p.number,
+                                                     'is_owner', p.is_owner))
+               FROM people p WHERE p.id = ANY({alias}.people) AND NOT p.ignored AND {VISIBLE_SQL}), '[]'::json)"""
+
+
 def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
     """Данные для «Созвездия»: люди, темы, разговоры со связями и фото. Раскладку строит приложение."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -340,7 +347,7 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
                       AND ph.status IN ('analyzed', 'done')
                     ORDER BY ph.taken_at LIMIT 1) AS photo_id
             FROM conversations c
-            WHERE c.started_at > %s AND c.title IS NOT NULL
+            WHERE c.started_at > %s AND c.title IS NOT NULL AND c.trashed_at IS NULL
             ORDER BY c.started_at LIMIT 400""", (since,)).fetchall()
     ids = sorted({pid for c in convs for pid in (c["people"] or [])})
     people = conn.execute(
@@ -354,8 +361,15 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
             item = topics.setdefault(t, {"name": t, "count": 0, "first_at": c["started_at"]})
             item["count"] += 1
             item["last_at"] = c["started_at"]
+    events = conn.execute(
+        f"""SELECT e.id, e.title, e.emoji, e.kind, e.started_at, e.ended_at, e.topics, e.photo_id,
+                   greatest(0, extract(epoch FROM e.ended_at - e.started_at))::int AS duration_sec,
+                   coalesce((SELECT array_agg(p.id) FROM people p WHERE p.id = ANY(e.people) AND NOT p.ignored
+                             AND {VISIBLE_SQL}), '{{}}') AS people,
+                   (SELECT min(c.id) FROM conversations c WHERE c.event_id = e.id AND c.trashed_at IS NULL) AS first_conversation
+            FROM day_events e WHERE e.started_at > %s ORDER BY e.started_at LIMIT 400""", (since,)).fetchall()
     return {"people": people, "topics": sorted(topics.values(), key=lambda t: -t["count"])[:60],
-            "conversations": convs, "since": since}
+            "conversations": convs, "events": events, "since": since}
 
 
 # ---------------------------------------------------------------- для агента

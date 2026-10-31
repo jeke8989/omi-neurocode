@@ -328,3 +328,26 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 -- фразы, проверенные на «напомни / создай задачу»
 ALTER TABLE segments ADD COLUMN IF NOT EXISTS task_checked BOOLEAN NOT NULL DEFAULT false;
 UPDATE segments SET task_checked = true WHERE NOT task_checked AND started_at < now() - interval '1 day';
+
+-- События дня: фрагменты разговоров, собранные в одну ситуацию; мусор — в корзину на 7 дней
+CREATE TABLE IF NOT EXISTS day_events (
+    id          BIGSERIAL PRIMARY KEY,
+    day         DATE NOT NULL,
+    started_at  TIMESTAMPTZ NOT NULL,
+    ended_at    TIMESTAMPTZ NOT NULL,
+    title       TEXT,
+    emoji       TEXT,
+    kind        TEXT NOT NULL DEFAULT 'другое',
+    summary     TEXT,
+    people      BIGINT[] NOT NULL DEFAULT '{}',
+    topics      TEXT[] NOT NULL DEFAULT '{}',
+    photo_id    BIGINT,
+    status      TEXT NOT NULL DEFAULT 'open',   -- open | final
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS day_events_day_idx ON day_events (day, started_at);
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES day_events(id) ON DELETE SET NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMPTZ;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS junk_reason TEXT;
+CREATE INDEX IF NOT EXISTS conversations_event_idx ON conversations (event_id);

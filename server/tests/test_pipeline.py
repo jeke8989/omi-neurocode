@@ -38,7 +38,7 @@ DEVICE = "AA-BB-CC-DD-EE-FF"
 def conn():
     db.wait_and_migrate()
     c = db.connect()
-    c.execute("TRUNCATE devices, audio_chunks, conversations, segments, tasks, memories, events, "
+    c.execute("TRUNCATE devices, audio_chunks, conversations, segments, tasks, memories, events, day_events, "
               "received_batches, settings, llm_usage, questions, chat_messages, agent_runs, agent_steps, extensions, "
               "locations, places, photos, diary_days, task_exports, people, voiceprints, person_suggestions "
               "RESTART IDENTITY CASCADE")

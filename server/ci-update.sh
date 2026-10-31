@@ -7,10 +7,12 @@
 # Пересобирает только сервисы, чьи файлы изменились, по одному: на маленьком диске (рядом Jarvis и другие
 # проекты) полная пересборка всех образов не помещается. Места не хватает — останавливается с ошибкой,
 # не заполняя диск соседям.
-set -euo pipefail
+set -Eeuo pipefail
+# причина ошибки — строкой ::error:: (GitHub показывает её в аннотациях запуска; ничего секретного не пишем)
+trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 
 main() {
-  local DIR BRANCH OLD NEW changed services f s
+  local DIR BRANCH OLD NEW BASE changed services f s
   DIR="$(cd "$(dirname "$0")/.." && pwd)"
   BRANCH="${MNEMO_BRANCH:-main}"
 
@@ -30,9 +32,16 @@ main() {
   set -a; . ./.env; set +a
   PORT="${GATEWAY_PORT:-8090}"
 
-  # что пересобирать — по изменённым файлам; ручной запуск без новых коммитов ничего не собирает
-  changed=""
-  [ "$OLD" != "$NEW" ] && changed=$(git diff --name-only "$OLD" "$NEW" 2>/dev/null || echo "server/common/")
+  # что пересобирать — по файлам, изменённым с последнего удачного обновления (.deployed): если прошлое
+  # обновление упало на сборке, его сервисы соберутся сейчас. Отметки нет — собираем всё один раз.
+  BASE=$(cat .deployed 2>/dev/null || true)
+  if [ -n "$BASE" ] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+    changed=""
+    [ "$BASE" != "$NEW" ] && changed=$(git diff --name-only "$BASE" "$NEW" 2>/dev/null || echo "server/common/")
+  else
+    changed="server/common/"
+  fi
+  echo "::notice title=Диск::свободно $(free_mb) МБ до сборки"
   services=""
   while read -r f; do
     case "$f" in
@@ -64,7 +73,13 @@ main() {
     sleep 2
   done
   docker compose ps --format 'table {{.Service}}\t{{.Status}}'
-  [ "$ok" = 1 ] || { echo "Gateway не ответил. Логи: docker compose logs gateway --tail 100"; exit 1; }
+  if [ "$ok" != 1 ]; then
+    # в аннотацию — только состояния сервисов и названия исключений, не сами логи (логи CI публичные)
+    echo "::error title=Gateway не ответил::$(docker compose ps --format '{{.Service}}: {{.Status}}' | tr '\n' ';') ошибки: $(docker compose logs gateway --tail 200 2>&1 | grep -oE '[A-Za-z]+(Error|Exception)' | sort -u | tr '\n' ' ')"
+    echo "Gateway не ответил. Логи: docker compose logs gateway --tail 100"
+    exit 1
+  fi
+  echo "$NEW" > .deployed
   say "Готово: $(curl -fsS "http://127.0.0.1:${PORT}/health/full" 2>/dev/null || echo '?'), свободно $(free_mb) МБ"
 }
 
@@ -79,6 +94,7 @@ check_space() {
   size=$(docker image inspect -f '{{.Size}}' "$img" 2>/dev/null || echo 0)
   need=$(( size / 1048576 * 13 / 10 + 300 ))
   if [ "$(free_mb)" -lt "$need" ]; then
+    echo "::error title=Мало места на диске::свободно $(free_mb) МБ, для сборки $1 нужно ~${need} МБ"
     echo "Мало места на диске: свободно $(free_mb) МБ, для сборки $1 нужно ~${need} МБ."
     echo "Освободите место или перенесите Mnemo на сервер с диском побольше. Работающие контейнеры не тронуты."
     exit 1
