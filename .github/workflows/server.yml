@@ -75,12 +75,12 @@ jobs:
         working-directory: server
         run: docker compose logs --tail 200
 
-  # После пуша в main (в том числе пуша Claude из чата приложения) — обновить сервер.
+  # После пуша в main (в том числе пуша Claude из чата приложения) — обновить сервер. Вручную: Actions -> Server -> Run workflow.
   # Секреты репозитория: DEPLOY_SSH_KEY (ключ с command="…/ci-update.sh" на сервере), DEPLOY_KNOWN_HOSTS;
   # переменная DEPLOY_HOST — IP сервера. Нет DEPLOY_HOST — шаг пропускается.
   deploy:
     needs: [tests, docker-e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_HOST != ''
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.DEPLOY_HOST != ''
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-server
