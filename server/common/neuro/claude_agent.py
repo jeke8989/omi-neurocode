@@ -236,7 +236,14 @@ def execute(conn, run_id: int, step, finish) -> str:
     if not token:
         return finish(conn, run_id, run["channel"], "failed", i18n.t(lang, "claude.no_token"))
     saved = _get(conn, session_key) or None
-    body = {"prompt": run["question"], "token": token, "session_id": saved, "model": model or None}
+    prompt = run["question"]
+    if level == "claude" and run.get("context"):
+        from . import agent_context  # noqa: PLC0415
+
+        about = agent_context.context_block(conn, run["context"])
+        if about:  # чат открыт из события или дня: Claude сразу видит, о чём речь
+            prompt = f"Я открыл чат с экрана приложения Mnemo — вот что там:\n{about[:12000]}\n\nМой вопрос: {prompt}"
+    body = {"prompt": prompt, "token": token, "session_id": saved, "model": model or None}
     mcp_token = None
     if level == "claude":
         mcp_token = issue_run_token(run_id)

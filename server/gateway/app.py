@@ -42,6 +42,7 @@ from neuro.audio import (
 log = logging.getLogger("neuro.gateway")
 
 DEVICE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+CONTEXT_RE = re.compile(r"^(event:\d{1,12}|conversation:\d{1,12}|day:\d{4}-\d{2}-\d{2})$")
 writers: dict[str, ChunkWriter] = {}
 writer_locks: dict[str, asyncio.Lock] = {}
 
@@ -694,15 +695,22 @@ async def ws_ask(websocket: WebSocket):
                 if kind == "stop":
                     reason = "stop"
                     break
+                if kind == "cancel":  # передумал спрашивать
+                    log.info("ask cancelled while listening")
+                    return
         await websocket.send_json({"type": "heard", "reason": reason, "seconds": round(len(pcm) / 32000, 1)})
         log.info("ask from %s: %.1fs audio, end=%s", device, len(pcm) / 32000, reason)
 
-        reply = await answer_voice(device, client_id, bytes(pcm))
-        if voice in tts.VOICES and reply.get("answer"):
+        reply = await answer_voice(device, client_id, bytes(pcm), websocket)
+        if reply is None:
+            log.info("ask: phone left before the answer, it goes to chat")
+            return
+        if voice in tts.VOICES and reply.get("answer") and not reply.get("cancelled"):
             tts.prewarm(reply["answer"], voice, i18n.normalize(str(start.get("lang") or "ru")), speed)
         await websocket.send_text(json.dumps(reply, ensure_ascii=False))
-        log.info("ask answered in %sms (%s): %s", reply.get("latency_ms"), reply.get("level"),
-                 (reply.get("answer") or "")[:80])
+        # в журнал — только цифры (вопросы и ответы — личное)
+        log.info("ask answered in %sms (%s)%s%s", reply.get("latency_ms"), reply.get("level"),
+                 " pending" if reply.get("pending") else "", " cancelled" if reply.get("cancelled") else "")
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     except Exception:  # noqa: BLE001
@@ -817,7 +825,8 @@ async def api_models(request: Request):
     return Json(out)
 
 
-VOICE_BUDGET_SEC = config.env_float("VOICE_BUDGET_SEC", 14.0)
+# Голосовой вопрос ждёт полного ответа (с прогрессом и кнопкой «Стоп»); дольше — ответ придёт в чат
+VOICE_WAIT_SEC = config.env_float("VOICE_WAIT_SEC", 240.0)
 
 
 def _run_in_thread(fn, *args):
@@ -830,8 +839,32 @@ def _execute_run(run_id: int) -> str:
         return agent_core.execute(conn, run_id)
 
 
-async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
-    """Вопрос с кнопки: распознать -> уровень -> агент. Долгую работу продолжаем в фоне, ответ — в чат."""
+async def _until_cancel(websocket) -> str:
+    """Ждёт от телефона {"type":"cancel"} («Стоп» в приложении). Возвращает "cancel" или "gone" (телефон ушёл)."""
+    if websocket is None:
+        await asyncio.Event().wait()
+    while True:
+        msg = await websocket.receive()
+        if msg["type"] == "websocket.disconnect":
+            return "gone"
+        if msg.get("text"):
+            try:
+                if json.loads(msg["text"]).get("type") == "cancel":
+                    return "cancel"
+            except ValueError:
+                pass
+
+
+def _new_steps(run_id: int, after: int) -> list[dict]:
+    with db.connect() as conn:
+        return conn.execute(
+            """SELECT id, kind, title FROM agent_steps WHERE run_id = %s AND id > %s AND kind IN ('plan', 'tool', 'ask')
+               ORDER BY id""", (run_id, after)).fetchall()
+
+
+async def answer_voice(device: str, client_id: str | None, pcm: bytes, websocket=None) -> dict | None:
+    """Вопрос с кнопки: распознать -> уровень -> агент -> ждём ответ (до VOICE_WAIT_SEC), показывая шаги.
+    Телефон может остановить работу ({"type":"cancel"}). None — телефон отключился: ответ будет в чате."""
     t0 = time.monotonic()
 
     def current_lang():
@@ -869,13 +902,33 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
 
     run_id = await _run_in_thread(start)
     future = _run_in_thread(_execute_run, run_id)
-    if level == "deep":
-        answer, pending = i18n.t(lang, "voice.deep"), True
-    else:
-        try:
-            answer, pending = await asyncio.wait_for(asyncio.shield(future), timeout=VOICE_BUDGET_SEC), False
-        except asyncio.TimeoutError:
-            answer, pending = i18n.t(lang, "voice.later"), True
+    if websocket is not None:
+        await websocket.send_json({"type": "question", "question": question, "level": level, "run_id": run_id})
+    watcher = asyncio.ensure_future(_until_cancel(websocket))
+    answer, pending, cancelled, last = None, False, False, 0
+    try:
+        while answer is None:
+            done, _ = await asyncio.wait({future, watcher}, timeout=1.0, return_when=asyncio.FIRST_COMPLETED)
+            if future in done:
+                answer = future.result()
+                cancelled = answer == i18n.t(lang, "agent.cancelled")
+            elif watcher in done:
+                if watcher.result() == "gone":
+                    return None  # агент доработает, ответ появится в чате
+                def stop():
+                    with db.connect() as conn:
+                        agent_core.cancel(conn, run_id)
+                await _run_in_thread(stop)
+                answer, cancelled = i18n.t(lang, "agent.cancelled"), True
+            elif time.monotonic() - t0 > VOICE_WAIT_SEC:
+                answer, pending = i18n.t(lang, "voice.later"), True
+            elif websocket is not None:
+                for st in await _run_in_thread(_new_steps, run_id, last):
+                    last = st["id"]
+                    await websocket.send_json({"type": "progress", "kind": st["kind"], "text": st["title"]})
+    finally:
+        if not watcher.done():
+            watcher.cancel()
     latency = int((time.monotonic() - t0) * 1000)
 
     def record():
@@ -885,7 +938,7 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes) -> dict:
 
     await _run_in_thread(record)
     return {"type": "answer", "question": question, "answer": answer, "level": level, "run_id": run_id,
-            "pending": pending, "latency_ms": latency}
+            "pending": pending, "cancelled": cancelled, "latency_ms": latency}
 
 
 # ---------------------------------------------------------------------------
@@ -901,8 +954,16 @@ async def api_chat(request: Request):
             return Json({"error": "bad json"}, status_code=400)
         text = str(body.get("text") or "").strip()
         level = str(body.get("level") or "auto")
+        agent = str(body.get("agent") or "mnemo")
+        context = str(body.get("context") or "").strip() or None
         if not text:
             return Json({"error": "empty"}, status_code=400)
+        if agent not in ("mnemo", "gpt", "claude"):
+            return Json({"error": "agent: mnemo | gpt | claude"}, status_code=400)
+        if context and not CONTEXT_RE.match(context):
+            return Json({"error": "context: event:ID | conversation:ID | day:YYYY-MM-DD"}, status_code=400)
+        if agent == "claude" and level not in claude_agent.LEVELS:
+            level = "claude"
         if level != "auto" and level not in claude_agent.LEVELS and level not in agent_core.LEVELS:
             return Json({"error": "level: auto | fast | tools | deep | claude | claude_code"}, status_code=400)
         if level in claude_agent.LEVELS:
@@ -921,11 +982,11 @@ async def api_chat(request: Request):
 
         def start():
             with db.connect() as conn:
-                return agent_core.start_run(conn, text, level, "chat", None)
+                return agent_core.start_run(conn, text, level, "chat", None, agent, context)
 
         run_id, message_id = await _run_in_thread(start)
         _run_in_thread(_execute_run, run_id)
-        return Json({"run_id": run_id, "message_id": message_id, "level": level})
+        return Json({"run_id": run_id, "message_id": message_id, "level": level, "agent": agent})
 
     limit = _clamp(request.query_params.get("limit"), 60, 1, 300)
     async with await aconnect() as conn:
@@ -936,7 +997,8 @@ async def api_chat(request: Request):
         runs = {}
         if run_ids:
             for r in await (await conn.execute(
-                    "SELECT id, level, status, model FROM agent_runs WHERE id = ANY(%s)", (run_ids,))).fetchall():
+                    "SELECT id, level, status, model, agent, context FROM agent_runs WHERE id = ANY(%s)",
+                    (run_ids,))).fetchall():
                 runs[r["id"]] = {**r, "steps": []}
             for st in await (await conn.execute(
                     """SELECT run_id, kind, title, detail, created_at FROM agent_steps
@@ -944,6 +1006,28 @@ async def api_chat(request: Request):
                 runs[st["run_id"]]["steps"].append(st)
     return Json({"messages": messages, "runs": {str(k): v for k, v in runs.items()},
                  "running": any(r["status"] == "running" for r in runs.values())})
+
+
+async def api_run_cancel(request: Request):
+    """Остановить запуск агента (кнопка «Стоп» в чате). Claude останавливается своим способом."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    run_id = int(request.path_params["run_id"])
+
+    def stop():
+        with db.connect() as conn:
+            row = conn.execute("SELECT level, status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
+            if row is None:
+                return None
+            if row["level"] in claude_agent.LEVELS:
+                claude_agent.cancel(conn)
+                return row["status"] == "running"
+            return agent_core.cancel(conn, run_id)
+
+    stopped = await _run_in_thread(stop)
+    if stopped is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"stopped": bool(stopped)})
 
 
 async def api_chat_clear(request: Request):
@@ -1593,6 +1677,7 @@ app = Starlette(
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
+        Route("/api/runs/{run_id:int}/cancel", api_run_cancel, methods=["POST"]),
         Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
         Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),

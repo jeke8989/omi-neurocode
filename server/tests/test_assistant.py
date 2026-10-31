@@ -75,11 +75,47 @@ def test_voice_question_through_agent(conn, monkeypatch):  # noqa: F811
     chans = [m["channel"] for m in conn.execute("SELECT channel FROM chat_messages ORDER BY id").fetchall()]
     assert chans[-2:] == ["voice", "voice"]
 
-    # глубокий вопрос: сразу короткий ответ голосом, работа продолжается в фоне
+    # глубокий вопрос: ждём полный ответ голосом (а не «пришлю в чат»), шаги идут в телефон
     monkeypatch.setattr(llm, "transcribe", lambda *a, **k: {"text": "подробно проанализируй мои встречи"})
     monkeypatch.setattr(llm, "chat", lambda *a, **k: {"content": "Готово"})
     reply = asyncio.run(gw.answer_voice(DEVICE, "q2", voice(2.0)))
-    assert reply["level"] == "deep" and reply["pending"] and "в чат" in reply["answer"]
+    assert reply["level"] == "deep" and not reply["pending"] and reply["answer"] == "Готово"
+
+    # «Стоп» в приложении во время поиска: агент останавливается, ответ — «Остановлено.»
+    import time
+
+    class WS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, m):
+            self.sent.append(m)
+
+        async def receive(self):
+            await asyncio.sleep(0.4)
+            return {"type": "websocket.receive", "text": '{"type": "cancel"}'}
+
+    def slow_chat(*a, **k):
+        time.sleep(1.2)
+        return {"content": "", "tool_calls": [{"id": "1", "type": "function",
+                                                "function": {"name": "list_tasks", "arguments": "{}"}}]}
+
+    monkeypatch.setattr(llm, "transcribe", lambda *a, **k: {"text": "найди всё про мои задачи"})
+    monkeypatch.setattr(llm, "chat", slow_chat)
+    ws = WS()
+    reply = asyncio.run(gw.answer_voice(DEVICE, "q4", voice(2.0), ws))
+    assert reply["cancelled"] and reply["answer"] == "Остановлено." and reply["latency_ms"] < 1200
+    assert ws.sent[0]["type"] == "question" and ws.sent[0]["question"].startswith("найди")
+    status = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (reply["run_id"],)).fetchone()["status"]
+    assert status == "cancelled"
+
+    # телефон отключился, пока агент думал: ответ доработает и ляжет в чат
+    class Gone(WS):
+        async def receive(self):
+            return {"type": "websocket.disconnect"}
+
+    monkeypatch.setattr(llm, "chat", lambda *a, **k: {"content": "Ответ в чате"})
+    assert asyncio.run(gw.answer_voice(DEVICE, "q5", voice(2.0), Gone())) is None
 
     # пустое распознавание -> просьба повторить
     monkeypatch.setattr(llm, "transcribe", lambda *a, **k: {"text": " "})

@@ -109,6 +109,9 @@ def test_claude_run_through_chat(conn, monkeypatch):  # noqa: F811
     agent_core.execute(conn, run2)
     assert sent["body"]["session_id"] == SESSION
     assert client.post("/api/chat", json={"text": "x", "level": "bogus"}).status_code == 400
+    assert client.post("/api/chat", json={"text": "x", "agent": "bard"}).status_code == 400
+    assert client.post("/api/chat", json={"text": "x", "context": "event:1;drop"}).status_code == 400
+    assert client.post("/api/runs/999999/cancel").status_code == 404
     run_code, _ = agent_core.start_run(conn, "почини тест", "claude_code", "chat", None)
     agent_core.execute(conn, run_code)
     assert sent["body"]["mode"] == "code" and "mcp" not in sent["body"] and sent["body"]["session_id"] is None

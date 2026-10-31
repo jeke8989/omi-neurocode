@@ -14,7 +14,7 @@ from . import agent_core, extensions, i18n
 log = logging.getLogger("neuro.mcp")
 
 PROTOCOL = "2025-06-18"
-SKIP = {"web_search"}
+SKIP = {"web_search", "ask_user"}  # у Claude свой веб-поиск; уточняющий вопрос он задаёт сам ответом
 
 
 def _tools(conn) -> tuple[list[dict], dict]:

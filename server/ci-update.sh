@@ -188,10 +188,22 @@ diag() {
   q="SELECT to_char(created_at AT TIME ZONE 'Europe/Moscow', 'MM-DD') || ' $' || round(sum(cost)::numeric, 3)
      || ' (' || count(*) || ')' FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1 ORDER BY 1"
   echo "::notice title=ИИ по дням::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
-  q="SELECT 'разговоров=' || count(*) || ' фраз=' || (SELECT count(*) FROM segments WHERE started_at > now() - interval '7 days')
+  local vol
+  vol="SELECT 'разговоров=' || count(*) || ' фраз=' || (SELECT count(*) FROM segments WHERE started_at > now() - interval '7 days')
      || ' вопросов=' || (SELECT count(*) FROM questions WHERE asked_at > now() - interval '7 days')
      || ' задач=' || (SELECT count(*) FROM tasks WHERE created_at > now() - interval '7 days')
      FROM conversations WHERE started_at > now() - interval '7 days'"
+  # вопросы с кнопки: как заканчивались, сколько ждали ответа (только счётчики, без текста)
+  local asks lat
+  asks=$(docker compose logs gateway --since 168h 2>&1 \
+    | grep -oE 'ask from [^ ]+ [0-9.]+s audio, end=[a-z]+|ask answered in [0-9]+ms \([a-z_]+\)( pending)?( cancelled)?|ask failed|ask transcription failed|phone left before the answer|ask cancelled while listening' \
+    | sed -E 's/ask from [^ ]+ [0-9.]+s audio, end=/конец=/; s/ask answered in [0-9]+ms \(([a-z_]+)\)/ответ-\1/; s/ /_/g' \
+    | sort | uniq -c | sort -rn | awk '{print $2"x"$1}' | tr '\n' ' ' || true)
+  lat=$(docker compose logs gateway --since 168h 2>&1 | grep -oE 'ask answered in [0-9]+ms' | grep -oE '[0-9]+' \
+    | awk '{n++; s+=$1; if ($1>m) m=$1} END {if (n) printf "ждали в среднем %.1f с, максимум %.1f с", s/n/1000, m/1000}' || true)
+  q="SELECT status || '=' || count(*) FROM agent_runs WHERE channel = 'voice' AND created_at > now() - interval '7 days'
+     GROUP BY status ORDER BY 1"
+  echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
   q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')
      || ' из ' || (SELECT count(*) FROM segments)
@@ -201,7 +213,7 @@ diag() {
      || ', точек ' || (SELECT count(*) FROM locations WHERE lat IS NOT NULL)
      || ', людей ' || (SELECT count(*) FROM people WHERE name NOT LIKE 'enc_:%%')"
   echo "::notice title=Шифрование::$(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
-  echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
+  echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true)"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 
