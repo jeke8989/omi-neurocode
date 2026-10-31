@@ -67,14 +67,20 @@ def record_usage(conn, task: str, model: str, usage: dict | None, audio_seconds:
 
 # ---------------------------------------------------------------- LLM
 def parse_json(content: str) -> dict:
+    """Ответ модели -> JSON-объект. Модель иногда присылает список вместо объекта: [{…}] -> {…},
+    [1, 2] -> {"items": [1, 2]} — чтобы вызывающий код не падал на .get()."""
     content = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content.strip())
     try:
-        return json.loads(content)
+        data = json.loads(content)
     except ValueError:
         start, end = content.find("{"), content.rfind("}")
         if start >= 0 and end > start:
-            return json.loads(content[start:end + 1])
-        raise
+            data = json.loads(content[start:end + 1])
+        else:
+            raise
+    if isinstance(data, list):
+        return data[0] if len(data) == 1 and isinstance(data[0], dict) else {"items": data}
+    return data if isinstance(data, dict) else {"items": [data]}
 
 
 def _headers() -> dict:

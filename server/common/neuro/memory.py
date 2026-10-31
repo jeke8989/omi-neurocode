@@ -83,7 +83,7 @@ def review_tick(conn, batch: int = 60) -> int:
         log.exception("memory review failed")
         return 0
     keep = set()
-    for k in result.get("keep") or []:
+    for k in (result.get("keep") if "keep" in result else result.get("items")) or []:
         try:
             keep.add(int(k))
         except (TypeError, ValueError):
