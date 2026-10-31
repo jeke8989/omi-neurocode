@@ -60,16 +60,12 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
         super.onResume()
         // под защитой — в списке недавних приложений вместо экрана пустая карточка
         if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(!AppLock.enabled)
+        Core.syncPhotosNow()
     }
 
     override fun onStop() {
         AppLock.onStop()
         Core.setForeground(false)
         super.onStop()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        Core.syncPhotosNow()
     }
 }
