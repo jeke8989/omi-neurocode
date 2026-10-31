@@ -235,8 +235,9 @@ private fun Working(run: ChatRun?) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Lens(LensState.THINKING, 34.dp)
             Spacer(Modifier.width(6.dp))
-            Txt(stringResource(R.string.working) + (run?.let { ", " + levelTitle(it.level).lowercase() } ?: ""),
-                T.smallStrong, modifier = Modifier.weight(1f))
+            Txt(stringResource(R.string.working) + (run?.let {
+                ", " + levelTitle(it.level).let { t -> if (it.level == "claude") t else t.lowercase() }
+            } ?: ""), T.smallStrong, modifier = Modifier.weight(1f))
             if (run?.level == "claude") {
                 val scope = rememberCoroutineScope()
                 Txt(stringResource(R.string.claude_stop), T.smallStrong, c.red, Modifier.padding(horizontal = 8.dp)
