@@ -209,6 +209,35 @@ PHRASES: dict[str, dict[str, str]] = {
         "ru": "👤 Разговоры с: {name}", "en": "👤 Conversations with: {name}",
         "tr": "👤 Şununla konuşmalar: {name}", "es": "👤 Conversaciones con: {name}",
     },
+    "tool.day_events": {
+        "ru": "📅 Смотрю события: {day}", "en": "📅 Looking at events: {day}",
+        "tr": "📅 Etkinliklere bakıyorum: {day}", "es": "📅 Revisando eventos: {day}",
+    },
+    "tool.event_details": {
+        "ru": "🗒 Открываю событие #{id}", "en": "🗒 Opening event #{id}",
+        "tr": "🗒 #{id} etkinliğini açıyorum", "es": "🗒 Abriendo el evento #{id}",
+    },
+    "tool.conversation_details": {
+        "ru": "🎙 Читаю разговор #{id}", "en": "🎙 Reading conversation #{id}",
+        "tr": "🎙 #{id} konuşmasını okuyorum", "es": "🎙 Leyendo la conversación #{id}",
+    },
+    "tool.places": {
+        "ru": "📍 Смотрю, где был: {day}", "en": "📍 Checking where you were: {day}",
+        "tr": "📍 Nerede olduğuna bakıyorum: {day}", "es": "📍 Reviso dónde estuviste: {day}",
+    },
+    "tool.diary": {
+        "ru": "📔 Открываю дневник: {day}", "en": "📔 Opening the diary: {day}",
+        "tr": "📔 Günlüğü açıyorum: {day}", "es": "📔 Abriendo el diario: {day}",
+    },
+    "tool.ask_user": {
+        "ru": "❓ Уточняю вопрос", "en": "❓ Asking you to clarify", "tr": "❓ Soruyu netleştiriyorum",
+        "es": "❓ Pido una aclaración",
+    },
+    "agent.cancelled": {
+        "ru": "Остановлено.", "en": "Stopped.", "tr": "Durduruldu.", "es": "Detenido.",
+    },
+    "agent.mnemo": {"ru": "Mnemo", "en": "Mnemo", "tr": "Mnemo", "es": "Mnemo"},
+    "agent.gpt": {"ru": "GPT", "en": "GPT", "tr": "GPT", "es": "GPT"},
     "tool.extension": {"ru": "🧩 {name}", "en": "🧩 {name}", "tr": "🧩 {name}", "es": "🧩 {name}"},
     "memory.mark": {
         "ru": "Отметка {when} (речь рядом не распознана)", "en": "Marked at {when} (no speech recognized nearby)",

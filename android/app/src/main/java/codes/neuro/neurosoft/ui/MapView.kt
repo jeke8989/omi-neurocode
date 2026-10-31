@@ -263,7 +263,7 @@ fun MnemoMap(
         }
 
         // подпись поставщиков карты (обязательна по условиям OpenStreetMap и CARTO)
-        Txt("© OpenStreetMap © CARTO", T.tiny.copy(fontSize = T.tiny.fontSize * 0.8f), c.graphite, maxLines = 1,
+        Txt(Api.mapAttribution, T.tiny.copy(fontSize = T.tiny.fontSize * 0.8f), c.graphite, maxLines = 1,
             modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(6.dp))
                 .background(paper.copy(alpha = 0.75f)).padding(horizontal = 5.dp, vertical = 1.dp))
     }

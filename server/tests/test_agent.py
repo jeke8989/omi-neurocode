@@ -253,3 +253,71 @@ def test_photos_without_ai_cost_nothing(conn, monkeypatch, tmp_path):  # noqa: F
                                         (pid,)).fetchone())
     assert p["status"] == "analyzed" and p["caption"] is None and abs(p["lat"] - 41.03) < 1e-6
     conn.execute("DELETE FROM settings WHERE key IN ('feature.photo_ai', 'feature.photo_style')")
+
+
+def test_agent_life_tools_clarify_cancel_and_gpt(conn, monkeypatch):  # noqa: F811
+    """Вопрос о жизни: агент смотрит события дня, открывает событие, при неясности — уточняет;
+    запуск можно остановить; агент GPT — те же инструменты на модели OpenAI."""
+    from neuro import agent_context, agent_core, crypto, llm
+    conn.execute("DELETE FROM extensions")
+    now = datetime.now(timezone.utc)
+    day = agent_context.parse_day("сегодня")
+    eid = conn.execute(
+        """INSERT INTO day_events (day, started_at, ended_at, title, emoji, summary, topics)
+           VALUES (%s, %s, %s, %s, '🍽', %s, %s) RETURNING id""",
+        (day, now - timedelta(hours=2), now - timedelta(hours=1), crypto.seal("Обед с Кристиной"),
+         crypto.seal("Договорились поехать в Питер в декабре."), crypto.seal_list(["поездка"]))).fetchone()["id"]
+    cid = conn.execute(
+        """INSERT INTO conversations (device_id, started_at, last_activity, title, summary, status, event_id)
+           VALUES (%s, %s, %s, %s, %s, 'done', %s) RETURNING id""",
+        (DEVICE, now - timedelta(hours=2), now - timedelta(hours=1), crypto.seal("Обед"),
+         crypto.seal("Про поездку"), eid)).fetchone()["id"]
+    assert cid and "Обед с Кристиной" in agent_context.day_overview(conn, day)
+    assert "Питер" in agent_context.event_details(conn, eid)
+    assert "Обед с Кристиной" in agent_context.context_block(conn, f"event:{eid}")
+
+    seen = []
+
+    def life_chat(conn_, task, messages, tools=None, model=None, **kw):
+        seen.append((task, model))
+        sys_text = "\n".join(m["content"] for m in messages if m["role"] == "system")
+        assert "Обед с Кристиной" in sys_text  # шпаргалка дня уже в контексте
+        results = [m["content"] for m in messages if m["role"] == "tool"]
+        if not results:
+            return {"content": "", "tool_calls": [{"id": "a", "type": "function", "function": {
+                "name": "day_events", "arguments": '{"day": "сегодня"}'}}]}
+        if len(results) == 1:
+            return {"content": "", "tool_calls": [{"id": "b", "type": "function", "function": {
+                "name": "event_details", "arguments": json.dumps({"id": eid})}}]}
+        assert "Питер" in results[1]
+        return {"content": "Договорились поехать в Питер в декабре (обед с Кристиной)."}
+
+    monkeypatch.setattr(llm, "chat", life_chat)
+    res = agent_core.ask(conn, "о чём мы договорились сегодня с Кристиной?", channel="chat")
+    assert res["level"] == "tools" and "Питер" in res["answer"]
+    titles = [s["title"] for s in conn.execute(
+        "SELECT title FROM agent_steps WHERE run_id = %s ORDER BY id", (res["run_id"],)).fetchall()]
+    assert "📅 Смотрю события: сегодня" in titles and f"🗒 Открываю событие #{eid}" in titles
+
+    # уточняющий вопрос: ответ — вопрос владельцу, статус needs_input
+    monkeypatch.setattr(llm, "chat", lambda *a, **k: {"content": "", "tool_calls": [{"id": "q", "type": "function",
+                        "function": {"name": "ask_user", "arguments": '{"question": "Какой обед: вчера или сегодня?"}'}}]})
+    res = agent_core.ask(conn, "что было на обеде?", level="tools")
+    run = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
+    assert res["answer"] == "Какой обед: вчера или сегодня?" and run["status"] == "needs_input"
+
+    # остановка: агент замечает её перед следующим шагом
+    run_id, _ = agent_core.start_run(conn, "долгий вопрос", "tools", "chat", None)
+    assert agent_core.cancel(conn, run_id) is True
+    assert agent_core.execute(conn, run_id) == "Остановлено."
+    assert conn.execute("SELECT status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()["status"] == "cancelled"
+    assert agent_core.cancel(conn, run_id) is False
+
+    # агент GPT: модель из задачи agent_gpt, контекст открытого события в запуске
+    seen.clear()
+    monkeypatch.setattr(llm, "chat", lambda conn_, task, messages, model=None, **kw:
+                        seen.append(model) or {"content": "ok"})
+    res = agent_core.ask(conn, "кратко", level="fast", agent="gpt", context=f"event:{eid}")
+    run = conn.execute("SELECT agent, model, context FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
+    assert run["agent"] == "gpt" and run["model"].startswith("openai/") and run["context"] == f"event:{eid}"
+    assert seen and seen[0].startswith("openai/")

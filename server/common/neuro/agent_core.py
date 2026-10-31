@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import claude_agent, config, crypto, extensions, i18n, llm, people
+from . import agent_context, claude_agent, config, crypto, extensions, i18n, llm, people
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -41,12 +41,21 @@ TOOL_WORDS = re.compile(
     r"|quién (dijo|era)|con quién)", re.I)
 
 
+LIFE_WORDS = re.compile(
+    r"\b(вчера|сегодня|позавчера|утром|вечером|недел|в (понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)"
+    r"|я |мы |мне |мой |моя |мои |наш|где (я|мы) был|о ч[её]м|что было|кто был|договорил|обещал|обсуждал"
+    r"|yesterday|today|this morning|last week|did i|did we|where was i|what happened"
+    r"|dün|bugün|ayer|hoy)", re.I)
+
+
 def route(text: str, channel: str) -> str:
     """Автовыбор уровня без лишнего запроса к модели."""
     if DEEP_WORDS.search(text):
         return "deep"
     if channel == "voice":
         return "fast"  # инструменты доступны и на быстром уровне
+    if channel != "voice" and LIFE_WORDS.search(text):
+        return "tools"  # вопросы о жизни владельца — с инструментами (события, люди, расшифровки)
     return "tools" if TOOL_WORDS.search(text) or len(text) > 160 else "fast"
 
 
@@ -78,14 +87,49 @@ BUILTIN_TOOLS = [
     _fn("person_conversations", "Разговоры и задачи с конкретным человеком (по имени или подписи «Голос N»).",
         {"name": {"type": "string"}, "days": {"type": "integer", "description": "за сколько дней, по умолчанию 60"}},
         ["name"]),
+    _fn("day_events", "События дня по порядку: время, название, с кем, итог. Для вопросов «что было вчера/в пятницу».",
+        {"day": {"type": "string", "description": "YYYY-MM-DD, «сегодня» или «вчера»"}}, ["day"]),
+    _fn("event_details", "Всё о событии: итог, люди, темы, место, части и расшифровка. id — из day_events.",
+        {"id": {"type": "integer"}}, ["id"]),
+    _fn("conversation_details", "Всё о разговоре: итог, люди, задачи и расшифровка. id — из списков разговоров.",
+        {"id": {"type": "integer"}}, ["id"]),
+    _fn("places", "Где был владелец в этот день (по геолокации) и сколько времени.",
+        {"day": {"type": "string", "description": "YYYY-MM-DD, «сегодня» или «вчера»"}}, ["day"]),
+    _fn("diary", "Сводка дня из дневника: история дня, настроение, главные моменты.",
+        {"day": {"type": "string", "description": "YYYY-MM-DD, «сегодня» или «вчера»"}}, ["day"]),
+    _fn("ask_user", "Задать владельцу один короткий уточняющий вопрос, когда без ответа нельзя ответить точно "
+        "(подходит несколько событий или людей, неясен период). Не спрашивай то, что можно найти инструментами.",
+        {"question": {"type": "string", "description": "вопрос, при возможности с 2–4 вариантами"}}, ["question"]),
 ]
+
+AGENTS = {
+    "mnemo": None,          # модель — по уровню (Быстро / Основательно / Глубоко)
+    "gpt": "agent_gpt",     # тот же агент Mnemo, но все шаги — на модели GPT (выбирается в «Моделях»)
+}
+
+
+class Cancelled(Exception):
+    pass
+
+
+def cancel(conn, run_id: int) -> bool:
+    """Остановить запуск: агент заметит на следующем шаге и ответит «Остановлено»."""
+    res = conn.execute("UPDATE agent_runs SET status = 'cancelled' WHERE id = %s AND status = 'running'", (run_id,))
+    return bool(res.rowcount)
+
+
+def _check(conn, run_id: int):
+    row = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
+    if row and row["status"] == "cancelled":
+        raise Cancelled()
+
 
 def tool_title(lang: str, name: str, args: dict) -> str:
     """Короткая строка шага для чата: «🔎 Ищу в интернете: …» на языке приложения."""
     if "tool." + name not in i18n.PHRASES:
         return f"⚙️ {name}"
     return i18n.t(lang, "tool." + name, query=args.get("query", ""), text=args.get("text", ""), id=args.get("id"),
-                  name=args.get("name", ""))
+                  name=args.get("name", ""), day=args.get("day", ""))
 
 
 def web_search(conn, query: str) -> str:
@@ -142,7 +186,12 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
             people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND NOT s.junk
                                        ORDER BY s.started_at DESC LIMIT 20000""", (since,)).fetchall()
                 if has(s["text"])][:15]
-        out = [f"[память {_d(m['created_at'])}] {m['text']}" for m in mems]
+        evs = [e for e in conn.execute(
+            """SELECT id, started_at, title, summary, topics FROM day_events WHERE started_at > %s
+               ORDER BY started_at DESC LIMIT 2000""", (since,)).fetchall()
+               if has(e["title"], e["summary"], " ".join(e["topics"] or []))][:10]
+        out = [f"[событие #{e['id']} {_d(e['started_at'])}] {e['title']}: {e['summary'] or ''}" for e in evs]
+        out += [f"[память {_d(m['created_at'])}] {m['text']}" for m in mems]
         out += [f"[разговор {_d(c['started_at'])}] {c['title']}: {c['summary'] or ''}" for c in convs]
         out += [f"[фраза {_d(s['started_at'])}] {people.speaker_label(s)}: {s['text']}" for s in segs]
         return "\n".join(out) or "Ничего не найдено. Попробуй другие слова (поиск по точному совпадению)."
@@ -165,6 +214,16 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
         return people.people_overview(conn)
     if name == "person_conversations":
         return people.person_conversations(conn, str(args.get("name") or ""), int(args.get("days") or 60))
+    if name == "day_events":
+        return agent_context.day_overview(conn, agent_context.parse_day(args.get("day")))
+    if name == "event_details":
+        return agent_context.event_details(conn, int(args.get("id") or 0))
+    if name == "conversation_details":
+        return agent_context.conversation_details(conn, int(args.get("id") or 0))
+    if name == "places":
+        return agent_context.places_day(conn, agent_context.parse_day(args.get("day")))
+    if name == "diary":
+        return agent_context.diary_day(conn, agent_context.parse_day(args.get("day")))
     return f"Неизвестный инструмент {name}"
 
 
@@ -191,11 +250,18 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
         "deep": "Работай основательно: следуй плану, проверяй факты в нескольких источниках, сделай вывод.",
     }[level]
     return (
-        f"Ты — Mnemo, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть расшифровки его "
-        f"разговоров, задачи и память. Сейчас {WEEKDAYS[now.weekday()]}, {now.strftime('%d.%m.%Y %H:%M')}. "
-        f"{i18n.reply_in(lang)} Расшифровки автоматические и могут содержать ошибки; говорящие подписаны "
-        f"«Владелец», по имени или «Голос N» (узнаны по голосу). {depth} {style} "
-        f"Никогда не выдумывай факты; если не знаешь — скажи и предложи, что сделать."
+        f"Ты — Mnemo, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть его день, собранный в "
+        f"события, расшифровки разговоров, люди (узнаны по голосу), места, задачи, память и дневник. "
+        f"Сейчас {WEEKDAYS[now.weekday()]}, {now.strftime('%d.%m.%Y %H:%M')}. {i18n.reply_in(lang)} "
+        f"Как работать: вопросы о его жизни (что было, с кем говорил, о чём договорились, где был, что обещал) — "
+        f"сначала найди данные инструментами: day_events и event_details для дней и событий, search_memory для "
+        f"поиска по словам, person_conversations для людей, conversation_details для расшифровки, places и diary. "
+        f"Относительные даты («вчера», «в пятницу») переводи в конкретный день. В ответе опирайся на найденное и "
+        f"называй, откуда это (событие, время, человек). Если вопрос можно понять по-разному и от этого зависит "
+        f"ответ — задай один короткий уточняющий вопрос инструментом ask_user (лучше с вариантами); то, что можно "
+        f"найти самому, не уточняй. Расшифровки автоматические и могут содержать ошибки; говорящие подписаны "
+        f"«Владелец», по имени или «Голос N». {depth} {style} "
+        f"Никогда не выдумывай факты; если не нашёл — так и скажи и предложи, что сделать."
     )
 
 
@@ -206,14 +272,21 @@ def step(conn, run_id: int, kind: str, title: str, detail: str | None = None):
     )
 
 
-def start_run(conn, question: str, level: str, channel: str, device_id: str | None) -> tuple[int, int]:
+def start_run(conn, question: str, level: str, channel: str, device_id: str | None, agent: str = "mnemo",
+              context: str | None = None) -> tuple[int, int]:
     """Создаёт сообщение пользователя и запуск. Возвращает (run_id, message_id).
-    level: fast | tools | deep — агент Mnemo, claude | claude_code — Claude Code CLI (claude_agent)."""
-    model = claude_agent.LABEL if level in claude_agent.LEVELS else llm.resolve_model(conn, LEVELS[level]["task"])
+    level: fast | tools | deep — агент Mnemo, claude | claude_code — Claude Code CLI (claude_agent).
+    agent: mnemo | gpt (тот же агент на модели GPT). context: «event:12» и т. п. — о чём этот разговор."""
+    if level in claude_agent.LEVELS:
+        model, agent = claude_agent.LABEL, "claude"
+    elif AGENTS.get(agent):
+        model = llm.resolve_model(conn, AGENTS[agent])
+    else:
+        model, agent = llm.resolve_model(conn, LEVELS[level]["task"]), "mnemo"
     run = conn.execute(
-        """INSERT INTO agent_runs (level, question, channel, device_id, model)
-           VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-        (level, crypto.seal(question), channel, device_id, model),
+        """INSERT INTO agent_runs (level, question, channel, device_id, model, agent, context)
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (level, crypto.seal(question), channel, device_id, model, agent, context),
     ).fetchone()["id"]
     msg = conn.execute(
         "INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('user', %s, %s, %s) RETURNING id",
@@ -231,6 +304,9 @@ def history(conn, before_run: int, limit: int = 8) -> list[dict]:
 
 def finish(conn, run_id: int, channel: str, status: str, answer: str) -> str:
     """Итог запуска: статус и ответ в agent_runs, ответ — сообщением в чат."""
+    row = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
+    if row and row["status"] == "cancelled" and status != "cancelled":
+        status, answer = "cancelled", i18n.t(i18n.lang(conn), "agent.cancelled")  # остановили, пока думал
     conn.execute("UPDATE agent_runs SET status = %s, answer = %s, finished_at = now() WHERE id = %s",
                  (status, crypto.seal(answer), run_id))
     conn.execute("INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('assistant', %s, %s, %s)",
@@ -262,6 +338,12 @@ def execute(conn, run_id: int) -> str:
         messages = [{"role": "system", "content": system_prompt(level, channel, lang)}]
         if context:
             messages.append({"role": "system", "content": "Контекст:\n" + context})
+        # шпаргалка: что было сегодня и вчера (подробности — инструментами)
+        messages.append({"role": "system", "content": "Что есть в приложении:\n" + agent_context.overview(conn)})
+        about = agent_context.context_block(conn, run.get("context"))
+        if about:
+            messages.append({"role": "system", "content": "Владелец открыл чат из этого места приложения — вопросы, "
+                             "скорее всего, о нём:\n" + about})
         messages += history(conn, run_id)
         messages.append({"role": "user", "content": run["question"]})
 
@@ -277,7 +359,9 @@ def execute(conn, run_id: int) -> str:
                 messages.append({"role": "user", "content": "Выполни план и дай итоговый ответ."})
 
         answer = None
+        status = "done"
         for _ in range(cfg["max_steps"]):
+            _check(conn, run_id)
             msg = llm.chat(conn, cfg["task"], messages, tools=tools, reasoning=cfg["reasoning"], model=model,
                            timeout=config.ASK_TIMEOUT_SEC if level == "fast" else 120)
             calls = msg.get("tool_calls") or []
@@ -291,6 +375,12 @@ def execute(conn, run_id: int) -> str:
                     args = json.loads(call.get("function", {}).get("arguments") or "{}") or {}
                 except ValueError:
                     args = {}
+                if name == "ask_user":
+                    # уточнение: вопрос уходит владельцу ответом, его ответ — следующее сообщение в чате
+                    answer = str(args.get("question") or "").strip()
+                    step(conn, run_id, "ask", i18n.t(lang, "tool.ask_user"))
+                    break
+                _check(conn, run_id)
                 if name in ext_index:
                     row, tool = ext_index[name]
                     shown = extensions.localize(row["manifest"], lang)
@@ -308,11 +398,15 @@ def execute(conn, run_id: int) -> str:
                         result = f"Ошибка инструмента: {exc}"
                 step(conn, run_id, "result", _short(result), result)
                 messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
+            if answer:
+                status = "needs_input"
+                break
         if not answer:
             msg = llm.chat(conn, cfg["task"], messages + [{"role": "user", "content":
                            "Шаги закончились. Дай лучший ответ по тому, что уже известно."}], model=model)
             answer = (msg.get("content") or "").strip() or i18n.t(lang, "agent.no_answer")
-        status = "done"
+    except Cancelled:
+        answer, status = i18n.t(lang, "agent.cancelled"), "cancelled"
     except Exception as exc:  # noqa: BLE001
         log.exception("run %s failed", run_id)
         step(conn, run_id, "error", "⚠️ Ошибка: " + str(exc)[:200])
@@ -325,11 +419,12 @@ def _short(text: str, n: int = 110) -> str:
     return "↳ " + (line[:n] + "…" if len(line) > n else line)
 
 
-def ask(conn, question: str, level: str = "auto", channel: str = "chat", device_id: str | None = None) -> dict:
+def ask(conn, question: str, level: str = "auto", channel: str = "chat", device_id: str | None = None,
+        agent: str = "mnemo", context: str | None = None) -> dict:
     level = route(question, channel) if level == "auto" else level
     if level not in LEVELS:
         level = "fast"
-    run_id, _ = start_run(conn, question, level, channel, device_id)
+    run_id, _ = start_run(conn, question, level, channel, device_id, agent, context)
     t0 = time.monotonic()
     answer = execute(conn, run_id)
     return {"run_id": run_id, "level": level, "answer": answer, "latency_ms": int((time.monotonic() - t0) * 1000)}

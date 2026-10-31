@@ -66,6 +66,13 @@ TASKS += [
         "default": "google/gemini-3.7-flash",
     },
     {
+        "key": "agent_gpt",
+        "kind": "llm",
+        "title": "Агент GPT",
+        "description": "Агент «GPT» в чате: те же инструменты, что у Mnemo, но все шаги — на модели OpenAI.",
+        "default": "openai/gpt-5-mini",
+    },
+    {
         "key": "search",
         "kind": "llm",
         "title": "Веб-поиск",
@@ -185,6 +192,11 @@ TASKS_I18N = {
         "en": ("Agent: deep", "Level 3: plans first, then works in many steps. Worth a strong model."),
         "tr": ("Ajan: derin", "Seviye 3: önce plan yapar, sonra çok adımlı çalışır. Güçlü bir model önerilir."),
         "es": ("Agente: profundo", "Nivel 3: primero planifica y luego trabaja en varios pasos. Conviene un modelo potente."),
+    },
+    "agent_gpt": {
+        "en": ("GPT agent", "The “GPT” agent in chat: the same tools as Mnemo, but every step runs on an OpenAI model."),
+        "tr": ("GPT ajanı", "Sohbetteki “GPT” ajanı: Mnemo ile aynı araçlar, ama tüm adımlar bir OpenAI modelinde çalışır."),
+        "es": ("Agente GPT", "El agente «GPT» del chat: las mismas herramientas que Mnemo, pero cada paso usa un modelo de OpenAI."),
     },
     "search": {
         "en": ("Web search", "Reads search results and retells them briefly with sources."),

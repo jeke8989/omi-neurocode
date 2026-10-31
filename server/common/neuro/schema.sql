@@ -366,3 +366,8 @@ ALTER TABLE photos ADD COLUMN IF NOT EXISTS pos TEXT;
 
 -- Карта воспоминаний: яркость события (оценка модели при сборке дня)
 ALTER TABLE day_events ADD COLUMN IF NOT EXISTS vivid REAL;
+
+-- Агент в чате: какой агент отвечал (mnemo | gpt | claude) и откуда открыт чат («event:12», «day:2026-10-31»)
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS agent TEXT NOT NULL DEFAULT 'mnemo';
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS context TEXT;
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS context TEXT;

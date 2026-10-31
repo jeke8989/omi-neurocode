@@ -1162,6 +1162,7 @@ async def api_features(request: Request):
         "audio_keep_days": retention.parse(st[retention.KEY]) if retention.KEY in st else config.KEEP_AUDIO_DAYS,
         "audio_keep_choices": list(retention.CHOICES),
         "transcript_cleanup": st.get(cleanup.SETTING, "1") != "0",
+        "map_attribution": geo.ATTRIBUTION,
     })
 
 

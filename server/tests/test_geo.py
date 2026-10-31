@@ -54,9 +54,38 @@ def test_tiles_are_proxied_and_cached(conn, monkeypatch, tmp_path):  # noqa: F81
         return R()
 
     monkeypatch.setattr(geo.requests, "get", fake_get)
+    monkeypatch.setattr(geo, "CARTO_KEY", "k123")
     client = Asgi(__import__("gateway.app", fromlist=["app"]).app)
     r = client.get("/api/tiles/dark/12/2476/1280.png")
-    assert r.status_code == 200 and r.content == PNG and "dark_all/12/2476/1280@2x.png" in calls[0]
+    assert r.status_code == 200 and r.content == PNG and "dark_all/12/2476/1280@2x.png?key=k123" in calls[0]
     assert client.get("/api/tiles/dark/12/2476/1280.png").content == PNG and len(calls) == 1  # из кеша
     assert client.get("/api/tiles/neon/1/0/0.png").status_code == 400
     assert client.get("/api/tiles/light/2/9/0.png").status_code == 400
+
+
+def test_osm_tiles_are_restyled_without_key(conn, monkeypatch, tmp_path):  # noqa: F811
+    """Без ключа CARTO — плитка OpenStreetMap, перекрашенная под тему (512 px, спокойные цвета)."""
+    import io
+
+    from PIL import Image
+
+    from neuro import geo
+    monkeypatch.setattr(geo, "TILE_DIR", tmp_path)
+    monkeypatch.setattr(geo, "CARTO_KEY", "")
+    src = io.BytesIO()
+    Image.new("RGB", (256, 256), (242, 239, 233)).save(src, "PNG")
+    calls = []
+
+    class R:
+        status_code = 200
+        content = src.getvalue()
+
+    monkeypatch.setattr(geo.requests, "get", lambda url, **kw: calls.append(url) or R())
+    client = Asgi(__import__("gateway.app", fromlist=["app"]).app)
+    for style in ("light", "dark"):
+        r = client.get(f"/api/tiles/{style}/3/4/2.png")
+        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        lum = sum(img.getpixel((100, 100))) / 3
+        assert r.status_code == 200 and img.size == (512, 512)
+        assert (lum > 230) if style == "light" else (lum < 60)
+    assert all(u == "https://tile.openstreetmap.org/3/4/2.png" for u in calls) and len(calls) == 2

@@ -492,6 +492,9 @@ object Api {
     }
 
     /** Плитка подложки карты (через свой сервер). style: light | dark. */
+    /** Подпись поставщиков карты (обязательна): сервер говорит, откуда плитки. */
+    @Volatile var mapAttribution: String = "© OpenStreetMap"
+
     fun tileUrl(style: String, z: Int, x: Int, y: Int): String = Core.prefs.serverUrl + "/api/tiles/$style/$z/$x/$y.png"
 
     private fun latLons(a: JSONArray?): List<LatLon> {
@@ -658,7 +661,7 @@ object Api {
         audioKeepChoices = o.optJSONArray("audio_keep_choices")?.let { a -> (0 until a.length()).map { a.getInt(it) } }
             ?: listOf(0, 1, 3, 7, 30),
         transcriptCleanup = o.optBoolean("transcript_cleanup", true),
-    )
+    ).also { mapAttribution = o.optString("map_attribution", mapAttribution).ifBlank { mapAttribution } }
 
     suspend fun diary(): DiaryInfo {
         val o = JSONObject(call("GET", "/api/diary?limit=21"))

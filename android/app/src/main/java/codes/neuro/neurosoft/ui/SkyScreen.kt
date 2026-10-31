@@ -82,6 +82,14 @@ class SkyGraph(val nodes: List<SkyNode>, val edges: List<SkyEdge>) {
     val isEmpty get() = nodes.none { !it.center }
 }
 
+/** Короткая подпись: обрезаем по границе слова, с многоточием — без «Третьяковская гал». */
+fun shortLabel(text: String?, max: Int = 24): String? {
+    val t = text?.trim()?.ifBlank { null } ?: return null
+    if (t.length <= max) return t
+    val cut = t.take(max + 1).substringBeforeLast(' ').trimEnd(',', '.', ':', '—', '-', ' ')
+    return (if (cut.length >= max / 2) cut else t.take(max).trimEnd()) + "…"
+}
+
 /** Оттенок события по виду: тёплые — люди и семья, холодные — работа и учёба. */
 private fun kindTint(kind: String): Color = when (kind) {
     "встреча", "друзья", "семья" -> Color(0xFFFFDDB0)
@@ -182,16 +190,16 @@ fun memoryGraph(g: Graph, since: Long, now: Long): SkyGraph {
         }
         pos.values.forEach { p ->
             val d = hypot(p[0], p[1])
-            if (d > 0.9f) { p[0] *= 0.9f / d; p[1] *= 0.9f / d }
+            if (d > 0.78f) { p[0] *= 0.78f / d; p[1] *= 0.78f / d }
         }
     }
     val nodes = ArrayList<SkyNode>()
     val index = HashMap<Long, Int>()
-    fun label(e: GraphEvent) = listOfNotNull(e.emoji, e.title).joinToString(" ").ifBlank { null }?.take(28)
+    fun label(e: GraphEvent) = shortLabel(listOfNotNull(e.emoji, e.title).joinToString(" "))
     anchors.forEach { e ->
         val p = pos.getValue(e.id)
         index[e.id] = nodes.size
-        nodes += SkyNode(e.id, p[0], p[1], 0.7f + 0.9f * e.vivid, 0.6f + 0.4f * e.vivid, 1f, label(e), kindTint(e.kind),
+        nodes += SkyNode(e.id, p[0], p[1], 0.6f + 0.6f * e.vivid, 0.6f + 0.4f * e.vivid, 1f, label(e), kindTint(e.kind),
             event = e, last = isoMillis(e.startedAt), count = e.fragments)
     }
     // остальные — вокруг самой близкой по смыслу яркой звезды; не связаны ни с одной — сами по себе
@@ -211,7 +219,7 @@ fun memoryGraph(g: Graph, since: Long, now: Long): SkyGraph {
             val ang = base + k * (2 * PI.toFloat() / max(5, list.size))
             val orbit = 0.12f + 0.025f * (k / 5)
             index[e.id] = nodes.size
-            nodes += SkyNode(e.id, ap[0] + cos(ang) * orbit, ap[1] + sin(ang) * orbit, 0.32f + 0.4f * e.vivid,
+            nodes += SkyNode(e.id, ap[0] + cos(ang) * orbit, ap[1] + sin(ang) * orbit, 0.3f + 0.3f * e.vivid,
                 0.3f * e.vivid, 0.85f, label(e), kindTint(e.kind), event = e, last = isoMillis(e.startedAt),
                 count = e.fragments)
             edges += SkyEdge(ai, nodes.lastIndex, (rel / 3f).coerceIn(0.25f, 1f), curved = false)
@@ -219,7 +227,7 @@ fun memoryGraph(g: Graph, since: Long, now: Long): SkyGraph {
     }
     free.forEach { e ->
         val age = ((now - isoMillis(e.startedAt)) / span).coerceIn(0f, 1f)
-        val d = 0.2f + 0.75f * sqrt(age)
+        val d = 0.2f + 0.7f * sqrt(age)
         val a = (e.id % 9973) * GOLDEN + 0.4f
         nodes += SkyNode(e.id, cos(a) * d, sin(a) * d, 0.28f + 0.35f * e.vivid, 0.2f * e.vivid, 0.6f, label(e),
             kindTint(e.kind), event = e, last = isoMillis(e.startedAt), count = e.fragments)
@@ -287,7 +295,7 @@ fun SkyCanvas(
         val unit = with(density) { nodeScale.toPx() }
         fun screen(n: SkyNode) = center + camera.pan + Offset(n.x, n.y) * (R * camera.zoom)
         // звезда растёт с приближением, но медленнее карты — чтобы не слипались
-        fun radius(n: SkyNode) = (if (n.center) unit * 1.15f else unit * n.r) * sqrt(camera.zoom).coerceIn(0.85f, 1.8f)
+        fun radius(n: SkyNode) = (if (n.center) unit * 1.1f else unit * n.r) * sqrt(camera.zoom).coerceIn(0.9f, 1.25f)
         val related = remember(graph, selected) {
             if (selected == null) null
             else {
@@ -322,8 +330,8 @@ fun SkyCanvas(
             val pts = graph.nodes.map { screen(it) }
             // связи: от вас — прямые лучи, между людьми — мягкие дуги
             graph.edges.forEach { e ->
-                val a = pts[e.a]
-                val b = pts[e.b]
+                val (a, b) = trimmed(pts[e.a], pts[e.b], radius(graph.nodes[e.a]) + 2 * density.density,
+                    radius(graph.nodes[e.b]) + 2 * density.density) ?: return@forEach
                 val on = related == null || (e.a in related && e.b in related)
                 val base = if (e.curved) 0.16f + 0.42f * e.strength else 0.08f + 0.26f * e.strength
                 val alpha = (if (on) base else base * 0.18f) * min(graph.nodes[e.a].alpha, graph.nodes[e.b].alpha)
@@ -353,15 +361,18 @@ fun SkyCanvas(
                     drawCircle(StarLight, r * 0.42f, p)
                 } else {
                     val a = n.alpha * dim
-                    val glow = r * (3f + 2.5f * n.weight)
-                    drawCircle(Brush.radialGradient(listOf(n.tint.copy(alpha = 0.34f * a), Color.Transparent), p, glow),
+                    val glow = r * (2.2f + 1.4f * n.weight)
+                    drawCircle(Brush.radialGradient(listOf(n.tint.copy(alpha = 0.24f * a), Color.Transparent), p, glow),
                         glow, p)
                     if (n.event != null && n.weight >= 0.75f) {
-                        // яркое воспоминание — с лучами, как у настоящей яркой звезды
-                        val spike = r * 3.6f
-                        val c = n.tint.copy(alpha = 0.55f * a)
-                        drawLine(c, Offset(p.x - spike, p.y), Offset(p.x + spike, p.y), 1.2f * density.density)
-                        drawLine(c, Offset(p.x, p.y - spike), Offset(p.x, p.y + spike), 1.2f * density.density)
+                        // яркое воспоминание — с короткими лучами, как у яркой звезды
+                        val spike = r * 2.1f
+                        val c = n.tint.copy(alpha = 0.4f * a)
+                        val sw = 0.8f * density.density
+                        drawLine(Brush.horizontalGradient(listOf(Color.Transparent, c, Color.Transparent), p.x - spike, p.x + spike),
+                            Offset(p.x - spike, p.y), Offset(p.x + spike, p.y), sw)
+                        drawLine(Brush.verticalGradient(listOf(Color.Transparent, c, Color.Transparent), p.y - spike, p.y + spike),
+                            Offset(p.x, p.y - spike), Offset(p.x, p.y + spike), sw)
                     }
                     drawCircle(n.tint.copy(alpha = a), r, p)
                 }
@@ -370,6 +381,14 @@ fun SkyCanvas(
             drawLabels(graph, pts, ::radius, measurer, nameStyle, centerStyle, selected, related, density.density)
         }
     }
+}
+
+/** Отрезок между звёздами без кусков внутри звёзд (линия начинается у края диска). */
+private fun trimmed(a: Offset, b: Offset, ra: Float, rb: Float): Pair<Offset, Offset>? {
+    val d = (b - a).getDistance()
+    if (d <= ra + rb) return null
+    val u = (b - a) / d
+    return (a + u * ra) to (b - u * rb)
 }
 
 /** Подписи без наложений: сначала выбранный и центр, потом самые важные; не влезла — не рисуем. */
@@ -382,6 +401,15 @@ private fun DrawScope.drawLabels(
     val order = graph.nodes.indices.sortedWith(compareByDescending<Int> { graph.nodes[it].key == selected }
         .thenByDescending { graph.nodes[it].center }.thenByDescending { graph.nodes[it].weight })
     val placed = ArrayList<Rect>()
+    // линии связей — тоже препятствия: подпись не должна их перечёркивать
+    val segments = graph.edges.map { pts[it.a] to pts[it.b] }
+    fun crossesLine(rect: Rect): Boolean = segments.any { (a, b) ->
+        if (max(a.x, b.x) < rect.left || min(a.x, b.x) > rect.right || max(a.y, b.y) < rect.top || min(a.y, b.y) > rect.bottom) {
+            false
+        } else {
+            (1..15).any { k -> rect.contains(a + (b - a) * (k / 16f)) }
+        }
+    }
     for (i in order) {
         val n = graph.nodes[i]
         val text = n.label ?: continue
@@ -394,13 +422,20 @@ private fun DrawScope.drawLabels(
         val candidates = listOf(
             Offset(p.x - tw / 2, p.y + r), Offset(p.x - tw / 2, p.y - r - th),
             Offset(p.x + r, p.y - th / 2), Offset(p.x - r - tw, p.y - th / 2),
+            Offset(p.x + r * 0.7f, p.y + r * 0.7f), Offset(p.x - tw - r * 0.7f, p.y + r * 0.7f),
+            Offset(p.x + r * 0.7f, p.y - th - r * 0.7f), Offset(p.x - tw - r * 0.7f, p.y - th - r * 0.7f),
         )
-        val spot = candidates.firstOrNull { tl ->
+        fun fits(tl: Offset, strict: Boolean): Boolean {
             val rect = Rect(tl, androidx.compose.ui.geometry.Size(tw, th)).inflate(3 * dp)
-            rect.left >= 0 && rect.right <= size.width && rect.top >= 0 && rect.bottom <= size.height &&
+            return rect.left >= 0 && rect.right <= size.width && rect.top >= 0 && rect.bottom <= size.height &&
                 placed.none { it.overlaps(rect) } &&
-                taken.withIndex().none { (j, t) -> j != i && t.overlaps(rect) }
-        } ?: continue
+                taken.withIndex().none { (j, t) -> j != i && t.overlaps(rect) } &&
+                (!strict || !crossesLine(rect.deflate(3 * dp)))
+        }
+        // сначала место без линий; для главных подписей — хотя бы без наложений
+        val spot = candidates.firstOrNull { fits(it, strict = true) }
+            ?: candidates.takeIf { n.center || n.key == selected || n.weight >= 0.6f }?.firstOrNull { fits(it, strict = false) }
+            ?: continue
         placed += Rect(spot, androidx.compose.ui.geometry.Size(tw, th)).inflate(3 * dp)
         val dim = if (related == null || i in related) 1f else 0.3f
         drawText(layout, topLeft = spot, alpha = (n.alpha * dim).coerceIn(0.3f, 1f))

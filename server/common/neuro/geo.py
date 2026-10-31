@@ -1,11 +1,13 @@
 """Карта: маршрут дня, места и где проходили разговоры; подложка карты через свой сервер.
 
-Подложка — растровые плитки CARTO (светлая Positron и тёмная Dark Matter, данные © OpenStreetMap).
-Телефон берёт их у своего сервера, а сервер — у CARTO и хранит у себя: так поставщик карты не видит
-телефон, а однажды открытые места потом открываются мгновенно и без лишних запросов.
+Подложка — плитки OpenStreetMap, которые сервер перекрашивает в спокойные светлые или тёмные тона под тему
+приложения. Если в .env задан CARTO_KEY (бесплатный ключ: carto.com/basemaps/apikey) — берутся готовые
+плитки CARTO Positron / Dark Matter, они чётче. Телефон получает плитки только у своего сервера, а сервер
+хранит их у себя: поставщик карты не видит телефон, а однажды открытые места открываются мгновенно.
 """
 from __future__ import annotations
 
+import io
 import logging
 import random
 import statistics
@@ -21,8 +23,21 @@ log = logging.getLogger("neuro.geo")
 TILE_DIR = Path(config.env("TILE_DIR", "/data/tiles"))
 TILE_CACHE_MB = int(config.env("TILE_CACHE_MB", "300"))
 STYLES = {"light": "light_all", "dark": "dark_all"}
+CARTO_KEY = config.env("CARTO_KEY", "")
+CACHE_VERSION = "v2"  # v1 — плитки CARTO без ключа («API KEY REQUIRED»), их не показываем
+ATTRIBUTION = "© OpenStreetMap © CARTO" if CARTO_KEY else "© OpenStreetMap"
+UA = "Mnemo/1.0 (personal server; +https://github.com/jeke8989/omi-neurocode)"
 MAX_ZOOM = 19
+# Перекраска OSM под тему приложения (как CARTO Positron / Dark Matter): подписи, фон (от зданий до дорог),
+# вода и парки — своими спокойными цветами
+PALETTE = {
+    "light": {"ink": "#5f6673", "low": "#e2e4e9", "high": "#ffffff", "water": "#d5dce5", "park": "#e6ece4", "gamma": 2.2},
+    "dark": {"ink": "#aeb5c1", "low": "#0f1218", "high": "#363d4a", "water": "#0b0e13", "park": "#18201b", "gamma": 4.0},
+}
 NEAR = timedelta(minutes=5)
+
+
+_trimmed = False  # прежние версии кеша убираются при первой новой плитке
 
 
 class TileError(RuntimeError):
@@ -34,38 +49,80 @@ def tile_path(style: str, z: int, x: int, y: int) -> Path:
     import hashlib  # noqa: PLC0415
 
     salt = (crypto.seal_det("tiles") or "") if crypto.enabled() else ""
-    h = hashlib.sha256(f"{salt}|{style}/{z}/{x}/{y}".encode()).hexdigest()
-    return TILE_DIR / h[:2] / f"{h}.png"
+    source = "carto" if CARTO_KEY else "osm"
+    h = hashlib.sha256(f"{salt}|{source}|{style}/{z}/{x}/{y}".encode()).hexdigest()
+    return TILE_DIR / CACHE_VERSION / h[:2] / f"{h}.png"
+
+
+def restyle(png: bytes, style: str) -> bytes:
+    """Плитка OSM (256 px, яркая) → спокойная плитка 512 px в цветах темы приложения."""
+    import numpy as np  # noqa: PLC0415
+    from PIL import Image, ImageFilter  # noqa: PLC0415
+
+    pal = PALETTE.get(style) or PALETTE["light"]
+
+    def rgb(h: str):
+        return np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.float32)
+
+    a = np.asarray(Image.open(io.BytesIO(png)).convert("RGB"), dtype=np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    t = np.clip((lum - 150) / 105, 0, 1)[..., None] ** pal["gamma"]  # здания → земля → дороги
+    out = rgb(pal["low"]) + (rgb(pal["high"]) - rgb(pal["low"])) * t
+    water = ((b - r > 25) & (b > 140) & (lum > 165))[..., None]
+    green = ((g - r > 25) & (g - b > 15))[..., None]
+    road = ((r > 200) & (r - b > 35) & (lum > 165))[..., None]  # крупные улицы OSM — жёлтые, оранжевые, розовые
+    out = np.where(road, rgb(pal["high"]), out)
+    out = np.where(water, rgb(pal["water"]), out)
+    out = np.where(green, out * 0.3 + rgb(pal["park"]) * 0.7, out)
+    ink = np.clip((180 - lum) / 100, 0, 1)[..., None] ** 0.7  # подписи и границы
+    out = out + (rgb(pal["ink"]) - out) * ink
+    img = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")
+    img = img.resize((512, 512), Image.LANCZOS).filter(ImageFilter.UnsharpMask(radius=1.2, percent=60, threshold=2))
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _fetch(url: str) -> bytes:
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent": UA})
+    except requests.RequestException as exc:
+        raise TileError(str(exc)) from exc
+    if r.status_code != 200 or not r.content.startswith(b"\x89PNG"):
+        raise TileError(f"tile {r.status_code}")
+    return r.content
 
 
 def tile(style: str, z: int, x: int, y: int) -> bytes:
-    """Плитка 512×512 (@2x) из кеша или от CARTO."""
+    """Плитка 512×512 из кеша, от CARTO (если есть ключ) или перекрашенная плитка OpenStreetMap."""
     if style not in STYLES or not 0 <= z <= MAX_ZOOM or not (0 <= x < 2 ** z and 0 <= y < 2 ** z):
         raise ValueError("bad tile")
     path = tile_path(style, z, x, y)
     if path.exists():
         return path.read_bytes()
-    url = f"https://{'abcd'[(x + y) % 4]}.basemaps.cartocdn.com/{STYLES[style]}/{z}/{x}/{y}@2x.png"
-    try:
-        r = requests.get(url, timeout=10, headers={"User-Agent": "Mnemo/1.0 (personal server)"})
-    except requests.RequestException as exc:
-        raise TileError(str(exc)) from exc
-    if r.status_code != 200 or not r.content.startswith(b"\x89PNG"):
-        raise TileError(f"tile {r.status_code}")
+    if CARTO_KEY:
+        data = _fetch(f"https://basemaps.cartocdn.com/{STYLES[style]}/{z}/{x}/{y}@2x.png?key={CARTO_KEY}")
+    else:
+        data = restyle(_fetch(f"https://tile.openstreetmap.org/{z}/{x}/{y}.png"), style)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".part")
-    tmp.write_bytes(r.content)
+    tmp.write_bytes(data)
     tmp.replace(path)
-    if random.random() < 0.01:
+    global _trimmed
+    if not _trimmed or random.random() < 0.01:
+        _trimmed = True
         trim_cache()
-    return r.content
+    return data
 
 
 def trim_cache():
-    """Кеш плиток — не больше TILE_CACHE_MB: самые давние удаляются."""
-    for old in TILE_DIR.glob("*/*/*/*.png"):  # прежняя раскладка (по координатам) — убрать
-        old.unlink(missing_ok=True)
-    files = [(p.stat().st_mtime, p.stat().st_size, p) for p in TILE_DIR.glob("*/*.png")]
+    """Кеш плиток — не больше TILE_CACHE_MB: самые давние удаляются; прежние версии кеша — сразу."""
+    for old in TILE_DIR.glob("*"):
+        if old.name != CACHE_VERSION and old.is_dir():
+            for f in old.rglob("*.png"):
+                f.unlink(missing_ok=True)
+    files = [(p.stat().st_mtime, p.stat().st_size, p) for p in TILE_DIR.glob(f"{CACHE_VERSION}/*/*.png")]
     total = sum(f[1] for f in files)
     limit = TILE_CACHE_MB << 20
     for _, size, p in sorted(files):

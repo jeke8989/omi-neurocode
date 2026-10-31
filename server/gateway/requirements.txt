@@ -6,3 +6,4 @@ tzdata
 requests>=2.31
 sherpa-onnx>=1.13.6,<1.14
 cryptography>=42
+Pillow>=10
