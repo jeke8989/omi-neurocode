@@ -26,7 +26,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_core, assistant, claude_agent, config, db, diary, extensions, i18n, llm, mnemo_mcp, pairing,
-                   people, retention, voices)
+                   people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -1414,7 +1414,10 @@ async def api_tts(request: Request):
 EVENT_FRAGMENTS_SQL = """
 SELECT c.id, c.event_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary, c.emoji,
        greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
-       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count
+       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count,
+       c.topics, """ + people.participants_sql("c") + """ AS people,
+       (SELECT left(string_agg(x.text, ' '), 240) FROM
+           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id ORDER BY s.started_at LIMIT 6) x) AS preview
 FROM conversations c
 """
 

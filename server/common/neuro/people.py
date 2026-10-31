@@ -362,11 +362,12 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
             item["count"] += 1
             item["last_at"] = c["started_at"]
     events = conn.execute(
-        f"""SELECT e.id, e.title, e.emoji, e.kind, e.started_at, e.ended_at, e.topics, e.photo_id,
+        f"""SELECT e.id, e.day, e.title, e.emoji, e.kind, e.started_at, e.ended_at, e.topics, e.photo_id,
                    greatest(0, extract(epoch FROM e.ended_at - e.started_at))::int AS duration_sec,
                    coalesce((SELECT array_agg(p.id) FROM people p WHERE p.id = ANY(e.people) AND NOT p.ignored
                              AND {VISIBLE_SQL}), '{{}}') AS people,
-                   (SELECT min(c.id) FROM conversations c WHERE c.event_id = e.id AND c.trashed_at IS NULL) AS first_conversation
+                   (SELECT min(c.id) FROM conversations c WHERE c.event_id = e.id AND c.trashed_at IS NULL) AS first_conversation,
+                   (SELECT count(*) FROM conversations c WHERE c.event_id = e.id AND c.trashed_at IS NULL) AS fragments
             FROM day_events e WHERE e.started_at > %s ORDER BY e.started_at LIMIT 400""", (since,)).fetchall()
     return {"people": people, "topics": sorted(topics.values(), key=lambda t: -t["count"])[:60],
             "conversations": convs, "events": events, "since": since}
