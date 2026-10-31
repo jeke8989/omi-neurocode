@@ -15,6 +15,10 @@
     <string name="ask_anything">Спросите что угодно</string>
     <string name="assistant">Ассистент</string>
     <string name="assistant_answer">Ответ на вопрос с кнопки</string>
+    <string name="audio_keep">Звук записей</string>
+    <string name="audio_keep_after">Удалять после расшифровки</string>
+    <string name="audio_keep_after_sub">Звук не хранится на сервере дольше пары минут</string>
+    <string name="audio_keep_footer">Расшифровки, итоги и дневник хранятся всегда. Без звука нельзя прослушать фразу в карточке человека и в «Кто это?».</string>
     <string name="autostart">Включать запись после перезагрузки</string>
     <string name="avg_frame">Средний кадр звука</string>
     <string name="avg_frame_sub">В тишине кадры меньше: кодек экономит</string>
@@ -518,6 +522,12 @@
         <item quantity="few">%d разговора</item>
         <item quantity="many">%d разговоров</item>
         <item quantity="other">%d разговора</item>
+    </plurals>
+    <plurals name="keep_days">
+        <item quantity="one">Хранить %d день</item>
+        <item quantity="few">Хранить %d дня</item>
+        <item quantity="many">Хранить %d дней</item>
+        <item quantity="other">Хранить %d дня</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d человек</item>

@@ -25,7 +25,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import agent_core, assistant, config, db, diary, extensions, i18n, llm, pairing, people, voices
+from neuro import (agent_core, assistant, config, db, diary, extensions, i18n, llm, pairing, people, retention,
+                   voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -949,6 +950,18 @@ async def api_features(request: Request):
                 await conn.execute(
                     """INSERT INTO settings (key, value) VALUES ('stt.language', %s)
                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""", (choice,))
+            if "audio_keep_days" in body:
+                try:
+                    days = int(body["audio_keep_days"])
+                except (TypeError, ValueError):
+                    days = -1
+                if days not in retention.CHOICES:
+                    return Json({"error": "audio_keep_days: " + " | ".join(map(str, retention.CHOICES))},
+                                status_code=400)
+                await conn.execute(
+                    """INSERT INTO settings (key, value) VALUES (%s, %s)
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                    (retention.KEY, str(days)))
             for name, key in FEATURE_KEYS.items():
                 if name not in body:
                     continue
@@ -974,6 +987,8 @@ async def api_features(request: Request):
         "language": i18n.normalize(st.get("app.language")),
         "stt_language": st.get("stt.language") or config.STT_LANGUAGE or "app",
         "languages": [{"code": k, "name": v["name"]} for k, v in i18n.LANGS.items()],
+        "audio_keep_days": retention.parse(st[retention.KEY]) if retention.KEY in st else config.KEEP_AUDIO_DAYS,
+        "audio_keep_choices": list(retention.CHOICES),
     })
 
 

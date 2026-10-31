@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from neuro import config, db, i18n, llm, voices
+from neuro import config, db, i18n, llm, retention, voices
 from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, speech_ms
 
 log = logging.getLogger("neuro.stt")
@@ -384,6 +384,11 @@ def main():
                                    WHERE id = %s""",
                                 (str(exc)[:500], chunk["attempts"], chunk["id"]),
                             )
+                        continue
+                    try:
+                        retention.after_transcribed(conn, chunk["id"])
+                    except Exception:  # noqa: BLE001 — звук удалит уборка агента
+                        log.exception("chunk %s: could not remove audio", chunk["id"])
         except Exception:  # noqa: BLE001
             log.exception("database error, retrying in 5s")
             time.sleep(5)

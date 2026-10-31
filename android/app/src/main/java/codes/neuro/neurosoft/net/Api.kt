@@ -155,7 +155,8 @@ data class Extension(
 
 data class Features(val diary: Boolean, val photoStyle: Boolean, val photoAi: Boolean = true, val style: String, val photosPerDay: Int,
                     val styles: List<Pair<String, String>>, val language: String = "ru",
-                    val sttLanguage: String = "app")
+                    val sttLanguage: String = "app", val audioKeepDays: Int = 3,
+                    val audioKeepChoices: List<Int> = listOf(0, 1, 3, 7, 30))
 
 data class Highlight(val time: String, val emoji: String, val title: String, val text: String, val kind: String,
                      val photoId: Long?)
@@ -427,6 +428,9 @@ object Api {
         style = o.optString("style"), photosPerDay = o.optInt("photos_per_day", 3),
         styles = o.optJSONArray("styles").map { it.optString("key") to it.optString("title") },
         language = o.optString("language", "ru"), sttLanguage = o.optString("stt_language", "app"),
+        audioKeepDays = o.optInt("audio_keep_days", 3),
+        audioKeepChoices = o.optJSONArray("audio_keep_choices")?.let { a -> (0 until a.length()).map { a.getInt(it) } }
+            ?: listOf(0, 1, 3, 7, 30),
     )
 
     suspend fun diary(): DiaryInfo {

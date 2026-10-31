@@ -15,6 +15,10 @@
     <string name="ask_anything">Pregunta lo que quieras</string>
     <string name="assistant">Asistente</string>
     <string name="assistant_answer">Respuesta a tu pregunta con el botón</string>
+    <string name="audio_keep">Audio de las grabaciones</string>
+    <string name="audio_keep_after">Borrar tras la transcripción</string>
+    <string name="audio_keep_after_sub">El audio solo queda en el servidor un par de minutos</string>
+    <string name="audio_keep_footer">Las transcripciones, los resúmenes y el diario se guardan siempre. Sin audio no se puede escuchar una frase en la ficha de una persona ni en «¿Quién es?».</string>
     <string name="autostart">Grabar tras reiniciar</string>
     <string name="avg_frame">Trama de audio media</string>
     <string name="avg_frame_sub">En silencio las tramas son más pequeñas: el códec ahorra datos</string>
@@ -516,6 +520,10 @@
     <plurals name="conversations">
         <item quantity="one">%d conversación</item>
         <item quantity="other">%d conversaciones</item>
+    </plurals>
+    <plurals name="keep_days">
+        <item quantity="one">Guardar %d día</item>
+        <item quantity="other">Guardar %d días</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d persona</item>

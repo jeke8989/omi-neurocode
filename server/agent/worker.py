@@ -5,13 +5,12 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, diary, extensions, i18n, people
+from neuro import agent_core, diary, extensions, i18n, people, retention
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
 
@@ -341,18 +340,7 @@ def sync_task_integrations(conn):
 # ---------------------------------------------------------------------------
 def cleanup(conn):
     conn.execute("DELETE FROM received_batches WHERE received_at < now() - interval '7 days'")
-    old = conn.execute(
-        """SELECT id, path FROM audio_chunks
-           WHERE path IS NOT NULL AND status IN ('done', 'empty', 'failed')
-             AND started_at < now() - %s * interval '1 day'
-           LIMIT 2000""",
-        (config.KEEP_AUDIO_DAYS,),
-    ).fetchall()
-    for row in old:
-        Path(row["path"]).unlink(missing_ok=True)
-        conn.execute("UPDATE audio_chunks SET path = NULL WHERE id = %s", (row["id"],))
-    if old:
-        log.info("removed %d old audio files", len(old))
+    retention.cleanup(conn)  # срок хранения звука выбирается в приложении
 
 
 def main():
@@ -371,7 +359,7 @@ def main():
                     sync_task_integrations(conn)
                     if llm.configured():
                         diary.tick(conn)
-                    if time.monotonic() - last_cleanup > 3600:
+                    if time.monotonic() - last_cleanup > 600:
                         cleanup(conn)
                         last_cleanup = time.monotonic()
                     time.sleep(10)

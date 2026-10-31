@@ -15,6 +15,10 @@
     <string name="ask_anything">Bir şey sorun</string>
     <string name="assistant">Asistan</string>
     <string name="assistant_answer">Düğme sorusunun cevabı</string>
+    <string name="audio_keep">Kayıt sesi</string>
+    <string name="audio_keep_after">Yazıya döküldükten sonra sil</string>
+    <string name="audio_keep_after_sub">Ses sunucuda yalnızca birkaç dakika kalır</string>
+    <string name="audio_keep_footer">Dökümler, özetler ve günlük her zaman saklanır. Ses olmadan kişi kartında ve «Bu kim?» bölümünde bir ifadeyi dinleyemezsiniz.</string>
     <string name="autostart">Yeniden başlatınca kayda başla</string>
     <string name="avg_frame">Ortalama ses çerçevesi</string>
     <string name="avg_frame_sub">Sessizlikte çerçeveler küçülür: kodek tasarruf eder</string>
@@ -516,6 +520,10 @@
     <plurals name="conversations">
         <item quantity="one">%d konuşma</item>
         <item quantity="other">%d konuşma</item>
+    </plurals>
+    <plurals name="keep_days">
+        <item quantity="one">%d gün sakla</item>
+        <item quantity="other">%d gün sakla</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d kişi</item>

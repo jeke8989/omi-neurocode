@@ -156,6 +156,9 @@ fun SettingsScreen() {
         Group(stringResource(R.string.data)) {
             item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
                 onClick = { Nav.push(Route.Memories) }) }
+            item { ListRow(stringResource(R.string.audio_keep), icon = Icons.Wave, chevron = true,
+                value = features.data?.let { audioKeepTitle(it.audioKeepDays) },
+                onClick = { Nav.push(Route.AudioKeep) }) }
             item { ListRow(stringResource(R.string.clear_chat), icon = Icons.Trash, danger = true,
                 onClick = { confirmClear = true }) }
         }
@@ -450,6 +453,44 @@ fun SttLanguageScreen() {
                             }
                         }) {
                         if (code == current) Icon(Icons.Check, null, tint = Mn.c.ink, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ======================================================================= звук записей
+@Composable
+fun audioKeepTitle(days: Int): String =
+    if (days == 0) stringResource(R.string.audio_keep_after) else plural(R.plurals.keep_days, days)
+
+@Composable
+fun AudioKeepScreen() {
+    val res by Repo.features.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    var error by remember { mutableStateOf<Throwable?>(null) }
+    LaunchedEffect(Unit) { Repo.features.refresh() }
+    val f = res.data
+    SettingsPage(stringResource(R.string.audio_keep)) {
+        error?.let { StaleNote(it) }
+        Group(footer = stringResource(R.string.audio_keep_footer), inset = 22.dp) {
+            (f?.audioKeepChoices ?: listOf(0, 1, 3, 7, 30)).forEach { days ->
+                item {
+                    ListRow(audioKeepTitle(days),
+                        subtitle = if (days == 0) stringResource(R.string.audio_keep_after_sub) else null,
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    Api.setFeatures(mapOf("audio_keep_days" to days))
+                                    Repo.features.refresh()
+                                    error = null
+                                } catch (e: Exception) {
+                                    error = e
+                                }
+                            }
+                        }) {
+                        if (f?.audioKeepDays == days) Icon(Icons.Check, null, tint = Mn.c.ink, modifier = Modifier.size(20.dp))
                     }
                 }
             }

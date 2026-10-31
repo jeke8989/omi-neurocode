@@ -86,6 +86,7 @@ sealed interface Route {
     data object Memories : Route
     data class Person(val id: Long) : Route
     data object VoicesSettings : Route
+    data object AudioKeep : Route
     data object Server : Route
 }
 
