@@ -193,7 +193,13 @@ diag() {
      || ' задач=' || (SELECT count(*) FROM tasks WHERE created_at > now() - interval '7 days')
      FROM conversations WHERE started_at > now() - interval '7 days'"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
-  q="SELECT 'открытых фраз=' || count(*) FILTER (WHERE text NOT LIKE 'enc_:%%') || ' из ' || count(*) FROM segments"
+  q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')
+     || ' из ' || (SELECT count(*) FROM segments)
+     || ', разговоров ' || (SELECT count(*) FROM conversations WHERE title NOT LIKE 'enc_:%%')
+     || ', задач ' || (SELECT count(*) FROM tasks WHERE text NOT LIKE 'enc_:%%')
+     || ', памяти ' || (SELECT count(*) FROM memories WHERE text NOT LIKE 'enc_:%%')
+     || ', точек ' || (SELECT count(*) FROM locations WHERE lat IS NOT NULL)
+     || ', людей ' || (SELECT count(*) FROM people WHERE name NOT LIKE 'enc_:%%')"
   echo "::notice title=Шифрование::$(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
