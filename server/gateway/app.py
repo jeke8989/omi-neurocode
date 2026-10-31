@@ -25,8 +25,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_core, assistant, claude_agent, config, db, diary, extensions, i18n, llm, pairing, people,
-                   retention, voices)
+from neuro import (agent_core, assistant, claude_agent, config, db, diary, extensions, i18n, llm, mnemo_mcp, pairing,
+                   people, retention, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -808,9 +808,9 @@ async def api_chat(request: Request):
         level = str(body.get("level") or "auto")
         if not text:
             return Json({"error": "empty"}, status_code=400)
-        if level != "auto" and level != "claude" and level not in agent_core.LEVELS:
-            return Json({"error": "level: auto | fast | tools | deep | claude"}, status_code=400)
-        if level == "claude":
+        if level != "auto" and level not in claude_agent.LEVELS and level not in agent_core.LEVELS:
+            return Json({"error": "level: auto | fast | tools | deep | claude | claude_code"}, status_code=400)
+        if level in claude_agent.LEVELS:
             def check():
                 with db.connect() as conn:
                     return claude_agent.configured(conn), claude_agent.busy(conn)
@@ -856,8 +856,26 @@ async def api_chat_clear(request: Request):
         return _unauthorized()
     async with await aconnect() as conn:
         await conn.execute("DELETE FROM chat_messages")
-        await conn.execute("DELETE FROM settings WHERE key = %s", (claude_agent.SESSION_KEY,))  # Claude — с чистого листа
+        await conn.execute("DELETE FROM settings WHERE key = ANY(%s)",  # Claude — с чистого листа
+                           (list(claude_agent.SESSION_KEYS.values()),))
     return Json({"cleared": True})
+
+
+async def mcp_endpoint(request: Request):
+    """Инструменты Mnemo для Claude (MCP, JSON-RPC). Пускает только с токеном текущего запуска «Claude»."""
+    if claude_agent.run_for_token(_token(request.headers, {})) is None:
+        return _unauthorized()
+    if request.method != "POST":
+        return Json({"error": "method not allowed"}, status_code=405)  # SSE-поток не держим
+    try:
+        body = await request.json()
+    except ValueError:
+        return Json({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, status_code=400)
+    batch = body if isinstance(body, list) else [body]
+    replies = [r for r in [await _sync(mnemo_mcp.handle, m) for m in batch if isinstance(m, dict)] if r is not None]
+    if not replies:
+        return Response(status_code=202)
+    return Json(replies if isinstance(body, list) else replies[0])
 
 
 async def api_claude(request: Request):
@@ -1341,6 +1359,7 @@ app = Starlette(
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
         Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
+        Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),
         Route("/api/extensions/install", api_extension_install, methods=["POST"]),
         Route("/api/extensions/{id}", api_extension, methods=["POST", "DELETE"]),

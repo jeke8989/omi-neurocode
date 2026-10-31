@@ -61,7 +61,7 @@
     <string name="claude_disconnect">Отключить Claude</string>
     <string name="claude_disconnect_q">Отключить Claude?</string>
     <string name="claude_disconnect_text">Токен будет удалён с сервера. Код и коммиты останутся.</string>
-    <string name="claude_intro">В режиме «Claude» сообщения из чата уходят в Claude Code на вашем сервере. Он работает в копии репозитория Mnemo: правит код, коммитит и по вашей просьбе («залей») отправляет изменения в GitHub. Дальше сервер и приложение обновятся сами.</string>
+    <string name="claude_intro">Режим «Claude» — тот же ассистент Mnemo, только умнее: отвечает на вашей подписке Claude, видит память, разговоры, задачи и людей, умеет искать в интернете. Режим «Claude · код» меняет само приложение: правит код Mnemo, коммитит и по вашей просьбе («залей») отправляет в GitHub, дальше сервер и приложение обновятся сами.</string>
     <string name="claude_model">Модель</string>
     <string name="claude_model_default">По умолчанию</string>
     <string name="claude_new_session">Начать новую сессию</string>
@@ -72,7 +72,7 @@
     <string name="claude_service_off">На сервере не отвечает</string>
     <string name="claude_session_reset">Следующее сообщение начнёт новую сессию</string>
     <string name="claude_stop">Остановить</string>
-    <string name="claude_sub">Агент в чате: меняет код Mnemo и выкатывает обновления</string>
+    <string name="claude_sub">Ассистент на вашей подписке Claude и режим «код» для обновлений</string>
     <string name="claude_token">Токен</string>
     <string name="claude_token_bad">Это не похоже на токен. Вставьте всю строку из claude setup-token.</string>
     <string name="claude_token_footer">На компьютере выполните claude setup-token и вставьте строку, которую он выдаст. Токен хранится только на вашем сервере, в приложение он не возвращается.</string>
@@ -211,6 +211,7 @@
     <string name="led_sub">Насколько ярко светит огонёк на кулоне</string>
     <string name="level_auto">Авто</string>
     <string name="level_claude">Claude</string>
+    <string name="level_claude_code">Claude · код</string>
     <string name="level_deep">Глубоко</string>
     <string name="level_fast">Быстро</string>
     <string name="level_tools">Основательно</string>

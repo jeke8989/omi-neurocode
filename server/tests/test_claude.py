@@ -93,16 +93,27 @@ def test_claude_run_through_chat(conn, monkeypatch):  # noqa: F811
     monkeypatch.setattr(claude_agent.requests, "post", fake_post)
     run_id, _ = agent_core.start_run(conn, "почини x.py и залей", "claude", "chat", None)
     assert agent_core.execute(conn, run_id) == "Готово, запушил."
-    assert sent["url"].endswith("/run") and sent["body"]["token"] == TOKEN and sent["body"]["model"] == "sonnet"
-    assert sent["body"]["session_id"] is None and "Mnemo" in sent["body"]["system"]
+    body = sent["body"]
+    assert sent["url"].endswith("/run") and body["token"] == TOKEN and body["model"] == "sonnet"
+    assert body["session_id"] is None and "Mnemo" in body["system"]
+    # ассистент: без кода и файлов, данные Mnemo — через MCP с токеном только этого запуска
+    assert body["mode"] == "assistant" and body["tools"] == "WebSearch,WebFetch"
+    mcp_auth = body["mcp"]["mcpServers"]["mnemo"]["headers"]["Authorization"]
+    assert mcp_auth.startswith("Bearer ") and claude_agent.run_for_token(mcp_auth[7:]) is None  # отозван
     run = conn.execute("SELECT status, model, answer FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     assert (run["status"], run["model"]) == ("done", "claude-sonnet-test")
     assert conn.execute("SELECT value FROM settings WHERE key = 'claude.session'").fetchone()["value"] == SESSION
 
-    # следующее сообщение продолжает ту же сессию
+    # следующее сообщение продолжает ту же сессию; режим «код» — своя сессия и без MCP
     run2, _ = agent_core.start_run(conn, "а тесты?", "claude", "chat", None)
     agent_core.execute(conn, run2)
     assert sent["body"]["session_id"] == SESSION
+    assert client.post("/api/chat", json={"text": "x", "level": "bogus"}).status_code == 400
+    run_code, _ = agent_core.start_run(conn, "почини тест", "claude_code", "chat", None)
+    agent_core.execute(conn, run_code)
+    assert sent["body"]["mode"] == "code" and "mcp" not in sent["body"] and sent["body"]["session_id"] is None
+    assert "git pull" in sent["body"]["system"]
+    assert conn.execute("SELECT value FROM settings WHERE key = 'claude.session.code'").fetchone()["value"] == SESSION
 
     # сервис занят или упал — понятный ответ, запуск failed
     monkeypatch.setattr(claude_agent.requests, "post", lambda *a, **k: FakeStream([], status=423))
@@ -110,14 +121,57 @@ def test_claude_run_through_chat(conn, monkeypatch):  # noqa: F811
     assert "ещё работает" in agent_core.execute(conn, run3)
 
     chat = client.get("/api/chat").json()
-    assert [m["role"] for m in chat["messages"]] == ["user", "assistant"] * 3
+    assert [m["role"] for m in chat["messages"]] == ["user", "assistant"] * 4
     assert chat["runs"][str(run_id)]["level"] == "claude"
 
     # очистка чата начинает новую сессию, удаление токена выключает режим
     client.post("/api/chat/clear")
-    assert client.get("/api/claude").json()["session"] is False
+    assert client.get("/api/claude").json()["session"] is False  # обе сессии сброшены
     assert client.delete("/api/claude").json()["configured"] is False
     _clean(conn)
+
+
+def test_mcp_gives_mnemo_tools_only_during_a_run(conn):  # noqa: F811
+    from gateway import app as gw
+    from neuro import claude_agent
+    _clean(conn)
+    conn.execute("DELETE FROM tasks")
+    anon = Asgi(gw.app, token="nope")
+    rpc = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+    assert anon.post("/mcp", json=rpc, auth=True).status_code == 401  # без токена запуска — нельзя
+
+    token = claude_agent.issue_run_token(42)
+    client = Asgi(gw.app, token=token)
+    init = client.post("/mcp", json=rpc).json()
+    assert init["result"]["serverInfo"]["name"] == "mnemo" and init["result"]["protocolVersion"] == "2025-06-18"
+    assert client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}).status_code == 202
+    names = {t["name"] for t in client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+             .json()["result"]["tools"]}
+    assert {"search_memory", "create_task", "people"} <= names and "web_search" not in names
+    done = client.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        "name": "create_task", "arguments": {"text": "Позвонить Анне"}}}).json()["result"]
+    assert done["isError"] is False and "Позвонить Анне" in done["content"][0]["text"]
+    assert conn.execute("SELECT text, source FROM tasks").fetchone() == {"text": "Позвонить Анне", "source": "agent"}
+    bad = client.post("/mcp", json={"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                    "params": {"name": "rm_rf", "arguments": {}}}).json()["result"]
+    assert bad["isError"] is True
+    assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 5, "method": "nope"}).json()["error"]["code"] == -32601
+
+    claude_agent.revoke_run_token(token)
+    assert client.post("/mcp", json=rpc).status_code == 401  # запуск закончился — доступа нет
+    conn.execute("DELETE FROM tasks")
+
+
+def test_service_command_by_mode():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "claude"))
+    import service  # noqa: PLC0415
+    sys.path.remove(str(Path(__file__).resolve().parents[1] / "claude"))
+    mcp = {"mcpServers": {"mnemo": {"type": "http", "url": "http://gateway:8000/mcp"}}}
+    a = service.command({"prompt": "hi", "mode": "assistant", "tools": "WebSearch,WebFetch", "mcp": mcp}, False)
+    assert a[a.index("--tools") + 1] == "WebSearch,WebFetch" and "--strict-mcp-config" in a
+    assert json.loads(a[a.index("--mcp-config") + 1]) == mcp
+    c = service.command({"prompt": "hi", "mode": "code", "session_id": SESSION}, True)
+    assert "--tools" not in c and "--mcp-config" not in c and c[c.index("--resume") + 1] == SESSION
 
 
 def _fake_cli(tmp: Path) -> Path:

@@ -61,7 +61,7 @@
     <string name="claude_disconnect">Desconectar Claude</string>
     <string name="claude_disconnect_q">¿Desconectar Claude?</string>
     <string name="claude_disconnect_text">El token se borrará del servidor. El código y los commits se quedan.</string>
-    <string name="claude_intro">En el modo Claude, los mensajes del chat van a Claude Code en tu servidor. Trabaja en una copia del repositorio de Mnemo: edita el código, hace commits y, cuando lo pides («publícalo»), envía los cambios a GitHub. Después el servidor y la app se actualizan solos.</string>
+    <string name="claude_intro">El modo Claude es el mismo asistente de Mnemo, pero más listo: funciona con tu suscripción de Claude, ve tu memoria, conversaciones, tareas y personas, y puede buscar en internet. El modo Claude · código cambia la propia app: edita el código de Mnemo, hace commits y, cuando lo pides («publícalo»), lo envía a GitHub; después el servidor y la app se actualizan solos.</string>
     <string name="claude_model">Modelo</string>
     <string name="claude_model_default">Predeterminado</string>
     <string name="claude_new_session">Empezar una sesión nueva</string>
@@ -72,7 +72,7 @@
     <string name="claude_service_off">No responde en el servidor</string>
     <string name="claude_session_reset">El próximo mensaje empezará una sesión nueva</string>
     <string name="claude_stop">Detener</string>
-    <string name="claude_sub">Agente en el chat: cambia el código de Mnemo y publica actualizaciones</string>
+    <string name="claude_sub">El asistente con tu suscripción de Claude y un modo código para actualizaciones</string>
     <string name="claude_token">Token</string>
     <string name="claude_token_bad">Eso no parece un token. Pega la línea completa de claude setup-token.</string>
     <string name="claude_token_footer">En un ordenador, ejecuta claude setup-token y pega la línea que muestra. El token se guarda solo en tu servidor y nunca vuelve a la app.</string>
@@ -211,6 +211,7 @@
     <string name="led_sub">Qué tan fuerte brilla la luz del colgante</string>
     <string name="level_auto">Auto</string>
     <string name="level_claude">Claude</string>
+    <string name="level_claude_code">Claude · código</string>
     <string name="level_deep">Profundo</string>
     <string name="level_fast">Rápido</string>
     <string name="level_tools">A fondo</string>

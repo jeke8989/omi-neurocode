@@ -30,8 +30,10 @@ import codes.neuro.neurosoft.net.ChatRun
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// claude — не уровень агента Mnemo, а другой исполнитель: Claude Code на сервере (Настройки -> Claude Code)
-private val LEVELS = listOf("auto", "fast", "tools", "deep", "claude")
+// claude — тот же ассистент Mnemo, но на Claude (подписка владельца), claude_code — Claude правит код Mnemo.
+// Оба работают через Claude Code CLI на сервере (Настройки -> Claude Code).
+private val LEVELS = listOf("auto", "fast", "tools", "deep", "claude", "claude_code")
+private fun isClaude(level: String) = level == "claude" || level == "claude_code"
 
 @Composable
 private fun levelTitle(level: String): String = stringResource(when (level) {
@@ -39,6 +41,7 @@ private fun levelTitle(level: String): String = stringResource(when (level) {
     "tools" -> R.string.level_tools
     "deep" -> R.string.level_deep
     "claude" -> R.string.level_claude
+    "claude_code" -> R.string.level_claude_code
     else -> R.string.level_auto
 })
 
@@ -48,7 +51,7 @@ fun ChatScreen(prefill: String?) {
     val claude by Repo.claude.state.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
     var level by rememberSaveable { mutableStateOf(LEVELS.indexOf(Core.prefs.chatLevel).coerceAtLeast(0)) }
-    val claudeMode = LEVELS[level] == "claude"
+    val claudeMode = isClaude(LEVELS[level])
     val claudeMissing = claudeMode && claude.data?.configured == false
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Throwable?>(null) }
@@ -236,9 +239,9 @@ private fun Working(run: ChatRun?) {
             Lens(LensState.THINKING, 34.dp)
             Spacer(Modifier.width(6.dp))
             Txt(stringResource(R.string.working) + (run?.let {
-                ", " + levelTitle(it.level).let { t -> if (it.level == "claude") t else t.lowercase() }
+                ", " + levelTitle(it.level).let { t -> if (isClaude(it.level)) t else t.lowercase() }
             } ?: ""), T.smallStrong, modifier = Modifier.weight(1f))
-            if (run?.level == "claude") {
+            if (run != null && isClaude(run.level)) {
                 val scope = rememberCoroutineScope()
                 Txt(stringResource(R.string.claude_stop), T.smallStrong, c.red, Modifier.padding(horizontal = 8.dp)
                     .quietTap { scope.launch { try { Api.setClaude(cancel = true) } catch (_: Exception) {} } })

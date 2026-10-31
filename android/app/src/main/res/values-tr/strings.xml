@@ -61,7 +61,7 @@
     <string name="claude_disconnect">Claude bağlantısını kes</string>
     <string name="claude_disconnect_q">Claude bağlantısı kesilsin mi?</string>
     <string name="claude_disconnect_text">Token sunucudan silinecek. Kod ve commit\'ler kalır.</string>
-    <string name="claude_intro">Claude modunda sohbet mesajları sunucunuzdaki Claude Code\'a gider. Mnemo deposunun bir kopyasında çalışır: kodu düzenler, commit eder ve siz isteyince («yayınla») değişiklikleri GitHub\'a gönderir. Ardından sunucu ve uygulama kendiliğinden güncellenir.</string>
+    <string name="claude_intro">Claude modu aynı Mnemo asistanıdır, sadece daha akıllı: Claude aboneliğinizle çalışır, hafızanızı, konuşmalarınızı, görevlerinizi ve kişileri görür, internette arama yapabilir. Claude · kod modu uygulamanın kendisini değiştirir: Mnemo kodunu düzenler, commit eder ve siz isteyince («yayınla») GitHub\'a gönderir; ardından sunucu ve uygulama kendiliğinden güncellenir.</string>
     <string name="claude_model">Model</string>
     <string name="claude_model_default">Varsayılan</string>
     <string name="claude_new_session">Yeni oturum başlat</string>
@@ -72,7 +72,7 @@
     <string name="claude_service_off">Sunucuda yanıt vermiyor</string>
     <string name="claude_session_reset">Sonraki mesaj yeni bir oturum başlatır</string>
     <string name="claude_stop">Durdur</string>
-    <string name="claude_sub">Sohbetteki ajan: Mnemo kodunu değiştirir ve güncellemeleri yayınlar</string>
+    <string name="claude_sub">Claude aboneliğinizle asistan ve güncellemeler için kod modu</string>
     <string name="claude_token">Token</string>
     <string name="claude_token_bad">Bu bir token\'a benzemiyor. claude setup-token çıktısındaki satırın tamamını yapıştırın.</string>
     <string name="claude_token_footer">Bilgisayarda claude setup-token komutunu çalıştırın ve verdiği satırı yapıştırın. Token yalnızca sunucunuzda saklanır, uygulamaya geri gönderilmez.</string>
@@ -211,6 +211,7 @@
     <string name="led_sub">Kolyedeki ışığın parlaklığı</string>
     <string name="level_auto">Otomatik</string>
     <string name="level_claude">Claude</string>
+    <string name="level_claude_code">Claude · kod</string>
     <string name="level_deep">Derin</string>
     <string name="level_fast">Hızlı</string>
     <string name="level_tools">Kapsamlı</string>

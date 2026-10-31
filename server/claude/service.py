@@ -1,13 +1,15 @@
 """Mnemo Claude — Claude Code CLI в отдельном контейнере для чата приложения.
 
 Gateway шлёт сюда вопрос и токен владельца (claude setup-token), сервис запускает
-`claude -p ... --output-format stream-json` в рабочей копии репозитория Mnemo и отдаёт
-события построчно (NDJSON). Ключей сервера (OpenRouter, база, API_TOKEN) здесь нет:
-контейнер видит только свой репозиторий и deploy-ключ для git push.
+`claude -p ... --output-format stream-json` и отдаёт события построчно (NDJSON). Два режима:
+assistant — ассистент Mnemo: пустая папка, встроенные инструменты из "tools" (WebSearch, WebFetch),
+данные — только через MCP gateway ("mcp", одноразовый токен запуска); code — рабочая копия
+репозитория Mnemo, все инструменты, git push своим deploy-ключом. Ключей сервера (OpenRouter,
+база, API_TOKEN) в контейнере нет.
 
   GET  /health  — живой ли сервис
   GET  /info    — версия CLI, репозиторий, публичная часть deploy-ключа
-  POST /run     — {"prompt", "token", "session_id"?, "system"?, "model"?} -> NDJSON
+  POST /run     — {"prompt", "token", "mode", "session_id"?, "system"?, "model"?, "tools"?, "mcp"?} -> NDJSON
   POST /cancel  — остановить текущий запуск
 """
 from __future__ import annotations
@@ -31,6 +33,7 @@ PUSH_URL = os.environ.get("CLAUDE_PUSH_URL", "git@github.com:jeke8989/omi-neuroc
 BRANCH = os.environ.get("CLAUDE_BRANCH", "main")
 MAX_SEC = int(os.environ.get("CLAUDE_MAX_MIN", "30")) * 60
 HOME = Path.home()
+ASSISTANT_DIR = HOME / "assistant"  # пустая папка: ассистенту файлы не нужны
 KEY = HOME / ".ssh" / "id_ed25519"
 REPO = WORK / REPO_URL.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
 
@@ -94,6 +97,10 @@ def command(body: dict, resume: bool) -> list[str]:
         cmd += ["--model", str(body["model"])]
     if body.get("system"):
         cmd += ["--append-system-prompt", str(body["system"])]
+    if body.get("mode") == "assistant":
+        cmd += ["--tools", str(body.get("tools") or ""), "--strict-mcp-config"]
+        if body.get("mcp"):
+            cmd += ["--mcp-config", json.dumps(body["mcp"])]
     return cmd
 
 
@@ -146,7 +153,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
-            sync_repo()
+            if body.get("mode") != "assistant":
+                sync_repo()
             code, text, lost = self._run(body, resume=True)
             if lost:  # сессию стёрли (новый том, переустановка) — начинаем новую
                 self._emit({"type": "service_note", "note": "session_reset"})
@@ -166,7 +174,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run(self, body: dict, resume: bool) -> tuple[int, str, bool]:
         """Запускает CLI и пересылает его события. Третье значение — сессия для --resume не найдена."""
-        cwd = REPO if (REPO / ".git").exists() else WORK
+        if body.get("mode") == "assistant":
+            ASSISTANT_DIR.mkdir(parents=True, exist_ok=True)
+            cwd = ASSISTANT_DIR
+        else:
+            cwd = REPO if (REPO / ".git").exists() else WORK
         proc = subprocess.Popen(command(body, resume), cwd=cwd, env=env_for(str(body["token"])),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, bufsize=1, start_new_session=True)

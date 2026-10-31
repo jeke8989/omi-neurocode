@@ -1,15 +1,21 @@
-"""Режим чата «Claude»: вопрос уходит в Claude Code CLI (сервис claude), а не в агента Mnemo.
+"""Режимы чата на Claude Code CLI (сервис claude) по токену владельца (`claude setup-token`).
 
-Токен владельца (`claude setup-token`) вводится в приложении и хранится в settings на сервере,
-в приложение обратно не отдаётся. Сессия CLI продолжается между сообщениями (--resume), пока
-чат не очистят. Claude работает в рабочей копии репозитория Mnemo: может править код, коммитить
-и пушить в GitHub; после пуша в main CI сам обновляет сервер и собирает APK.
+* claude      — ассистент Mnemo, только умнее: та же роль и те же данные (память, разговоры, задачи,
+                люди, расширения — через MCP-инструменты gateway, см. mnemo_mcp), плюс свой веб-поиск.
+                Кода и файлов не видит: встроенные инструменты — только WebSearch и WebFetch.
+* claude_code — разработка: Claude работает в рабочей копии репозитория Mnemo, правит код, коммитит
+                и по просьбе пушит в GitHub; после пуша в main CI сам обновляет сервер и собирает APK.
+
+Токен хранится в settings на сервере, в приложение не отдаётся. У каждого режима своя сессия CLI
+(--resume), очистка чата начинает обе заново.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+import secrets
+import threading
 from pathlib import PurePosixPath
 
 import requests
@@ -19,7 +25,12 @@ from . import config, i18n
 log = logging.getLogger("neuro.claude")
 
 URL = (config.env("CLAUDE_URL", "http://claude:8700") or "").rstrip("/")
-TOKEN_KEY, SESSION_KEY, MODEL_KEY = "claude.token", "claude.session", "claude.model"
+MCP_URL = config.env("MNEMO_MCP_URL", "http://gateway:8000/mcp")
+MCP_PREFIX = "mcp__mnemo__"
+LEVELS = ("claude", "claude_code")
+TOKEN_KEY, MODEL_KEY = "claude.token", "claude.model"
+SESSION_KEYS = {"claude": "claude.session", "claude_code": "claude.session.code"}
+SESSION_KEY = SESSION_KEYS["claude"]
 LABEL = "claude-code"
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._~+/=-]{20,500}$")
 MODELS = ("", "sonnet", "opus", "haiku")  # пусто — как решит CLI
@@ -44,7 +55,7 @@ def configured(conn) -> bool:
 
 def set_token(conn, token: str | None):
     _set(conn, TOKEN_KEY, token)
-    _set(conn, SESSION_KEY, None)  # новый аккаунт — новая сессия
+    reset_session(conn)  # новый аккаунт — новые сессии
 
 
 def set_model(conn, model: str):
@@ -52,12 +63,35 @@ def set_model(conn, model: str):
 
 
 def reset_session(conn):
-    _set(conn, SESSION_KEY, None)
+    for key in SESSION_KEYS.values():
+        _set(conn, key, None)
 
 
 def busy(conn) -> bool:
-    return conn.execute("SELECT 1 FROM agent_runs WHERE level = 'claude' AND status = 'running' LIMIT 1").fetchone() \
-        is not None
+    return conn.execute("SELECT 1 FROM agent_runs WHERE level = ANY(%s) AND status = 'running' LIMIT 1",
+                        (list(LEVELS),)).fetchone() is not None
+
+
+# одноразовые токены MCP: живут, пока идёт запуск; gateway — один процесс, хватает памяти
+_run_tokens: dict[str, int] = {}
+_tokens_lock = threading.Lock()
+
+
+def issue_run_token(run_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    with _tokens_lock:
+        _run_tokens[token] = run_id
+    return token
+
+
+def run_for_token(token: str | None) -> int | None:
+    with _tokens_lock:
+        return _run_tokens.get(token or "")
+
+
+def revoke_run_token(token: str):
+    with _tokens_lock:
+        _run_tokens.pop(token, None)
 
 
 def service_info(timeout: float = 4) -> dict:
@@ -72,7 +106,7 @@ def service_info(timeout: float = 4) -> dict:
 def status(conn) -> dict:
     token = _get(conn, TOKEN_KEY)
     return {"configured": bool(token), "token_hint": ("…" + token[-4:]) if token else None,
-            "session": bool(_get(conn, SESSION_KEY)), "model": _get(conn, MODEL_KEY), "models": list(MODELS),
+            "session": any(_get(conn, k) for k in SESSION_KEYS.values()), "model": _get(conn, MODEL_KEY), "models": list(MODELS),
             "service": service_info()}
 
 
@@ -83,7 +117,17 @@ def cancel():
         log.warning("claude cancel failed")
 
 
-def system_prompt(lang: str) -> str:
+def assistant_prompt(lang: str) -> str:
+    from . import agent_core  # noqa: PLC0415 — agent_core сам импортирует этот модуль
+
+    return agent_core.system_prompt("tools", "chat", lang) + (
+        " Данные владельца (память, разговоры с кулона, задачи, люди, расширения) — в инструментах mnemo "
+        "(mcp__mnemo__*): ищи там, прежде чем отвечать о его жизни и делах. Для свежих фактов из интернета — "
+        "WebSearch. Отвечай простым текстом без заголовков и таблиц, списки — через «•»."
+    )
+
+
+def code_prompt(lang: str) -> str:
     return (
         "Ты работаешь как агент в чате приложения Mnemo на телефоне владельца. Текущая папка — рабочая копия "
         "репозитория Mnemo (сервер Python в server/, приложение Android в android/). " + i18n.reply_in(lang) + " "
@@ -107,6 +151,10 @@ def _file(path) -> str:
 
 
 def tool_title(lang: str, name: str, args: dict) -> str:
+    if name.startswith(MCP_PREFIX):  # инструменты Mnemo — теми же словами, что у агента Mnemo
+        from . import agent_core  # noqa: PLC0415
+
+        return agent_core.tool_title(lang, name[len(MCP_PREFIX):], args)
     if name == "Bash":
         return i18n.t(lang, "claude.bash", text=_short(args.get("description") or args.get("command"), 80))
     if name in ("Read", "NotebookRead"):
@@ -179,14 +227,24 @@ def execute(conn, run_id: int, step, finish) -> str:
     """Выполняет запуск в режиме Claude. step/finish — из agent_core (шаги и итог в чат)."""
     run = conn.execute("SELECT * FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     lang = i18n.lang(conn)
+    level = run["level"] if run["level"] in LEVELS else "claude"
+    session_key = SESSION_KEYS[level]
     token, model = _get(conn, TOKEN_KEY), _get(conn, MODEL_KEY)
     col = Collector(lang, lambda kind, title, detail=None: step(conn, run_id, kind, title, detail))
-    step(conn, run_id, "level", i18n.t(lang, "claude.level", model=model or "Claude Code"))
+    step(conn, run_id, "level", i18n.t(lang, "claude.level", model=i18n.t(lang, "level." + level)
+                                       + (f" · {model}" if model else "")))
     if not token:
         return finish(conn, run_id, run["channel"], "failed", i18n.t(lang, "claude.no_token"))
-    saved = _get(conn, SESSION_KEY) or None
-    body = {"prompt": run["question"], "token": token, "session_id": saved,
-            "system": system_prompt(lang), "model": model or None}
+    saved = _get(conn, session_key) or None
+    body = {"prompt": run["question"], "token": token, "session_id": saved, "model": model or None}
+    mcp_token = None
+    if level == "claude":
+        mcp_token = issue_run_token(run_id)
+        body.update(mode="assistant", system=assistant_prompt(lang), tools="WebSearch,WebFetch",
+                    mcp={"mcpServers": {"mnemo": {"type": "http", "url": MCP_URL,
+                                                  "headers": {"Authorization": f"Bearer {mcp_token}"}}}})
+    else:
+        body.update(mode="code", system=code_prompt(lang))
     try:
         with requests.post(URL + "/run", json=body, stream=True, timeout=(10, 900)) as r:
             if r.status_code == 423:
@@ -201,10 +259,13 @@ def execute(conn, run_id: int, step, finish) -> str:
                     continue
                 if col.session and col.session != saved:
                     saved = col.session
-                    _set(conn, SESSION_KEY, saved)
+                    _set(conn, session_key, saved)
     except requests.RequestException as exc:
         log.warning("claude service: %s", exc)
         col.error = col.error or i18n.t(lang, "claude.unavailable")
+    finally:
+        if mcp_token:
+            revoke_run_token(mcp_token)
     if col.model:
         conn.execute("UPDATE agent_runs SET model = %s WHERE id = %s", (col.model, run_id))
     if col.answer:

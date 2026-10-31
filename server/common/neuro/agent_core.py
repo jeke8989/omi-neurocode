@@ -205,8 +205,8 @@ def step(conn, run_id: int, kind: str, title: str, detail: str | None = None):
 
 def start_run(conn, question: str, level: str, channel: str, device_id: str | None) -> tuple[int, int]:
     """Создаёт сообщение пользователя и запуск. Возвращает (run_id, message_id).
-    level: fast | tools | deep — агент Mnemo, claude — Claude Code CLI (claude_agent)."""
-    model = claude_agent.LABEL if level == "claude" else llm.resolve_model(conn, LEVELS[level]["task"])
+    level: fast | tools | deep — агент Mnemo, claude | claude_code — Claude Code CLI (claude_agent)."""
+    model = claude_agent.LABEL if level in claude_agent.LEVELS else llm.resolve_model(conn, LEVELS[level]["task"])
     run = conn.execute(
         """INSERT INTO agent_runs (level, question, channel, device_id, model)
            VALUES (%s, %s, %s, %s, %s) RETURNING id""",
@@ -239,7 +239,7 @@ def execute(conn, run_id: int) -> str:
     """Выполняет запуск до конца. Безопасно вызывать в отдельном потоке со своим соединением."""
     run = conn.execute("SELECT * FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     level, channel, device_id = run["level"], run["channel"], run["device_id"]
-    if level == "claude":
+    if level in claude_agent.LEVELS:
         try:
             return claude_agent.execute(conn, run_id, step, finish)
         except Exception:  # noqa: BLE001

@@ -96,7 +96,7 @@ wait_claude() {
   local i n
   for i in $(seq 1 60); do
     n=$(docker compose exec -T db psql -U neuro -d neuro -tAc \
-        "SELECT count(*) FROM agent_runs WHERE level = 'claude' AND status = 'running'" 2>/dev/null || echo 0)
+        "SELECT count(*) FROM agent_runs WHERE level IN ('claude', 'claude_code') AND status = 'running'" 2>/dev/null || echo 0)
     [ "${n:-0}" = 0 ] && return 0
     [ "$i" = 1 ] && echo "Claude ещё отвечает в чате — жду"
     sleep 5
