@@ -6,6 +6,7 @@ import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ChatState
 import codes.neuro.neurosoft.net.ClaudeInfo
 import codes.neuro.neurosoft.net.ConversationItem
+import codes.neuro.neurosoft.net.DayEvents
 import codes.neuro.neurosoft.net.DayInfo
 import codes.neuro.neurosoft.net.DiaryInfo
 import codes.neuro.neurosoft.net.Features
@@ -56,14 +57,19 @@ object Repo {
     val people = Cached<PeopleInfo> { Api.people() }
     val graph = Cached<Graph> { Api.graph(365) }
     private val byDay = HashMap<String, Cached<List<ConversationItem>>>()
+    private val eventsByDay = HashMap<String, Cached<DayEvents>>()
 
     @Synchronized
     fun conversations(day: String): Cached<List<ConversationItem>> =
         byDay.getOrPut(day) { Cached { Api.conversations(200, day) } }
 
+    /** Лента дня на главной: события (собранные фрагменты) и свежие фрагменты. */
+    @Synchronized
+    fun events(day: String): Cached<DayEvents> = eventsByDay.getOrPut(day) { Cached { Api.events(day) } }
+
     suspend fun refreshAll(day: String) {
         days.refresh()
-        conversations(day).refresh()
+        events(day).refresh()
     }
 }
 
@@ -72,6 +78,8 @@ sealed interface Route {
     data object Onboarding : Route
     data object Home : Route
     data class Conversation(val id: Long) : Route
+    data class Event(val id: Long, val day: String) : Route
+    data object Trash : Route
     data class Chat(val prefill: String? = null) : Route
     data object Search : Route
     data class Day(val day: String) : Route
@@ -124,4 +132,5 @@ object Nav {
 object HomeState {
     val page = mutableStateOf(0)
     val day = mutableStateOf(todayIso())
+    val skyMode = mutableStateOf(0)
 }

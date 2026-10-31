@@ -57,6 +57,7 @@ import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ApiException
 import codes.neuro.neurosoft.net.Graph
+import codes.neuro.neurosoft.net.GraphEvent
 import codes.neuro.neurosoft.net.NameSuggestion
 import codes.neuro.neurosoft.net.PeopleInfo
 import codes.neuro.neurosoft.net.Person
@@ -486,6 +487,77 @@ private fun layoutSky(g: Graph, cut: Long, w: Float, h: Float, dp: Float, labels
     return Sky(stars, edges, topics, photos, weight.size, topicCount.size, visible.size)
 }
 
+private class EventStar(val ev: GraphEvent, val x: Float, val y: Float, val r: Float, val alpha: Float,
+                        val label: String?, val tint: Color)
+
+private class EventSky(val stars: List<EventStar>, val links: List<Triple<EventStar, EventStar, Float>>,
+                       val people: Int, val cx: Float, val cy: Float)
+
+/** Оттенок звезды по виду события: тёплые — люди и семья, холодные — работа и учёба. */
+private fun kindTint(kind: String): Color = when (kind) {
+    "встреча", "друзья", "семья" -> Color(0xFFFFDDB0)
+    "работа", "учёба" -> Color(0xFFB4CCFF)
+    "звонок" -> Color(0xFFD3C4FF)
+    "поездка", "покупки" -> Color(0xFFBDEFE2)
+    "отдых", "спорт", "здоровье" -> Color(0xFFFFC9D6)
+    else -> StarLight
+}
+
+/**
+ * Небо событий на момент [cut]: в центре — «сейчас», чем старше событие, тем дальше от центра.
+ * Крупнее — дольше длилось, тусклее — давнее. Линии — события с общими людьми (ярче) или темой (бледнее):
+ * так видно, из каких встреч складываются истории.
+ */
+private fun layoutEvents(g: Graph, cut: Long, w: Float, h: Float, dp: Float): EventSky {
+    val cx = w / 2f
+    val cy = h / 2f + 10 * dp
+    val radius = min(w, h) / 2f - 28 * dp
+    val visible = g.events.filter { isoMillis(it.startedAt) <= cut }.sortedBy { isoMillis(it.startedAt) }.takeLast(90)
+    if (visible.isEmpty()) return EventSky(emptyList(), emptyList(), 0, cx, cy)
+    val owner = g.people.firstOrNull { it.ref.isOwner }?.id
+    val span = max(3_600_000L, cut - isoMillis(visible.first().startedAt)).toFloat()
+    val dmax = visible.maxOf { it.durationSec }.coerceAtLeast(60).toFloat()
+    val golden = (PI * (3 - sqrt(5.0))).toFloat()
+    val labelled = visible.sortedByDescending { it.durationSec }.take(6).map { it.id }.toSet()
+    val stars = visible.map { e ->
+        val t = isoMillis(e.startedAt)
+        val age = ((cut - t) / span).coerceIn(0f, 1f)
+        val dist = radius * (0.14f + 0.86f * sqrt(age))
+        val angle = (e.id % 9973) * golden
+        val k = sqrt(e.durationSec / dmax)
+        val days = (cut - t) / 86_400_000f
+        val title = listOfNotNull(e.emoji, e.title).joinToString(" ").ifBlank { null }
+        EventStar(e, cx + cos(angle) * dist, cy + sin(angle) * dist, (2.2f + 4.6f * k) * dp,
+            (1f - days / 60f).coerceIn(0.45f, 1f), if (e.id in labelled) title?.take(24) else null, kindTint(e.kind))
+    }
+    val links = ArrayList<Triple<EventStar, EventStar, Float>>()
+    for (i in stars.indices) {
+        val a = stars[i]
+        val ap = a.ev.people.filter { it != owner }.toSet()
+        var byPeople = false
+        var byTopic = false
+        for (j in i - 1 downTo max(0, i - 40)) {
+            val b = stars[j]
+            if (!byPeople && ap.isNotEmpty() && b.ev.people.any { it in ap }) {
+                links += Triple(a, b, 0.34f)
+                byPeople = true
+            } else if (!byTopic && a.ev.topics.isNotEmpty() && b.ev.topics.any { it in a.ev.topics }) {
+                links += Triple(a, b, 0.13f)
+                byTopic = true
+            }
+            if (byPeople && byTopic) break
+        }
+    }
+    val people = visible.flatMap { it.people }.filter { it != owner }.toSet().size
+    return EventSky(stars, links, people, cx, cy)
+}
+
+private fun openGraphEvent(e: GraphEvent) {
+    val day = e.day ?: Instant.ofEpochMilli(isoMillis(e.startedAt)).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+    val first = e.firstConversation
+    if (e.fragments <= 1 && first != null) Nav.push(Route.Conversation(first)) else Nav.push(Route.Event(e.id, day))
+}
+
 @Composable
 private fun Constellation(graph: Graph?, info: PeopleInfo?) {
     val fmt = rememberFmt()
@@ -495,8 +567,10 @@ private fun Constellation(graph: Graph?, info: PeopleInfo?) {
     val scope = rememberCoroutineScope()
     val still = reducedMotion()
     val now = remember { System.currentTimeMillis() }
-    val start = remember(graph) {
-        graph?.conversations?.minOfOrNull { isoMillis(it.startedAt) }?.takeIf { it > 0 } ?: (now - 86_400_000L)
+    var mode by HomeState.skyMode   // 0 — люди, 1 — события
+    val start = remember(graph, mode) {
+        (if (mode == 1) graph?.events?.minOfOrNull { isoMillis(it.startedAt) }
+         else graph?.conversations?.minOfOrNull { isoMillis(it.startedAt) })?.takeIf { it > 0 } ?: (now - 86_400_000L)
     }
     val anim = remember { Animatable(1f) }
     val cut = start + ((now - start) * anim.value).toLong()
@@ -520,7 +594,47 @@ private fun Constellation(graph: Graph?, info: PeopleInfo?) {
             val nameStyle = T.tiny.copy(color = StarLight.copy(alpha = 0.92f))
             val topicStyle = T.tiny.copy(color = TopicInk, fontStyle = FontStyle.Italic)
             val skyDescription = stringResource(R.string.sky_description, sky.people, sky.topicCount)
-            Canvas(
+            val evSky = remember(graph, cut, w, h, mode) {
+                if (mode == 1) layoutEvents(graph ?: Graph(emptyList(), emptyList(), emptyList()), cut, w, h, dp) else null
+            }
+            if (evSky != null) {
+                val evDescription = stringResource(R.string.sky_events_description, evSky.stars.size)
+                Canvas(
+                    Modifier.fillMaxSize().semantics { contentDescription = evDescription }
+                        .pointerInput(evSky) {
+                            detectTapGestures { pos ->
+                                val hit = evSky.stars.minByOrNull { hypot(it.x - pos.x, it.y - pos.y) }
+                                if (hit != null && hypot(hit.x - pos.x, hit.y - pos.y) < 28 * dp) openGraphEvent(hit.ev)
+                            }
+                        },
+                ) {
+                    bg.forEach { (x, y, s) ->
+                        drawCircle(StarLight.copy(alpha = 0.08f + 0.2f * s), (0.5f + s) * dp, Offset(x * size.width, y * size.height))
+                    }
+                    // кольца времени вокруг «сейчас»
+                    listOf(0.4f, 0.7f, 1f).forEach { f ->
+                        drawCircle(StarLight.copy(alpha = 0.05f), (min(size.width, size.height) / 2f - 28 * dp) * f,
+                            Offset(evSky.cx, evSky.cy), style = androidx.compose.ui.graphics.drawscope.Stroke(1 * dp))
+                    }
+                    evSky.links.forEach { (a, b, alpha) ->
+                        drawLine(StarLight.copy(alpha = alpha * min(a.alpha, b.alpha)), Offset(a.x, a.y), Offset(b.x, b.y), 1.1f * dp)
+                    }
+                    drawCircle(Brush.radialGradient(listOf(c.lens.copy(alpha = 0.45f), Color.Transparent),
+                        Offset(evSky.cx, evSky.cy), 30 * dp), 30 * dp, Offset(evSky.cx, evSky.cy))
+                    drawCircle(c.lens, 4 * dp, Offset(evSky.cx, evSky.cy))
+                    evSky.stars.forEach { s ->
+                        drawCircle(Brush.radialGradient(listOf(s.tint.copy(alpha = 0.38f * s.alpha), Color.Transparent),
+                            Offset(s.x, s.y), s.r * 3.4f), s.r * 3.4f, Offset(s.x, s.y))
+                        drawCircle(s.tint.copy(alpha = s.alpha), s.r, Offset(s.x, s.y))
+                    }
+                    evSky.stars.forEach { s ->
+                        val label = s.label ?: return@forEach
+                        val layout = measurer.measure(label, nameStyle, maxLines = 1)
+                        val left = min(max(4 * dp, s.x - layout.size.width / 2f), size.width - layout.size.width - 4 * dp)
+                        drawText(layout, topLeft = Offset(max(0f, left), s.y + s.r + 4 * dp))
+                    }
+                }
+            } else Canvas(
                 Modifier.fillMaxSize().semantics { contentDescription = skyDescription }
                     .pointerInput(sky) {
                         detectTapGestures { pos ->
@@ -563,17 +677,35 @@ private fun Constellation(graph: Graph?, info: PeopleInfo?) {
                     drawText(layout, topLeft = Offset(max(0f, left), s.y + s.r + 4 * dp))
                 }
             }
-            sky.photos.forEach { p ->
+            if (evSky == null) sky.photos.forEach { p ->
                 val half = (17 * dp).toInt()
                 ServerImage(p.id, Modifier.offset { IntOffset(p.x.toInt() - half, p.y.toInt() - half) }.size(34.dp)
                     .clip(CircleShape).border(1.5.dp, StarLight.copy(alpha = 0.8f), CircleShape)
                     .tap({ Nav.push(Route.Conversation(p.conversationId)) }))
             }
-            Column(Modifier.padding(start = 18.dp, top = 16.dp, end = 18.dp)) {
-                Txt(stringResource(R.string.sky_title), T.section, StarLight)
-                Txt(if (sky.conversations == 0) stringResource(R.string.sky_empty)
-                    else stringResource(R.string.sky_summary, plural(R.plurals.people, sky.people),
-                        plural(R.plurals.topics, sky.topicCount)), T.caption, TopicInk)
+            Row(Modifier.fillMaxWidth().padding(start = 18.dp, top = 16.dp, end = 12.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Txt(stringResource(R.string.sky_title), T.section, StarLight)
+                    Txt(when {
+                        evSky != null && evSky.stars.isEmpty() -> stringResource(R.string.sky_events_empty)
+                        evSky != null -> stringResource(R.string.sky_summary, plural(R.plurals.events, evSky.stars.size),
+                            plural(R.plurals.people, evSky.people))
+                        sky.conversations == 0 -> stringResource(R.string.sky_empty)
+                        else -> stringResource(R.string.sky_summary, plural(R.plurals.people, sky.people),
+                            plural(R.plurals.topics, sky.topicCount))
+                    }, T.caption, TopicInk)
+                }
+                // режим неба: люди или события
+                Row(Modifier.clip(RoundedCornerShape(16.dp)).background(StarLight.copy(alpha = 0.08f)).padding(3.dp)) {
+                    listOf(stringResource(R.string.sky_mode_people), stringResource(R.string.sky_mode_events))
+                        .forEachIndexed { i, label ->
+                            Txt(label, T.tiny, if (mode == i) Sky1 else StarLight.copy(alpha = 0.8f), maxLines = 1,
+                                modifier = Modifier.clip(RoundedCornerShape(13.dp))
+                                    .background(if (mode == i) StarLight else Color.Transparent)
+                                    .tap({ if (mode != i) { mode = i; scope.launch { anim.snapTo(1f) } } })
+                                    .padding(horizontal = 11.dp, vertical = 6.dp))
+                        }
+                }
             }
         }
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 18.dp, bottom = 12.dp),

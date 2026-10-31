@@ -241,6 +241,7 @@ object Core {
                     Reminders.schedule(app, Api.tasks("open"))
                 } catch (_: Exception) {
                 }
+                Morning.check(app)
             }
             delay(10 * 60_000L)
         }

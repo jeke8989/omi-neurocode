@@ -62,6 +62,8 @@ private fun Screen(route: Route) {
         Route.Onboarding -> OnboardingScreen()
         Route.Home -> HomeScreen()
         is Route.Conversation -> ConversationScreen(route.id)
+        is Route.Event -> EventScreen(route.id, route.day)
+        Route.Trash -> TrashScreen()
         is Route.Chat -> ChatScreen(route.prefill)
         Route.Search -> SearchScreen()
         is Route.Day -> DayScreen(route.day)

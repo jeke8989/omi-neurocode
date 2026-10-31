@@ -242,7 +242,7 @@ fun HomeTab() {
     val day by HomeState.day
     val today = todayIso()
     val daysRes by Repo.days.state.collectAsState()
-    val convRes by Repo.conversations(day).state.collectAsState()
+    val feedRes by Repo.events(day).state.collectAsState()
     val diaryRes by Repo.diary.state.collectAsState()
     val fmt = rememberFmt()
     val scope = rememberCoroutineScope()
@@ -280,26 +280,39 @@ fun HomeTab() {
                     item(key = "summaries") { SummariesCarousel(summaries) }
                 }
             }
-            val list = convRes.data
+            val feed = feedRes.data
             item(key = "day-title") {
-                val total = list?.sumOf { it.durationSec.toLong() } ?: 0L
+                val total = feed?.totalSec ?: 0L
                 SectionTitle(fmt.dayShortTitle(day)) {
                     if (total > 0) Txt(fmt.duration(total), T.small, Mn.c.graphite)
                 }
             }
             when {
-                list == null && convRes.error != null -> item(key = "err") {
-                    ErrorBlock(convRes.error, { scope.launch { Repo.refreshAll(day) } })
+                feed == null && feedRes.error != null -> item(key = "err") {
+                    ErrorBlock(feedRes.error, { scope.launch { Repo.refreshAll(day) } })
                 }
-                list == null -> item(key = "loading") { LoadingBlock() }
-                list.isEmpty() -> item(key = "empty") {
+                feed == null -> item(key = "loading") { LoadingBlock() }
+                feed.isEmpty -> item(key = "empty") {
                     EmptyBlock(Icons.Wave, stringResource(if (day == today) R.string.empty_today_title else R.string.empty_day_title),
                         stringResource(if (day == today) R.string.empty_today_text else R.string.empty_day_text))
                 }
                 else -> {
-                    item(key = "stale") { StaleNote(convRes.error) }
-                    itemsIndexed(list, key = { _, c -> c.id }) { i, c ->
-                        Grouped(i, list.size) { ConversationRow(c, fmt) }
+                    item(key = "stale") { StaleNote(feedRes.error) }
+                    // события дня — фрагменты записи, собранные в ситуации; свежие фрагменты ещё «отлёживаются»
+                    val entries = feedEntries(feed)
+                    itemsIndexed(entries, key = { _, e -> e.key }) { i, e ->
+                        Grouped(i, entries.size) {
+                            when (e) {
+                                is FeedEntry.Event -> EventRow(e.e, fmt)
+                                is FeedEntry.Fragment -> ConversationRow(e.c, fmt)
+                            }
+                        }
+                    }
+                    if (feed.grouped && feed.loose.isNotEmpty() && day == today) {
+                        item(key = "loose-note") {
+                            Txt(stringResource(R.string.events_loose_note), T.caption, Mn.c.graphite,
+                                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
+                        }
                     }
                 }
             }

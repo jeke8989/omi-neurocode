@@ -97,6 +97,16 @@ class Prefs(context: Context) {
         get() = sp.getString("tts_voice", "f1") ?: "f1"
         set(value) = sp.edit().putString("tts_voice", value).apply()
 
+    /** Утром — уведомление с итогами вчерашнего дня. */
+    var morningSummary: Boolean
+        get() = sp.getBoolean("morning_summary", true)
+        set(value) = sp.edit().putBoolean("morning_summary", value).apply()
+
+    /** За какой день утренняя сводка уже показана (YYYY-MM-DD). */
+    var morningShown: String
+        get() = sp.getString("morning_shown", "") ?: ""
+        set(value) = sp.edit().putString("morning_shown", value).apply()
+
     /** Задачи, по которым уже стоит напоминание: id -> время (мс). */
     var reminders: Map<Long, Long>
         get() = try {

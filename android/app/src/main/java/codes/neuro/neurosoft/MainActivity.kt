@@ -35,10 +35,18 @@ class MainActivity : ComponentActivity() {
 
     /** Из уведомления-напоминания — сразу на вкладку задач. */
     private fun openFrom(intent: android.content.Intent?) {
-        if (intent?.getStringExtra("open") == "tasks") {
-            Nav.reset(Route.Home)
-            codes.neuro.neurosoft.ui.HomeState.page.value = 1
+        val open = intent?.getStringExtra("open") ?: return
+        when {
+            open == "tasks" -> {
+                Nav.reset(Route.Home)
+                codes.neuro.neurosoft.ui.HomeState.page.value = 1
+            }
+            open.startsWith("day:") -> {  // утренняя сводка — сразу вчерашний день
+                Nav.reset(Route.Home)
+                Nav.push(Route.Day(open.removePrefix("day:")))
+            }
         }
+        intent?.removeExtra("open")
     }
 
     override fun onStart() {

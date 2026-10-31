@@ -153,6 +153,11 @@
     <string name="err_not_found">Не найдено</string>
     <string name="err_server">Ошибка сервера %1$s</string>
     <string name="err_unknown">Что-то пошло не так</string>
+    <string name="event_gone_text">Ассистент перегруппировал фрагменты дня. Вернитесь на главную — событие там в новом виде.</string>
+    <string name="event_gone_title">Событие пересобрано</string>
+    <string name="event_parts_note">по порядку</string>
+    <string name="event_people">Кто был</string>
+    <string name="events_loose_note">Свежие записи ассистент соберёт в события примерно через час.</string>
     <string name="ext_settings">Настройки</string>
     <string name="find_other_pendant">Подключить другой кулон</string>
     <string name="find_pendant">Найти кулон</string>
@@ -201,6 +206,10 @@
     <string name="internet_access_footer">Интеграция может обращаться только к этим адресам.</string>
     <string name="its_me">Это я</string>
     <string name="its_me_sub">Ваш голос: в расшифровках будет «Я», а задачи на вас станут вашими</string>
+    <string name="junk_fragment">обрывок</string>
+    <string name="junk_noise">шум</string>
+    <string name="junk_not_talk">не разговор</string>
+    <string name="junk_tv">телевизор или радио</string>
     <string name="just_now">только что</string>
     <string name="kbps">%1$s кбит/с</string>
     <string name="lang_system">Как в системе</string>
@@ -268,6 +277,11 @@
     <string name="models_agent">Ассистент</string>
     <string name="models_diary">Итоги и дневник</string>
     <string name="models_speech">Речь</string>
+    <string name="morning_channel">Итоги дня</string>
+    <string name="morning_channel_desc">Утром — как прошёл вчерашний день</string>
+    <string name="morning_setting">Утренняя сводка</string>
+    <string name="morning_setting_sub">После 7:30 — уведомление с итогами вчерашнего дня</string>
+    <string name="morning_sub">Вчера</string>
     <string name="name">Имя</string>
     <string name="name_hint">Например, Анна</string>
     <string name="needs_setup">Нужно настроить</string>
@@ -450,6 +464,10 @@
     <string name="size_mb">%1$s МБ</string>
     <string name="sky_description">Созвездие: людей %1$d, тем %2$d</string>
     <string name="sky_empty">Здесь появятся люди и темы ваших разговоров</string>
+    <string name="sky_events_description">Созвездие событий: %1$d</string>
+    <string name="sky_events_empty">Здесь появятся события ваших дней</string>
+    <string name="sky_mode_events">События</string>
+    <string name="sky_mode_people">Люди</string>
     <string name="sky_play">Прокрутить время</string>
     <string name="sky_summary">%1$s, %2$s</string>
     <string name="sky_title">Созвездие</string>
@@ -520,6 +538,12 @@
     <string name="today">Сегодня</string>
     <string name="transcript">Расшифровка</string>
     <string name="transcript_empty">Текста нет</string>
+    <string name="trash">Корзина</string>
+    <string name="trash_empty_text">Сюда ассистент убирает шум, телевизор и обрывки без смысла. Через 7 дней они удаляются.</string>
+    <string name="trash_empty_title">Корзина пуста</string>
+    <string name="trash_footer">Фрагменты с задачами и фактами в корзину не попадают. «Вернуть» — фрагмент снова появится в ленте дня.</string>
+    <string name="trash_restore">Вернуть</string>
+    <string name="trash_sub">Шум и обрывки, 7 дней</string>
     <string name="tts_missing">Синтезатор речи не готов: установите голос в настройках Android</string>
     <string name="turn_on">Включить</string>
     <string name="untitled">Без названия</string>
@@ -584,6 +608,18 @@
         <item quantity="few">%d разговора</item>
         <item quantity="many">%d разговоров</item>
         <item quantity="other">%d разговора</item>
+    </plurals>
+    <plurals name="event_parts">
+        <item quantity="one">%d фрагмент</item>
+        <item quantity="few">%d фрагмента</item>
+        <item quantity="many">%d фрагментов</item>
+        <item quantity="other">%d фрагмента</item>
+    </plurals>
+    <plurals name="events">
+        <item quantity="one">%d событие</item>
+        <item quantity="few">%d события</item>
+        <item quantity="many">%d событий</item>
+        <item quantity="other">%d события</item>
     </plurals>
     <plurals name="keep_days">
         <item quantity="one">Хранить %d день</item>

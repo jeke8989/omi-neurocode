@@ -153,6 +153,11 @@
     <string name="err_not_found">Bulunamadı</string>
     <string name="err_server">Sunucu hatası %1$s</string>
     <string name="err_unknown">Bir şeyler ters gitti</string>
+    <string name="event_gone_text">Asistan günün parçalarını yeniden grupladı. Yeni hâlini Ana sayfada bulabilirsiniz.</string>
+    <string name="event_gone_title">Bu etkinlik yeniden düzenlendi</string>
+    <string name="event_parts_note">sırayla</string>
+    <string name="event_people">Kimler vardı</string>
+    <string name="events_loose_note">Asistan yeni kayıtları yaklaşık bir saat içinde etkinliklere toplar.</string>
     <string name="ext_settings">Ayarlar</string>
     <string name="find_other_pendant">Başka bir kolye bağla</string>
     <string name="find_pendant">Kolyeyi bul</string>
@@ -201,6 +206,10 @@
     <string name="internet_access_footer">Bu entegrasyon yalnızca bu adreslere erişebilir.</string>
     <string name="its_me">Bu benim</string>
     <string name="its_me_sub">Sizin sesiniz: dökümlerde “Ben” yazar, size verilen görevler sizin olur</string>
+    <string name="junk_fragment">kırıntı</string>
+    <string name="junk_noise">gürültü</string>
+    <string name="junk_not_talk">konuşma değil</string>
+    <string name="junk_tv">televizyon veya radyo</string>
     <string name="just_now">az önce</string>
     <string name="kbps">%1$s kbit/sn</string>
     <string name="lang_system">Sistem dili</string>
@@ -268,6 +277,11 @@
     <string name="models_agent">Asistan</string>
     <string name="models_diary">Özetler ve günlük</string>
     <string name="models_speech">Konuşma</string>
+    <string name="morning_channel">Günün özeti</string>
+    <string name="morning_channel_desc">Sabah: dün nasıl geçti</string>
+    <string name="morning_setting">Sabah özeti</string>
+    <string name="morning_setting_sub">7:30\'dan sonra dünün özetiyle bir bildirim</string>
+    <string name="morning_sub">Dün</string>
     <string name="name">Ad</string>
     <string name="name_hint">Örneğin, Ayşe</string>
     <string name="needs_setup">Kurulum gerekli</string>
@@ -450,6 +464,10 @@
     <string name="size_mb">%1$s MB</string>
     <string name="sky_description">Takımyıldız: %1$d kişi, %2$d konu</string>
     <string name="sky_empty">Konuşmalarınızdaki kişiler ve konular burada görünecek</string>
+    <string name="sky_events_description">Etkinlik takımyıldızı: %1$d</string>
+    <string name="sky_events_empty">Günlerinizin etkinlikleri burada görünecek</string>
+    <string name="sky_mode_events">Etkinlikler</string>
+    <string name="sky_mode_people">Kişiler</string>
     <string name="sky_play">Zamanı oynat</string>
     <string name="sky_summary">%1$s, %2$s</string>
     <string name="sky_title">Takımyıldız</string>
@@ -520,6 +538,12 @@
     <string name="today">Bugün</string>
     <string name="transcript">Döküm</string>
     <string name="transcript_empty">Metin yok</string>
+    <string name="trash">Çöp kutusu</string>
+    <string name="trash_empty_text">Asistan gürültüyü, televizyonu ve anlamsız kırıntıları buraya taşır. 7 gün sonra silinirler.</string>
+    <string name="trash_empty_title">Çöp kutusu boş</string>
+    <string name="trash_footer">Görev veya bilgi içeren parçalar çöpe gitmez. Geri al, parçayı günün akışına geri koyar.</string>
+    <string name="trash_restore">Geri al</string>
+    <string name="trash_sub">Gürültü ve kırıntılar, 7 gün</string>
     <string name="tts_missing">Metin okuma hazır değil: Android ayarlarından bir ses yükleyin</string>
     <string name="turn_on">Aç</string>
     <string name="untitled">Başlıksız</string>
@@ -582,6 +606,14 @@
     <plurals name="conversations">
         <item quantity="one">%d konuşma</item>
         <item quantity="other">%d konuşma</item>
+    </plurals>
+    <plurals name="event_parts">
+        <item quantity="one">%d parça</item>
+        <item quantity="other">%d parça</item>
+    </plurals>
+    <plurals name="events">
+        <item quantity="one">%d etkinlik</item>
+        <item quantity="other">%d etkinlik</item>
     </plurals>
     <plurals name="keep_days">
         <item quantity="one">%d gün sakla</item>

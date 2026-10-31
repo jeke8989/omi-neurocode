@@ -78,7 +78,33 @@ data class PeopleInfo(val people: List<Person>, val suggestions: List<NameSugges
 data class GraphTopic(val name: String, val count: Int, val firstAt: String)
 data class GraphConversation(val id: Long, val title: String?, val emoji: String?, val startedAt: String,
                              val durationSec: Int, val people: List<Long>, val topics: List<String>, val photoId: Long?)
-data class Graph(val people: List<Person>, val topics: List<GraphTopic>, val conversations: List<GraphConversation>)
+/** Событие в «Созвездии»: звезда-событие, связанная с другими через общих людей и темы. */
+data class GraphEvent(val id: Long, val title: String?, val emoji: String?, val kind: String, val startedAt: String,
+                      val durationSec: Int, val people: List<Long>, val topics: List<String>, val photoId: Long?,
+                      val firstConversation: Long?, val fragments: Int = 1, val day: String? = null)
+data class Graph(val people: List<Person>, val topics: List<GraphTopic>, val conversations: List<GraphConversation>,
+                 val events: List<GraphEvent> = emptyList())
+
+/** Событие дня: несколько фрагментов записи, собранных ассистентом в одну ситуацию («Обед с Анной»). */
+data class EventItem(
+    val id: Long, val day: String, val startedAt: String, val endedAt: String, val title: String?, val emoji: String?,
+    val kind: String, val summary: String?, val topics: List<String>, val photoId: Long?, val people: List<PersonRef>,
+    val fragments: List<ConversationItem>, val final: Boolean = false,
+) {
+    val durationSec: Int get() = fragments.sumOf { it.durationSec }
+    val tasksCount: Int get() = fragments.sumOf { it.tasksCount }
+}
+
+/** Лента дня: события и ещё не разобранные фрагменты (последний час). grouped=false — сервер старый, без событий. */
+data class DayEvents(val day: String, val events: List<EventItem>, val loose: List<ConversationItem>,
+                     val grouped: Boolean = true) {
+    val totalSec: Long get() = events.sumOf { it.durationSec.toLong() } + loose.sumOf { it.durationSec.toLong() }
+    val isEmpty: Boolean get() = events.isEmpty() && loose.isEmpty()
+}
+
+/** Фрагмент в корзине: ассистент счёл его мусором (шум, телевизор); лежит 7 дней, можно вернуть. */
+data class TrashItem(val id: Long, val startedAt: String, val endedAt: String, val title: String?, val emoji: String?,
+                     val reason: String?, val preview: String?)
 
 /** День с записями: для ленты дней и календаря. */
 data class DayInfo(val day: String, val conversations: Int, val seconds: Int, val speechSeconds: Int = 0)
@@ -348,6 +374,39 @@ object Api {
     suspend fun conversations(limit: Int = 100, day: String? = null): List<ConversationItem> =
         JSONObject(call("GET", "/api/conversations?limit=$limit" + (day?.let { "&day=$it" } ?: "")))
             .getJSONArray("items").map { conversation(it) }
+
+    /** События дня. Старый сервер без событий — разговоры дня как отдельные фрагменты. */
+    suspend fun events(day: String): DayEvents = try {
+        val o = JSONObject(call("GET", "/api/events?day=$day"))
+        DayEvents(
+            day = day,
+            events = o.optJSONArray("events").map { e ->
+                EventItem(
+                    id = e.getLong("id"), day = e.optString("day").take(10).ifBlank { day },
+                    startedAt = e.optString("started_at"), endedAt = e.optString("ended_at"),
+                    title = e.str("title"), emoji = e.str("emoji"), kind = e.optString("kind", "другое"),
+                    summary = e.str("summary"), topics = e.optJSONArray("topics").strings(),
+                    photoId = e.longOrNull("photo_id"), people = e.optJSONArray("people").map { personRef(it) },
+                    fragments = e.optJSONArray("fragments").map { conversation(it) },
+                    final = e.optString("status") == "final",
+                )
+            }.filter { it.fragments.isNotEmpty() },
+            loose = o.optJSONArray("loose").map { conversation(it) },
+        )
+    } catch (e: ApiException) {
+        if (e.kind != ApiException.Kind.NOT_FOUND) throw e
+        DayEvents(day, emptyList(), conversations(200, day), grouped = false)
+    }
+
+    suspend fun trash(): List<TrashItem> =
+        JSONObject(call("GET", "/api/trash")).optJSONArray("items").map {
+            TrashItem(it.getLong("id"), it.optString("started_at"), it.optString("ended_at"), it.str("title"),
+                it.str("emoji"), it.str("junk_reason"), it.str("preview"))
+        }
+
+    suspend fun restore(conversationId: Long) {
+        call("POST", "/api/conversations/$conversationId/restore", JSONObject())
+    }
 
     suspend fun days(): List<DayInfo> =
         JSONObject(call("GET", "/api/days")).getJSONArray("items").map {
@@ -679,6 +738,18 @@ object Api {
                     startedAt = c.optString("started_at"), durationSec = c.optInt("duration_sec"),
                     people = if (ids == null) emptyList() else (0 until ids.length()).map { ids.optLong(it) },
                     topics = c.optJSONArray("topics").strings(), photoId = c.longOrNull("photo_id"),
+                )
+            },
+            events = o.optJSONArray("events").map { e ->
+                val ids = e.optJSONArray("people")
+                GraphEvent(
+                    id = e.getLong("id"), title = e.str("title"), emoji = e.str("emoji"),
+                    kind = e.optString("kind", "другое"), startedAt = e.optString("started_at"),
+                    durationSec = e.optInt("duration_sec"),
+                    people = if (ids == null) emptyList() else (0 until ids.length()).map { ids.optLong(it) },
+                    topics = e.optJSONArray("topics").strings(), photoId = e.longOrNull("photo_id"),
+                    firstConversation = e.longOrNull("first_conversation"), fragments = e.optInt("fragments", 1),
+                    day = e.str("day")?.take(10),
                 )
             },
         )

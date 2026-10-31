@@ -154,6 +154,13 @@ fun SettingsScreen() {
             item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Book, chevron = true,
                 value = features.data?.let { stringResource(if (it.diary) R.string.on else R.string.off) },
                 onClick = { Nav.push(Route.DiarySettings) }) }
+            item {
+                var morning by remember { mutableStateOf(Core.prefs.morningSummary) }
+                ToggleRow(stringResource(R.string.morning_setting), morning, {
+                    morning = it
+                    Core.prefs.morningSummary = it
+                }, icon = Icons.Bell, subtitle = stringResource(R.string.morning_setting_sub))
+            }
         }
 
         Group(stringResource(R.string.appearance)) {
@@ -174,6 +181,8 @@ fun SettingsScreen() {
         Group(stringResource(R.string.data)) {
             item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
                 onClick = { Nav.push(Route.Memories) }) }
+            item { ListRow(stringResource(R.string.trash), icon = Icons.Trash, chevron = true,
+                subtitle = stringResource(R.string.trash_sub), onClick = { Nav.push(Route.Trash) }) }
             item { ListRow(stringResource(R.string.audio_keep), icon = Icons.Wave, chevron = true,
                 value = features.data?.let { audioKeepTitle(it.audioKeepDays) },
                 onClick = { Nav.push(Route.AudioKeep) }) }

@@ -9,7 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.TaskItem
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 
 /**
@@ -85,6 +88,51 @@ object Reminders {
         }
         Core.reminderBuzz()
         Core.prefs.reminders = Core.prefs.reminders - id
+    }
+}
+
+/**
+ * Утренняя сводка: после 7:30 — одно уведомление с итогами вчерашнего дня (ночью сервер собрал события,
+ * перепроверил задачи и написал дневник). Нажатие открывает день.
+ */
+object Morning {
+    const val CHANNEL = "summary"
+
+    suspend fun check(context: Context) {
+        val prefs = Core.prefs
+        if (!prefs.morningSummary || !prefs.serverConfigured) return
+        val now = LocalTime.now()
+        if (now.isBefore(LocalTime.of(7, 30)) || now.isAfter(LocalTime.of(21, 0))) return
+        val yesterday = LocalDate.now().minusDays(1).toString()
+        if (prefs.morningShown == yesterday) return
+        val d = try {
+            Api.diary().days.firstOrNull { it.day == yesterday }
+        } catch (e: Exception) {
+            return
+        } ?: return
+        if (d.status != "done" || d.title.isNullOrBlank()) return
+        val r = Core.res()
+        val ch = NotificationChannel(CHANNEL, r.getString(R.string.morning_channel), NotificationManager.IMPORTANCE_DEFAULT)
+        ch.description = r.getString(R.string.morning_channel_desc)
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(ch)
+        val open = PendingIntent.getActivity(context, 2, Intent(context, MainActivity::class.java)
+            .putExtra("open", "day:$yesterday"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val text = d.summary?.trim().orEmpty()
+        val n = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_neuro)
+            .setSubText(r.getString(R.string.morning_sub))
+            .setContentTitle(listOfNotNull(d.mood?.takeIf { it.length <= 4 }, d.title).joinToString(" "))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            nm.notify(900, n)
+        } catch (_: SecurityException) {
+        }
+        prefs.morningShown = yesterday
     }
 }
 

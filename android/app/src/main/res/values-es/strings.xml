@@ -153,6 +153,11 @@
     <string name="err_not_found">No encontrado</string>
     <string name="err_server">Error del servidor %1$s</string>
     <string name="err_unknown">Algo salió mal</string>
+    <string name="event_gone_text">El asistente reagrupó los fragmentos del día. Vuelve al inicio para verlo en su nueva forma.</string>
+    <string name="event_gone_title">Este evento se reagrupó</string>
+    <string name="event_parts_note">en orden</string>
+    <string name="event_people">Quién estaba</string>
+    <string name="events_loose_note">El asistente agrupa las grabaciones recientes en eventos en aproximadamente una hora.</string>
     <string name="ext_settings">Ajustes</string>
     <string name="find_other_pendant">Conectar otro colgante</string>
     <string name="find_pendant">Encontrar colgante</string>
@@ -201,6 +206,10 @@
     <string name="internet_access_footer">Esta integración solo puede acceder a estas direcciones.</string>
     <string name="its_me">Soy yo</string>
     <string name="its_me_sub">Tu voz: en las transcripciones aparecerá «Yo» y las tareas que te asignen serán tuyas</string>
+    <string name="junk_fragment">fragmento</string>
+    <string name="junk_noise">ruido</string>
+    <string name="junk_not_talk">no es una conversación</string>
+    <string name="junk_tv">tele o radio</string>
     <string name="just_now">ahora mismo</string>
     <string name="kbps">%1$s kbit/s</string>
     <string name="lang_system">Como el sistema</string>
@@ -268,6 +277,11 @@
     <string name="models_agent">Asistente</string>
     <string name="models_diary">Resúmenes y diario</string>
     <string name="models_speech">Voz</string>
+    <string name="morning_channel">Resumen del día</string>
+    <string name="morning_channel_desc">Por la mañana: cómo fue ayer</string>
+    <string name="morning_setting">Resumen matinal</string>
+    <string name="morning_setting_sub">Después de las 7:30, un aviso con el resumen de ayer</string>
+    <string name="morning_sub">Ayer</string>
     <string name="name">Nombre</string>
     <string name="name_hint">Por ejemplo, Ana</string>
     <string name="needs_setup">Requiere configuración</string>
@@ -450,6 +464,10 @@
     <string name="size_mb">%1$s MB</string>
     <string name="sky_description">Constelación: %1$d personas, %2$d temas</string>
     <string name="sky_empty">Aquí aparecerán las personas y los temas de tus conversaciones</string>
+    <string name="sky_events_description">Constelación de eventos: %1$d</string>
+    <string name="sky_events_empty">Aquí aparecerán los eventos de tus días</string>
+    <string name="sky_mode_events">Eventos</string>
+    <string name="sky_mode_people">Personas</string>
     <string name="sky_play">Recorrer el tiempo</string>
     <string name="sky_summary">%1$s, %2$s</string>
     <string name="sky_title">Constelación</string>
@@ -520,6 +538,12 @@
     <string name="today">Hoy</string>
     <string name="transcript">Transcripción</string>
     <string name="transcript_empty">Sin texto</string>
+    <string name="trash">Papelera</string>
+    <string name="trash_empty_text">El asistente mueve aquí el ruido, la tele y los fragmentos sin sentido. Se borran a los 7 días.</string>
+    <string name="trash_empty_title">La papelera está vacía</string>
+    <string name="trash_footer">Los fragmentos con tareas o datos nunca van a la papelera. Restaurar lo devuelve al día.</string>
+    <string name="trash_restore">Restaurar</string>
+    <string name="trash_sub">Ruido y fragmentos, 7 días</string>
     <string name="tts_missing">La síntesis de voz no está lista: instala una voz en los ajustes de Android</string>
     <string name="turn_on">Activar</string>
     <string name="untitled">Sin título</string>
@@ -582,6 +606,14 @@
     <plurals name="conversations">
         <item quantity="one">%d conversación</item>
         <item quantity="other">%d conversaciones</item>
+    </plurals>
+    <plurals name="event_parts">
+        <item quantity="one">%d fragmento</item>
+        <item quantity="other">%d fragmentos</item>
+    </plurals>
+    <plurals name="events">
+        <item quantity="one">%d evento</item>
+        <item quantity="other">%d eventos</item>
     </plurals>
     <plurals name="keep_days">
         <item quantity="one">Guardar %d día</item>
