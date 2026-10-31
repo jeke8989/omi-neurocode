@@ -101,6 +101,8 @@ private fun HomeTopBar(onCalendar: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         IconCircle(Icons.Search, stringResource(R.string.cd_search), { Nav.push(Route.Search) })
         Spacer(Modifier.width(8.dp))
+        InboxBell()
+        Spacer(Modifier.width(8.dp))
         IconCircle(Icons.Gear, stringResource(R.string.cd_settings), { Nav.push(Route.Settings) })
     }
 }
@@ -420,9 +422,13 @@ private fun LiveStrip() {
             warn = true)
         !running -> Strip(stringResource(R.string.live_off), stringResource(R.string.live_off_text),
             stringResource(R.string.turn_on), { Core.startCapture(context) })
-        voice.phase == VoiceAssistant.Phase.LISTENING -> Strip(stringResource(R.string.live_listening), null)
-        voice.phase == VoiceAssistant.Phase.THINKING -> Strip(stringResource(R.string.live_thinking), voice.question)
-        voice.phase == VoiceAssistant.Phase.SPEAKING -> Strip(stringResource(R.string.live_speaking), voice.question)
+        voice.phase == VoiceAssistant.Phase.LISTENING -> Strip(stringResource(R.string.live_listening), null,
+            stringResource(R.string.cancel), { Core.voice.cancel() })
+        // агент ищет ответ: видно, что он делает, и его можно остановить
+        voice.phase == VoiceAssistant.Phase.THINKING -> Strip(stringResource(R.string.live_thinking),
+            voice.progress ?: voice.question, stringResource(R.string.voice_stop), { Core.voice.cancel() })
+        voice.phase == VoiceAssistant.Phase.SPEAKING -> Strip(stringResource(R.string.live_speaking), voice.question,
+            stringResource(R.string.voice_stop), { Core.voice.cancel() })
         device.state == ConnState.BLUETOOTH_OFF -> Strip(stringResource(R.string.state_bluetooth_off),
             stringResource(R.string.live_bt_off_text), warn = true)
         device.state != ConnState.CONNECTED -> Strip(
@@ -491,19 +497,32 @@ private fun AssistantCard() {
     val answer = voice.answer ?: return
     if (System.currentTimeMillis() - voice.at > 6 * 3600_000L) return
     val c = Mn.c
+    // ответ дорабатывался в чате: как только агент закончит, показываем его прямо здесь
+    val chat by Repo.chat.state.collectAsState()
+    val runId = voice.runId
+    val final = if (voice.pending && runId != null)
+        chat.data?.messages?.lastOrNull { it.role == "assistant" && it.runId == runId }?.text else null
+    LaunchedEffect(voice.pending, runId, final == null) {
+        while (voice.pending && runId != null && final == null) {
+            Repo.chat.refresh()
+            delay(5_000)
+        }
+    }
     Card(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), onClick = { Nav.push(Route.Chat()) }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Sparkle, null, tint = c.lens, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Txt(stringResource(R.string.assistant_answer), T.caption, c.graphite)
+            Txt(stringResource(R.string.assistant_answer), T.caption, c.graphite, Modifier.weight(1f), maxLines = 1)
+            IconCircle(Icons.Close, stringResource(R.string.assistant_answer_hide), { Core.voice.dismissAnswer() },
+                size = 30.dp, background = c.raised, tint = c.graphite)
         }
         voice.question?.let {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Txt(stringResource(R.string.quoted, it), T.small, c.graphite, maxLines = 2)
         }
         Spacer(Modifier.height(6.dp))
-        Txt(answer, T.body, maxLines = 6)
-        if (voice.pending) {
+        Txt(final ?: answer, T.body, maxLines = 8)
+        if (voice.pending && final == null) {
             Spacer(Modifier.height(10.dp))
             Txt(stringResource(R.string.answer_in_chat), T.smallStrong, c.lens)
         }

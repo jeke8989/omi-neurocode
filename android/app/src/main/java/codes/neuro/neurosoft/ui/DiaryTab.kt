@@ -324,6 +324,7 @@ fun DayScreen(day: String) {
                     Spacer(Modifier.height(4.dp))
                     Txt(d.title ?: stringResource(R.string.day_untitled), T.display)
                 }
+                ShareActions("day:$day", d.title, padding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 12.dp))
                 // цифры дня — как «42 · 2ч 46м · 8» у Omi, но с подписями
                 TileRow() {
                     StatTile(stringResource(R.string.stat_conversations), "${d.stats["conversations"] ?: 0}",

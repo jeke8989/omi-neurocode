@@ -120,6 +120,10 @@ fun EventScreen(id: Long, day: String) {
                         }
                     }
                 }
+                item(key = "share") {
+                    ShareActions("event:${e.id}", listOfNotNull(e.emoji, e.title).joinToString(" ").ifBlank { null },
+                        padding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 12.dp))
+                }
                 e.photoId?.let { photo ->
                     item(key = "photo") {
                         ServerImage(photo, Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(200.dp)

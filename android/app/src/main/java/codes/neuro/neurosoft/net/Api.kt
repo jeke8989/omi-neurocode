@@ -191,7 +191,8 @@ data class ModelsInfo(
 )
 
 data class ChatStep(val kind: String, val title: String, val detail: String?)
-data class ChatRun(val id: Long, val level: String, val status: String, val model: String?, val steps: List<ChatStep>)
+data class ChatRun(val id: Long, val level: String, val status: String, val model: String?, val steps: List<ChatStep>,
+                   val agent: String = "mnemo", val context: String? = null)
 data class ChatMessage(val id: Long, val role: String, val text: String, val channel: String, val runId: Long?,
                        val createdAt: String)
 data class ChatState(val messages: List<ChatMessage>, val runs: Map<Long, ChatRun>, val running: Boolean)
@@ -561,6 +562,8 @@ object Api {
                 id = r.getLong("id"), level = r.optString("level"), status = r.optString("status"),
                 model = r.str("model"),
                 steps = r.optJSONArray("steps").map { ChatStep(it.optString("kind"), it.optString("title"), it.str("detail")) },
+                agent = r.optString("agent").ifBlank { if (r.optString("level").startsWith("claude")) "claude" else "mnemo" },
+                context = r.str("context"),
             )
         }
         return ChatState(
@@ -573,8 +576,21 @@ object Api {
         )
     }
 
-    suspend fun sendChat(text: String, level: String) {
-        call("POST", "/api/chat", JSONObject().put("text", text).put("level", level))
+    suspend fun sendChat(text: String, level: String, agent: String = "mnemo", context: String? = null) {
+        val body = JSONObject().put("text", text).put("level", level).put("agent", agent)
+        if (context != null) body.put("context", context)
+        call("POST", "/api/chat", body)
+    }
+
+    /** Всё о событии, разговоре или дне простым текстом — для «Скопировать». ref: event:ID | conversation:ID | day:… */
+    suspend fun share(ref: String): Pair<String, String> {
+        val o = JSONObject(call("GET", "/api/share?ref=" + java.net.URLEncoder.encode(ref, "UTF-8")))
+        return o.optString("title") to o.optString("text")
+    }
+
+    /** Остановить запуск агента («Стоп» в чате). */
+    suspend fun cancelRun(id: Long) {
+        call("POST", "/api/runs/$id/cancel", JSONObject())
     }
 
     suspend fun clearChat() {

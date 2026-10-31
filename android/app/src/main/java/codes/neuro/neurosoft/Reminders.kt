@@ -88,6 +88,7 @@ object Reminders {
         }
         Core.reminderBuzz()
         Core.prefs.reminders = Core.prefs.reminders - id
+        Inbox.add("reminder", "reminder:$id", Core.res().getString(R.string.reminder_title), text, "tasks", id)
     }
 }
 
@@ -132,6 +133,8 @@ object Morning {
             nm.notify(900, n)
         } catch (_: SecurityException) {
         }
+        Inbox.add("morning", "morning:$yesterday", listOfNotNull(d.mood?.takeIf { it.length <= 4 }, d.title).joinToString(" "),
+            text, "day:$yesterday")
         prefs.morningShown = yesterday
     }
 }

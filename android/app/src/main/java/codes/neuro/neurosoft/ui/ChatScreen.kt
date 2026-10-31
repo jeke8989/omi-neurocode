@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -30,10 +31,20 @@ import codes.neuro.neurosoft.net.ChatRun
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// claude — тот же ассистент Mnemo, но на Claude (подписка владельца), claude_code — Claude правит код Mnemo.
-// Оба работают через Claude Code CLI на сервере (Настройки -> Claude Code).
-private val LEVELS = listOf("auto", "fast", "tools", "deep", "claude", "claude_code")
+// Агенты чата. Mnemo — свой агент (события, люди, расшифровки, задачи, память, расширения); GPT — тот же агент
+// и те же инструменты, но на модели OpenAI; Claude — Claude Code CLI на сервере по подписке владельца
+// (claude — ассистент с данными Mnemo, claude_code — правит код Mnemo). Настройки -> Claude Code.
+private val AGENTS = listOf("mnemo", "claude", "gpt")
+private val LEVELS = listOf("auto", "fast", "tools", "deep")
+private val CLAUDE_LEVELS = listOf("claude", "claude_code")
 private fun isClaude(level: String) = level == "claude" || level == "claude_code"
+
+@Composable
+private fun agentTitle(agent: String): String = when (agent) {
+    "claude" -> "Claude"
+    "gpt" -> "GPT"
+    else -> "Mnemo"
+}
 
 @Composable
 private fun levelTitle(level: String): String = stringResource(when (level) {
@@ -46,12 +57,16 @@ private fun levelTitle(level: String): String = stringResource(when (level) {
 })
 
 @Composable
-fun ChatScreen(prefill: String?) {
+fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? = null) {
     val res by Repo.chat.state.collectAsState()
     val claude by Repo.claude.state.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
-    var level by rememberSaveable { mutableStateOf(LEVELS.indexOf(Core.prefs.chatLevel).coerceAtLeast(0)) }
-    val claudeMode = isClaude(LEVELS[level])
+    var agent by rememberSaveable { mutableStateOf(Core.prefs.chatAgent.takeIf { it in AGENTS } ?: "mnemo") }
+    var level by rememberSaveable { mutableStateOf(Core.prefs.chatLevel.takeIf { it in LEVELS } ?: "auto") }
+    var claudeLevel by rememberSaveable { mutableStateOf(Core.prefs.chatClaudeLevel.takeIf { it in CLAUDE_LEVELS } ?: "claude") }
+    // с какого экрана открыт чат: агент видит это событие/день; можно убрать крестиком
+    var about by rememberSaveable { mutableStateOf(context) }
+    val claudeMode = agent == "claude"
     val claudeMissing = claudeMode && claude.data?.configured == false
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Throwable?>(null) }
@@ -72,7 +87,7 @@ fun ChatScreen(prefill: String?) {
         error = null
         scope.launch {
             try {
-                Api.sendChat(t, LEVELS[level])
+                Api.sendChat(t, if (claudeMode) claudeLevel else level, agent, about)
                 input = ""
                 Repo.chat.refresh()
             } catch (e: Exception) {
@@ -130,6 +145,10 @@ fun ChatScreen(prefill: String?) {
         TopBar(stringResource(R.string.assistant), { Nav.pop() }) {
             if (count > 0) IconCircle(Icons.Trash, stringResource(R.string.clear_chat), { confirmClear = true }, size = 40.dp)
         }
+        AgentSwitch(agent) {
+            agent = it
+            Core.prefs.chatAgent = it
+        }
         Box(Modifier.weight(1f)) {
             val chat = res.data
             when {
@@ -152,12 +171,53 @@ fun ChatScreen(prefill: String?) {
             }
         }
         Composer(
-            input = input, onInput = { input = it }, level = level, onLevel = {
-                level = it
-                Core.prefs.chatLevel = LEVELS[it]
+            input = input, onInput = { input = it },
+            levels = if (claudeMode) CLAUDE_LEVELS else LEVELS,
+            level = if (claudeMode) claudeLevel else level,
+            onLevel = {
+                if (claudeMode) {
+                    claudeLevel = it
+                    Core.prefs.chatClaudeLevel = it
+                } else {
+                    level = it
+                    Core.prefs.chatLevel = it
+                }
             },
+            about = about?.let { contextTitle ?: it }, onDropAbout = { about = null },
             sending = sending, error = error, claudeMissing = claudeMissing, onSend = { send(input) },
         )
+    }
+}
+
+/** Переключатель агентов: Mnemo, Claude, GPT — под ним одна строка о том, чем выбранный хорош. */
+@Composable
+private fun AgentSwitch(agent: String, onAgent: (String) -> Unit) {
+    val c = Mn.c
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.paper).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            AGENTS.forEach { a ->
+                val on = a == agent
+                Row(
+                    Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(19.dp))
+                        .background(if (on) c.ink else c.paper).tap({ onAgent(a) }),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (a == "mnemo") {
+                        Icon(Icons.Sparkle, null, tint = if (on) c.onInk else c.lens, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Txt(agentTitle(a), T.smallStrong, if (on) c.onInk else c.ink, maxLines = 1)
+                }
+            }
+        }
+        Txt(stringResource(when (agent) {
+            "claude" -> R.string.agent_claude_about
+            "gpt" -> R.string.agent_gpt_about
+            else -> R.string.agent_mnemo_about
+        }), T.tiny, c.graphite, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), maxLines = 2)
     }
 }
 
@@ -196,6 +256,8 @@ private fun Message(m: ChatMessage, run: ChatRun?) {
         val meta = listOfNotNull(
             if (m.channel == "voice") stringResource(R.string.by_voice) else null,
             if (mine) run?.level?.let { levelTitle(it) } else null,
+            if (!mine && run != null) agentTitle(run.agent) else null,
+            if (!mine && run?.status == "needs_input") stringResource(R.string.agent_asks) else null,
             fmt.time(m.createdAt),
         ).joinToString(", ")
         Txt(meta, T.tiny, c.faint, Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
@@ -239,12 +301,26 @@ private fun Working(run: ChatRun?) {
             Lens(LensState.THINKING, 34.dp)
             Spacer(Modifier.width(6.dp))
             Txt(stringResource(R.string.working) + (run?.let {
-                ", " + levelTitle(it.level).let { t -> if (isClaude(it.level)) t else t.lowercase() }
+                ", " + if (isClaude(it.level)) levelTitle(it.level)
+                else agentTitle(it.agent) + " · " + levelTitle(it.level).lowercase()
             } ?: ""), T.smallStrong, modifier = Modifier.weight(1f))
-            if (run != null && isClaude(run.level)) {
+            if (run != null) {
                 val scope = rememberCoroutineScope()
-                Txt(stringResource(R.string.claude_stop), T.smallStrong, c.red, Modifier.padding(horizontal = 8.dp)
-                    .quietTap { scope.launch { try { Api.setClaude(cancel = true) } catch (_: Exception) {} } })
+                var stopping by remember(run.id) { mutableStateOf(false) }
+                Txt(stringResource(if (stopping) R.string.voice_stopping else R.string.claude_stop), T.smallStrong,
+                    c.red, Modifier.padding(horizontal = 8.dp).quietTap {
+                        if (!stopping) {
+                            stopping = true
+                            scope.launch {
+                                try {
+                                    Api.cancelRun(run.id)
+                                    Repo.chat.refresh()
+                                } catch (_: Exception) {
+                                    stopping = false
+                                }
+                            }
+                        }
+                    })
             }
         }
         run?.steps?.filter { it.kind != "result" && it.kind != "level" }?.takeLast(5)?.forEach { s ->
@@ -255,7 +331,8 @@ private fun Working(run: ChatRun?) {
 
 @Composable
 private fun Composer(
-    input: String, onInput: (String) -> Unit, level: Int, onLevel: (Int) -> Unit, sending: Boolean,
+    input: String, onInput: (String) -> Unit, levels: List<String>, level: String, onLevel: (String) -> Unit,
+    about: String?, onDropAbout: () -> Unit, sending: Boolean,
     error: Throwable?, claudeMissing: Boolean, onSend: () -> Unit,
 ) {
     val c = Mn.c
@@ -267,9 +344,29 @@ private fun Composer(
             Txt(stringResource(R.string.claude_connect_hint), T.smallStrong, c.lens,
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp).quietTap { Nav.push(Route.Claude) })
         }
+        if (about != null) {
+            // о чём разговор: событие или день, с которого открыт чат
+            Row(
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp).clip(RoundedCornerShape(16.dp))
+                    .background(c.lens.copy(alpha = 0.10f)).padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Sparkle, null, tint = c.lens, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Txt(stringResource(R.string.chat_about, about), T.caption, c.ink, Modifier.weight(1f, fill = false), maxLines = 1)
+                IconCircle(Icons.Close, stringResource(R.string.chat_about_drop), onDropAbout, size = 28.dp,
+                    background = Color.Transparent, tint = c.graphite)
+            }
+        }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(LEVELS.size) { i -> Chip(levelTitle(LEVELS[i]), i == level, { onLevel(i) }) }
+            items(levels, key = { it }) { l ->
+                Chip(when (l) {
+                    "claude" -> stringResource(R.string.claude_mode_assistant)
+                    "claude_code" -> stringResource(R.string.claude_mode_code)
+                    else -> levelTitle(l)
+                }, l == level, { onLevel(l) })
+            }
         }
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
             Box(

@@ -93,6 +93,7 @@ object TaskPrompts {
             nm.notify(notificationId(t.id), n)
         } catch (_: SecurityException) {
         }
+        Inbox.add("task", "task:${t.id}", r.getString(R.string.task_prompt_title), t.text, "tasks", t.id)
     }
 
     /** Ответ принят — коротко подтверждаем на месте уведомления. Нет связи — вопрос остаётся с кнопками. */

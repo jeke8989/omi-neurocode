@@ -212,3 +212,99 @@ def context_block(conn, ref: str | None) -> str:
     except (ValueError, TypeError):
         return ""
     return ""
+
+
+# ---------------------------------------------------------------- «Скопировать» в приложении
+LABELS = {
+    "ru": {"summary": "Итог", "people": "Люди", "topics": "Темы", "place": "Место", "parts": "Части",
+           "tasks": "Задачи", "transcript": "Расшифровка", "diary": "Дневник"},
+    "en": {"summary": "Summary", "people": "People", "topics": "Topics", "place": "Place", "parts": "Parts",
+           "tasks": "Tasks", "transcript": "Transcript", "diary": "Diary"},
+    "tr": {"summary": "Özet", "people": "Kişiler", "topics": "Konular", "place": "Yer", "parts": "Bölümler",
+           "tasks": "Görevler", "transcript": "Transkript", "diary": "Günlük"},
+    "es": {"summary": "Resumen", "people": "Personas", "topics": "Temas", "place": "Lugar", "parts": "Partes",
+           "tasks": "Tareas", "transcript": "Transcripción", "diary": "Diario"},
+}
+
+
+def _transcript(conn, conv_ids: list[int], limit: int) -> str:
+    if not conv_ids:
+        return ""
+    segs = conn.execute(people.SEGMENT_SELECT + " WHERE s.conversation_id = ANY(%s) AND NOT s.junk "
+                        "ORDER BY s.started_at, s.id", (conv_ids,)).fetchall()
+    return transcript_text(segs, limit=limit) if segs else ""
+
+
+def share_text(conn, ref: str, lang: str = "ru") -> tuple[str, str] | None:
+    """Вся информация об событии, разговоре или дне — простым текстом для буфера обмена: (заголовок, текст)."""
+    from . import i18n  # noqa: PLC0415
+
+    L = LABELS.get(i18n.normalize(lang), LABELS["ru"])
+    kind, _, value = (ref or "").partition(":")
+    try:
+        if kind == "event":
+            e = conn.execute(
+                """SELECT e.id, e.started_at, e.ended_at, e.title, e.emoji, e.summary, e.topics, """
+                + people.event_people_sql("e") + """ AS people FROM day_events e WHERE e.id = %s""",
+                (int(value),)).fetchone()
+            if e is None:
+                return None
+            title = " ".join(x for x in (e["emoji"], e["title"]) if x) or "…"
+            out = [title, f"{e['started_at'].astimezone(TZ):%d.%m.%Y}, {_t(e['started_at'])}–{_t(e['ended_at'])}"]
+            place = _place(conn, e["started_at"], e["ended_at"])
+            if place:
+                out.append(f"{L['place']}: {place}")
+            if e["summary"]:
+                out += ["", f"{L['summary']}: {e['summary']}"]
+            who = _names(e["people"])
+            if who:
+                out.append(f"{L['people']}: {who}")
+            if e["topics"]:
+                out.append(f"{L['topics']}: " + ", ".join(e["topics"]))
+            parts = conn.execute(
+                """SELECT id, started_at, last_activity, title, summary FROM conversations
+                   WHERE event_id = %s AND trashed_at IS NULL ORDER BY started_at""", (e["id"],)).fetchall()
+            if parts:
+                out += ["", f"{L['parts']}:"]
+                out += [f"• {_t(p['started_at'])}–{_t(p['last_activity'])} {p['title'] or '…'}"
+                        + (f" — {p['summary']}" if p["summary"] else "") for p in parts]
+            text = _transcript(conn, [p["id"] for p in parts], 60000)
+            if text:
+                out += ["", f"{L['transcript']}:", text]
+            return title, "\n".join(out)
+        if kind == "conversation":
+            c = conn.execute(
+                """SELECT c.id, c.started_at, c.last_activity, c.title, c.emoji, c.summary, c.topics, """
+                + people.participants_sql("c") + """ AS people FROM conversations c WHERE c.id = %s""",
+                (int(value),)).fetchone()
+            if c is None:
+                return None
+            title = " ".join(x for x in (c.get("emoji"), c["title"]) if x) or "…"
+            out = [title, f"{_d(c['started_at'])}–{_t(c['last_activity'])}"]
+            if c["summary"]:
+                out += ["", f"{L['summary']}: {c['summary']}"]
+            who = _names(c["people"])
+            if who:
+                out.append(f"{L['people']}: {who}")
+            if c["topics"]:
+                out.append(f"{L['topics']}: " + ", ".join(c["topics"]))
+            tasks = conn.execute("SELECT text, due FROM tasks WHERE conversation_id = %s AND status <> 'dismissed'",
+                                 (c["id"],)).fetchall()
+            if tasks:
+                out += ["", f"{L['tasks']}:"] + [f"• {t['text']}" + (f" ({t['due']})" if t["due"] else "") for t in tasks]
+            text = _transcript(conn, [c["id"]], 60000)
+            if text:
+                out += ["", f"{L['transcript']}:", text]
+            return title, "\n".join(out)
+        if kind == "day":
+            d = parse_day(value)
+            title = f"{WEEKDAYS[d.weekday()]}, {d:%d.%m.%Y}"
+            diary = diary_day(conn, d)
+            parts = [title]
+            if not diary.startswith("Сводки"):
+                parts += ["", f"{L['diary']}:", diary]
+            parts += ["", day_overview(conn, d).split(":\n", 1)[-1]]
+            return title, "\n".join(parts)
+    except (ValueError, TypeError):
+        return None
+    return None

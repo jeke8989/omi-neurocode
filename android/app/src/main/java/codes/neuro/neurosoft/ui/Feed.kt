@@ -55,6 +55,8 @@ class Cached<T>(private val loader: suspend () -> T) {
 object Repo {
     val days = Cached { Api.days() }
     val tasks = Cached { Api.tasks("all").also { codes.neuro.neurosoft.Core.onTasks(it) } }
+    /** Удалённые задачи (последние сверху) — посмотреть, что смахнули, и вернуть. */
+    val removedTasks = Cached { Api.tasks("dismissed").take(60) }
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
     val chat = Cached<ChatState> { Api.chat() }
@@ -85,7 +87,9 @@ sealed interface Route {
     data class Conversation(val id: Long) : Route
     data class Event(val id: Long, val day: String) : Route
     data object Trash : Route
-    data class Chat(val prefill: String? = null) : Route
+    data object Inbox : Route
+    /** context — «event:12», «conversation:5», «day:2026-10-31»: чат открыт с этого экрана, агент сразу видит его. */
+    data class Chat(val prefill: String? = null, val context: String? = null, val contextTitle: String? = null) : Route
     data object Search : Route
     data class Day(val day: String) : Route
     data object Settings : Route

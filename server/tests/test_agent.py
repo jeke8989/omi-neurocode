@@ -299,6 +299,17 @@ def test_agent_life_tools_clarify_cancel_and_gpt(conn, monkeypatch):  # noqa: F8
         "SELECT title FROM agent_steps WHERE run_id = %s ORDER BY id", (res["run_id"],)).fetchall()]
     assert "📅 Смотрю события: сегодня" in titles and f"🗒 Открываю событие #{eid}" in titles
 
+    # «Скопировать»: всё о событии простым текстом (итог, части)
+    from tests.test_voices import Asgi
+    client = Asgi(__import__("gateway.app", fromlist=["app"]).app)
+    shared = client.get(f"/api/share?ref=event:{eid}").json()
+    assert shared["title"] == "🍽 Обед с Кристиной" and "Итог: Договорились поехать в Питер" in shared["text"]
+    assert "Обед — Про поездку" in shared["text"]
+    assert client.get(f"/api/share?ref=conversation:{cid}").json()["title"] == "Обед"
+    assert "Обед с Кристиной" in client.get(f"/api/share?ref=day:{day.isoformat()}").json()["text"]
+    assert client.get("/api/share?ref=event:0").status_code == 404
+    assert client.get("/api/share?ref=../etc").status_code == 400
+
     # уточняющий вопрос: ответ — вопрос владельцу, статус needs_input
     monkeypatch.setattr(llm, "chat", lambda *a, **k: {"content": "", "tool_calls": [{"id": "q", "type": "function",
                         "function": {"name": "ask_user", "arguments": '{"question": "Какой обед: вчера или сегодня?"}'}}]})

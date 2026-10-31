@@ -5,6 +5,10 @@
     <string name="about_footer">Mnemo funciona en tu propio servidor: las grabaciones, transcripciones y el diario se quedan contigo.</string>
     <string name="add">Añadir</string>
     <string name="add_photos">Añadir fotos</string>
+    <string name="agent_asks">pide una aclaración</string>
+    <string name="agent_claude_about">Claude con tu suscripción y acceso a tus datos de Mnemo. Se conecta en ajustes</string>
+    <string name="agent_gpt_about">Un modelo de OpenAI con las mismas herramientas que Mnemo. El modelo se cambia en Modelos</string>
+    <string name="agent_mnemo_about">Conoce tus conversaciones, eventos, personas y tareas, y responde a partir de ellos</string>
     <string name="ago">hace %1$s</string>
     <string name="ai_models">Modelos de IA</string>
     <string name="ai_models_sub">Un modelo por tarea, precios y gasto</string>
@@ -16,6 +20,7 @@
     <string name="ask_anything">Pregunta lo que quieras</string>
     <string name="assistant">Asistente</string>
     <string name="assistant_answer">Respuesta a tu pregunta con el botón</string>
+    <string name="assistant_answer_hide">Ocultar la respuesta</string>
     <string name="audio_keep">Audio de las grabaciones</string>
     <string name="audio_keep_after">Borrar tras la transcripción</string>
     <string name="audio_keep_after_sub">El audio solo queda en el servidor un par de minutos</string>
@@ -50,6 +55,8 @@
     <string name="cd_task_open">Marcar como hecha</string>
     <string name="cd_voice_input">Dictar</string>
     <string name="charging">Cargando</string>
+    <string name="chat_about">Sobre: %1$s</string>
+    <string name="chat_about_drop">No es sobre esto</string>
     <string name="chat_empty_text">El asistente busca en internet, recuerda tus conversaciones, crea tareas y usa integraciones. Las preguntas hechas con el botón del colgante también aparecen aquí.</string>
     <string name="chat_empty_title">Pregunta lo que quieras</string>
     <string name="chat_hint_1">¿De qué hablé esta mañana?</string>
@@ -65,6 +72,8 @@
     <string name="claude_disconnect_q">¿Desconectar Claude?</string>
     <string name="claude_disconnect_text">El token se borrará del servidor. El código y los commits se quedan.</string>
     <string name="claude_intro">El modo Claude es el mismo asistente de Mnemo, pero más listo: funciona con tu suscripción de Claude, ve tu memoria, conversaciones, tareas y personas, y puede buscar en internet. El modo Claude · código cambia la propia app: edita el código de Mnemo, hace commits y, cuando lo pides («publícalo»), lo envía a GitHub; después el servidor y la app se actualizan solos.</string>
+    <string name="claude_mode_assistant">Asistente</string>
+    <string name="claude_mode_code">Código de Mnemo</string>
     <string name="claude_model">Modelo</string>
     <string name="claude_model_default">Predeterminado</string>
     <string name="claude_new_session">Empezar una sesión nueva</string>
@@ -94,7 +103,10 @@
     <string name="control">Control</string>
     <string name="copied">Copiado</string>
     <string name="copy">Copiar</string>
+    <string name="copy_all">Copiar</string>
+    <string name="copy_failed">No se pudo copiar: no hay conexión con el servidor</string>
     <string name="copy_report">Copiar informe</string>
+    <string name="copying">Copiando…</string>
     <string name="data">Datos</string>
     <string name="day_conversations">Conversaciones del día</string>
     <string name="day_feed">Historia del día</string>
@@ -130,6 +142,7 @@
     <string name="diary_settings_footer">Solo entran las fotos ligadas a los momentos del día. Se omiten capturas y documentos.</string>
     <string name="different_people">Son personas distintas</string>
     <string name="disconnected_for">Sin conexión %1$s</string>
+    <string name="discuss_in_chat">Hablar en el chat</string>
     <string name="done_text">%1$s está conectado y grabando. Puedes cerrar la app: la grabación sigue en segundo plano.</string>
     <string name="done_title">Listo</string>
     <string name="dont_know">No lo sé, quitar la etiqueta</string>
@@ -200,6 +213,11 @@
     <string name="howto_two_sub">El último minuto de la conversación se convierte en una nota</string>
     <string name="ignore_voice">Ignorar esta voz</string>
     <string name="ignore_voice_sub">TV, radio, un desconocido: sus frases no entran en resúmenes, tareas ni respuestas del asistente</string>
+    <string name="inbox">Notificaciones</string>
+    <string name="inbox_clear">Borrar notificaciones</string>
+    <string name="inbox_empty_text">Las preguntas sobre tareas, los recordatorios y los resúmenes de la mañana se quedan aquí aunque los descartes</string>
+    <string name="inbox_empty_title">No hay notificaciones</string>
+    <string name="inbox_note">Las notificaciones se guardan solo en este teléfono, las últimas 80.</string>
     <string name="install_by_link">Instalar desde enlace</string>
     <string name="installed_ok">Instalada</string>
     <string name="integrations">Integraciones</string>
@@ -555,6 +573,7 @@
     <string name="tab_tasks">Tareas</string>
     <string name="talk_today">Conversaciones hoy</string>
     <string name="task_accept">Añadir a tareas</string>
+    <string name="task_delete_q">¿Eliminar la tarea?</string>
     <string name="task_deleted">Tarea eliminada</string>
     <string name="task_dismiss">Descartar</string>
     <string name="task_prompt_added">Añadida a tareas</string>
@@ -575,6 +594,8 @@
     <string name="tasks_empty_text">El asistente encuentra tareas en tus conversaciones. También puedes pulsar el botón del colgante y decir «crea una tarea…».</string>
     <string name="tasks_empty_title">No hay tareas pendientes</string>
     <string name="tasks_footer">Las tareas nuevas van a los servicios conectados: Ajustes → Integraciones.</string>
+    <string name="tasks_removed">Eliminadas</string>
+    <string name="tasks_removed_empty">No hay tareas eliminadas.</string>
     <string name="tasks_suggested">Sugeridas</string>
     <string name="tasks_suggested_note">Parece un acuerdo, pero no estoy seguro. ✓ la añade a tareas, ✕ la quita.</string>
     <string name="test_voice">Probar la voz</string>
@@ -610,6 +631,7 @@
     <string name="voice_choice_footer">Las voces de Mnemo son una red neuronal en tu propio servidor: gratis, y el texto no sale de él. Si el servidor no responde, contesta la voz del teléfono.</string>
     <string name="voice_companion">Interlocutor</string>
     <string name="voice_f1">Mnemo — femenina</string>
+    <string name="voice_lost">Se perdió la conexión con el servidor. La respuesta aparecerá en el chat.</string>
     <string name="voice_m1">Mnemo — masculina</string>
     <string name="voice_n">Voz %1$d</string>
     <string name="voice_neural_sub">Voz neuronal, suena natural</string>
@@ -627,6 +649,9 @@
     <string name="voice_server_error">Error del servidor.</string>
     <string name="voice_slow">El servidor tarda en responder. La respuesta estará en el chat.</string>
     <string name="voice_speed">Velocidad de voz</string>
+    <string name="voice_stop">Detener</string>
+    <string name="voice_stopped">Detenido.</string>
+    <string name="voice_stopping">Deteniendo…</string>
     <string name="voice_system">Voz del teléfono</string>
     <string name="voice_system_sub">Funciona sin servidor, suena más simple</string>
     <string name="voice_test">¡Hola! Soy Mnemo. Pulsa el botón del colgante, haz tu pregunta y vuelve a pulsar al terminar.</string>

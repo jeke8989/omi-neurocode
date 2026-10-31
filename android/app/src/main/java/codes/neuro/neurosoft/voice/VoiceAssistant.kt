@@ -61,6 +61,11 @@ class VoiceAssistant(
         val answer: String? = null,
         val level: String? = null,
         val pending: Boolean = false,
+        /** Что агент делает сейчас («🔎 Ищу в интернете…»), пока вы ждёте ответ. */
+        val progress: String? = null,
+        val cancelled: Boolean = false,
+        /** Запуск агента на сервере: долгий ответ потом берём из чата по нему. */
+        val runId: Long? = null,
         val at: Long = 0,
         val ttsReady: Boolean = false,
     )
@@ -88,6 +93,16 @@ class VoiceAssistant(
     // вопрос идёт до второго нажатия: через 90 с — тихий сигнал «я ещё слушаю», через 2 мин — конец
     private val listenWarn = Runnable { synchronized(this) { if (_state.value.phase == Phase.LISTENING) tone(ToneGenerator.TONE_PROP_BEEP2) } }
     private val listenLimit = Runnable { synchronized(this) { if (_state.value.phase == Phase.LISTENING) sendStop() } }
+    // пока агент ищет ответ — тихий «тик» раз в 20 с: слышно, что он ещё работает
+    private val thinkingTick: Runnable = object : Runnable {
+        override fun run() {
+            synchronized(this@VoiceAssistant) {
+                if (_state.value.phase != Phase.THINKING) return
+                tone(ToneGenerator.TONE_PROP_BEEP, 60)
+                main.postDelayed(this, THINKING_TICK_MS)
+            }
+        }
+    }
 
     /** Когда закончился последний озвученный ответ: звук с кулона в это время не пишем (это голос Mnemo). */
     @Volatile var lastSpokeAt = 0L
@@ -139,6 +154,51 @@ class VoiceAssistant(
             Phase.THINKING -> tone(ToneGenerator.TONE_PROP_ACK)
             Phase.IDLE -> start(buffered, ts)
         }
+    }
+
+    /** «Стоп» в приложении: пока слушаем — вопрос отменяется, пока ищем ответ — агент останавливается. */
+    @Synchronized
+    fun cancel() {
+        when (_state.value.phase) {
+            Phase.LISTENING -> {
+                ws?.send(JSONObject().put("type", "cancel").toString())
+                session++
+                ws?.close(1000, null)
+                ws = null
+                pre.clear()
+                clearTimers()
+                tone(ToneGenerator.TONE_PROP_NACK)
+                update { it.copy(phase = Phase.IDLE, progress = null) }
+            }
+            Phase.THINKING -> {
+                val socket = ws
+                if (socket != null && socket.send(JSONObject().put("type", "cancel").toString())) {
+                    update { it.copy(progress = str(R.string.voice_stopping)) }
+                    main.removeCallbacks(watchdog)
+                    main.postDelayed(watchdog, 15_000)
+                } else {
+                    session++
+                    clearTimers()
+                    update { it.copy(phase = Phase.IDLE, progress = null, answer = str(R.string.voice_stopped), cancelled = true) }
+                }
+            }
+            Phase.SPEAKING -> {
+                tts?.stop()
+                stopPlayer()
+                spoken()
+            }
+            Phase.IDLE -> Unit
+        }
+    }
+
+    /** Убрать карточку ответа с главной. */
+    fun dismissAnswer() = update { it.copy(answer = null, question = null, pending = false, progress = null) }
+
+    private fun clearTimers() {
+        main.removeCallbacks(watchdog)
+        main.removeCallbacks(listenWarn)
+        main.removeCallbacks(listenLimit)
+        main.removeCallbacks(thinkingTick)
     }
 
     @Synchronized
@@ -212,6 +272,7 @@ class VoiceAssistant(
         pre.addAll(buffered)
         open = false
         update { State(phase = Phase.LISTENING, at = System.currentTimeMillis(), ttsReady = it.ttsReady) }
+        main.removeCallbacks(thinkingTick)
         tone(ToneGenerator.TONE_PROP_BEEP)
         val url = server.trimEnd('/') + "/ws/ask?device_id=" + URLEncoder.encode(device, "UTF-8")
         val request = try {
@@ -261,24 +322,47 @@ class VoiceAssistant(
                         main.removeCallbacks(listenWarn)
                         main.removeCallbacks(listenLimit)
                         main.removeCallbacks(watchdog)
-                        main.postDelayed(watchdog, 45_000)
-                        update { it.copy(phase = Phase.THINKING) }
+                        // сервер ждёт ответ агента до 4 минут и присылает шаги; молчит дольше — что-то не так
+                        main.postDelayed(watchdog, THINK_LIMIT_MS)
+                        update { it.copy(phase = Phase.THINKING, progress = null, answer = null, cancelled = false) }
                         tone(ToneGenerator.TONE_PROP_ACK)
+                        main.removeCallbacks(thinkingTick)
+                        main.postDelayed(thinkingTick, THINKING_TICK_MS)
+                    }
+                    "question" -> update {
+                        it.copy(question = msg.optString("question").ifBlank { null },
+                            level = msg.optString("level").ifBlank { null },
+                            runId = msg.optLong("run_id").takeIf { id -> id > 0 })
+                    }
+                    "progress" -> {
+                        main.removeCallbacks(watchdog)
+                        main.postDelayed(watchdog, THINK_LIMIT_MS)
+                        update { it.copy(progress = msg.optString("text").ifBlank { null }) }
                     }
                     "answer" -> {
                         main.removeCallbacks(watchdog)
+                        main.removeCallbacks(thinkingTick)
                         val answer = msg.optString("answer").ifBlank { str(R.string.voice_no_answer) }
+                        val cancelled = msg.optBoolean("cancelled")
                         update {
                             it.copy(
-                                question = msg.optString("question").ifBlank { null },
+                                question = msg.optString("question").ifBlank { it.question },
                                 answer = answer,
                                 level = msg.optString("level").ifBlank { null },
                                 pending = msg.optBoolean("pending"),
+                                progress = null,
+                                cancelled = cancelled,
+                                runId = msg.optLong("run_id").takeIf { id -> id > 0 } ?: it.runId,
                             )
                         }
                         webSocket.close(1000, null)
                         ws = null
-                        speak(answer, keepAnswer = true)
+                        if (cancelled) {
+                            tone(ToneGenerator.TONE_PROP_NACK)
+                            update { it.copy(phase = Phase.IDLE) }
+                        } else {
+                            speak(answer, keepAnswer = true)
+                        }
                     }
                     "error" -> fail(msg.optString("message").ifBlank { str(R.string.voice_server_error) }, offline = false)
                 }
@@ -289,9 +373,13 @@ class VoiceAssistant(
             synchronized(this@VoiceAssistant) {
                 if (my != session) return
                 val phase = _state.value.phase
-                if (phase == Phase.LISTENING || phase == Phase.THINKING) {
-                    val auth = response?.code == 401 || response?.code == 403
+                val auth = response?.code == 401 || response?.code == 403
+                if (phase == Phase.LISTENING) {
                     fail(str(if (auth) R.string.voice_auth else R.string.voice_offline), offline = !auth)
+                } else if (phase == Phase.THINKING) {
+                    // вопрос сервер уже получил: агент доработает, ответ будет в чате — переспрашивать не нужно
+                    fail(str(if (auth) R.string.voice_auth else R.string.voice_lost), offline = false)
+                    update { it.copy(pending = !auth) }
                 }
             }
         }
@@ -301,22 +389,21 @@ class VoiceAssistant(
         synchronized(this) {
             val phase = _state.value.phase
             if (phase == Phase.LISTENING || phase == Phase.THINKING) {
-                fail(str(R.string.voice_slow), offline = false)
+                fail(str(if (phase == Phase.THINKING) R.string.voice_lost else R.string.voice_slow), offline = false)
+                if (phase == Phase.THINKING) update { it.copy(pending = true) }
             }
         }
     }
 
     private fun fail(text: String, offline: Boolean) {
-        main.removeCallbacks(watchdog)
-        main.removeCallbacks(listenWarn)
-        main.removeCallbacks(listenLimit)
+        clearTimers()
         session++ // старые ответы этого вопроса больше не нужны
         ws?.cancel()
         ws = null
         pre.clear()
         tone(ToneGenerator.TONE_PROP_NACK)
         if (offline) onOffline(tapTs)
-        update { it.copy(answer = text) }
+        update { it.copy(answer = text, progress = null) }
         speak(text, keepAnswer = true)
     }
 
@@ -398,10 +485,10 @@ class VoiceAssistant(
         update { if (it.phase == Phase.SPEAKING) it.copy(phase = Phase.IDLE) else it }
     }
 
-    private fun tone(type: Int) {
+    private fun tone(type: Int, ms: Int = 120) {
         if (!prefs.earcons || !mayTalk()) return
         try {
-            tones?.startTone(type, 120)
+            tones?.startTone(type, ms)
         } catch (e: RuntimeException) {
             Log.w("Mnemo.Voice", "tone failed", e)
         }
@@ -432,6 +519,9 @@ class VoiceAssistant(
     companion object {
         const val LISTEN_WARN_MS = 90_000L
         const val LISTEN_LIMIT_MS = 120_000L
+        /** Сервер ждёт агента до 4 минут; без вестей дольше — считаем, что связь пропала. */
+        const val THINK_LIMIT_MS = 270_000L
+        const val THINKING_TICK_MS = 20_000L
         /** Хвост после ответа: динамик ещё звучит, а «готово» уже пришло. */
         const val SPEECH_TAIL_MS = 800L
     }

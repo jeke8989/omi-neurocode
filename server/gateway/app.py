@@ -24,8 +24,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_core, assistant, claude_agent, cleanup, config, crypto, db, diary, extensions, geo, i18n,
-                   llm, mnemo_mcp, pairing, people, retention, tts, voices)
+from neuro import (agent_context, agent_core, assistant, claude_agent, cleanup, config, crypto, db, diary, extensions,
+                   geo, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -591,8 +591,9 @@ async def api_tasks(request: Request):
                                 WHERE e.task_id = t.id), '[]'::json) AS exports
                FROM tasks t LEFT JOIN conversations c ON c.id = t.conversation_id
                WHERE (%s = 'all' AND t.status <> 'dismissed' OR t.status = %s)
-               ORDER BY t.created_at DESC LIMIT 300""",
-            (status, status),
+               ORDER BY CASE WHEN %s = 'dismissed' THEN coalesce(t.updated_at, t.created_at) ELSE t.created_at END DESC
+               LIMIT 300""",  # удалённые — сначала последние удалённые
+            (status, status, status),
         )).fetchall()
     return Json({"items": rows})
 
@@ -1006,6 +1007,24 @@ async def api_chat(request: Request):
                 runs[st["run_id"]]["steps"].append(st)
     return Json({"messages": messages, "runs": {str(k): v for k, v in runs.items()},
                  "running": any(r["status"] == "running" for r in runs.values())})
+
+
+async def api_share(request: Request):
+    """«Скопировать»: всё о событии, разговоре или дне простым текстом (итог, люди, части, расшифровка)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    ref = request.query_params.get("ref", "")
+    if not CONTEXT_RE.match(ref):
+        return Json({"error": "ref: event:ID | conversation:ID | day:YYYY-MM-DD"}, status_code=400)
+
+    def build():
+        with db.connect() as conn:
+            return agent_context.share_text(conn, ref, i18n.lang(conn))
+
+    got = await _run_in_thread(build)
+    if got is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"title": got[0], "text": got[1]})
 
 
 async def api_run_cancel(request: Request):
@@ -1678,6 +1697,7 @@ app = Starlette(
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
         Route("/api/runs/{run_id:int}/cancel", api_run_cancel, methods=["POST"]),
+        Route("/api/share", api_share),
         Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
         Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),

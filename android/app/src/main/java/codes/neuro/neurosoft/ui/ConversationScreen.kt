@@ -132,6 +132,8 @@ fun ConversationScreen(id: Long) {
                     MetaPill(Icons.Clock, fmt.time(d.item.startedAt) + "–" + fmt.time(d.item.endedAt))
                     if (d.item.durationSec > 0) MetaPill(Icons.Wave, fmt.duration(d.item.durationSec.toLong()))
                 }
+                ShareActions("conversation:${d.item.id}", d.item.title,
+                    padding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp))
                 // кто участвовал: тап — карточка человека
                 val present = d.people.values.filter { !it.ignored && !it.transient }.sortedByDescending { it.isOwner }
                 if (present.isNotEmpty()) {

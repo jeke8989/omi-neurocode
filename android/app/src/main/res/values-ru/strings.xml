@@ -5,6 +5,10 @@
     <string name="about_footer">Mnemo работает на вашем сервере: записи, расшифровки и дневник хранятся у вас.</string>
     <string name="add">Добавить</string>
     <string name="add_photos">Добавить фото</string>
+    <string name="agent_asks">уточняет</string>
+    <string name="agent_claude_about">Claude по вашей подписке, с доступом к данным Mnemo. Подключается в настройках</string>
+    <string name="agent_gpt_about">Модель OpenAI с теми же инструментами, что у Mnemo. Модель меняется в «Моделях»</string>
+    <string name="agent_mnemo_about">Знает ваши разговоры, события, людей и задачи — отвечает по ним</string>
     <string name="ago">%1$s назад</string>
     <string name="ai_models">Модели ИИ</string>
     <string name="ai_models_sub">Своя модель для каждой задачи, цены и расход</string>
@@ -16,6 +20,7 @@
     <string name="ask_anything">Спросите что угодно</string>
     <string name="assistant">Ассистент</string>
     <string name="assistant_answer">Ответ на вопрос с кнопки</string>
+    <string name="assistant_answer_hide">Скрыть ответ</string>
     <string name="audio_keep">Звук записей</string>
     <string name="audio_keep_after">Удалять после расшифровки</string>
     <string name="audio_keep_after_sub">Звук не хранится на сервере дольше пары минут</string>
@@ -50,6 +55,8 @@
     <string name="cd_task_open">Отметить выполненной</string>
     <string name="cd_voice_input">Сказать голосом</string>
     <string name="charging">Заряжается</string>
+    <string name="chat_about">Об этом: %1$s</string>
+    <string name="chat_about_drop">Не про это</string>
     <string name="chat_empty_text">Ассистент ищет в интернете, помнит ваши разговоры, ставит задачи и пользуется интеграциями. Вопросы с кнопки кулона тоже появляются здесь.</string>
     <string name="chat_empty_title">Спросите что угодно</string>
     <string name="chat_hint_1">О чём я говорил сегодня утром?</string>
@@ -65,6 +72,8 @@
     <string name="claude_disconnect_q">Отключить Claude?</string>
     <string name="claude_disconnect_text">Токен будет удалён с сервера. Код и коммиты останутся.</string>
     <string name="claude_intro">Режим «Claude» — тот же ассистент Mnemo, только умнее: отвечает на вашей подписке Claude, видит память, разговоры, задачи и людей, умеет искать в интернете. Режим «Claude · код» меняет само приложение: правит код Mnemo, коммитит и по вашей просьбе («залей») отправляет в GitHub, дальше сервер и приложение обновятся сами.</string>
+    <string name="claude_mode_assistant">Ассистент</string>
+    <string name="claude_mode_code">Код Mnemo</string>
     <string name="claude_model">Модель</string>
     <string name="claude_model_default">По умолчанию</string>
     <string name="claude_new_session">Начать новую сессию</string>
@@ -94,7 +103,10 @@
     <string name="control">Управление</string>
     <string name="copied">Скопировано</string>
     <string name="copy">Скопировать</string>
+    <string name="copy_all">Скопировать</string>
+    <string name="copy_failed">Не получилось скопировать: нет связи с сервером</string>
     <string name="copy_report">Скопировать отчёт</string>
+    <string name="copying">Копирую…</string>
     <string name="data">Данные</string>
     <string name="day_conversations">Разговоры дня</string>
     <string name="day_feed">Лента дня</string>
@@ -130,6 +142,7 @@
     <string name="diary_settings_footer">В ленту попадают только фото, связанные с событиями дня. Скриншоты и документы пропускаются.</string>
     <string name="different_people">Это разные люди</string>
     <string name="disconnected_for">Без связи %1$s</string>
+    <string name="discuss_in_chat">Обсудить в чате</string>
     <string name="done_text">%1$s подключён и записывает. Приложение можно закрыть: запись продолжится в фоне.</string>
     <string name="done_title">Готово</string>
     <string name="dont_know">Не знаю, снять подпись</string>
@@ -200,6 +213,11 @@
     <string name="howto_two_sub">Последняя минута разговора станет заметкой в памяти</string>
     <string name="ignore_voice">Не учитывать</string>
     <string name="ignore_voice_sub">Телевизор, радио, случайный голос: его фразы не попадают в итоги, задачи и ответы ассистента</string>
+    <string name="inbox">Уведомления</string>
+    <string name="inbox_clear">Очистить уведомления</string>
+    <string name="inbox_empty_text">Здесь остаются вопросы о задачах, напоминания и утренние сводки, даже если смахнуть их в шторке</string>
+    <string name="inbox_empty_title">Уведомлений нет</string>
+    <string name="inbox_note">Уведомления хранятся только на этом телефоне, последние 80.</string>
     <string name="install_by_link">Установить по ссылке</string>
     <string name="installed_ok">Установлено</string>
     <string name="integrations">Интеграции</string>
@@ -555,6 +573,7 @@
     <string name="tab_tasks">Задачи</string>
     <string name="talk_today">Разговоры сегодня</string>
     <string name="task_accept">Принять в задачи</string>
+    <string name="task_delete_q">Удалить задачу?</string>
     <string name="task_deleted">Задача удалена</string>
     <string name="task_dismiss">Убрать</string>
     <string name="task_prompt_added">Добавлено в задачи</string>
@@ -575,6 +594,8 @@
     <string name="tasks_empty_text">Ассистент находит задачи в разговорах. Ещё можно нажать кнопку на кулоне и сказать «создай задачу…».</string>
     <string name="tasks_empty_title">Открытых задач нет</string>
     <string name="tasks_footer">Новые задачи уходят в подключённые сервисы: Настройки → Интеграции.</string>
+    <string name="tasks_removed">Удалённые</string>
+    <string name="tasks_removed_empty">Удалённых задач нет.</string>
     <string name="tasks_suggested">Предложенные</string>
     <string name="tasks_suggested_note">Похоже на договорённость, но я не уверен. ✓ — в задачи, ✕ — убрать.</string>
     <string name="test_voice">Проверить голос</string>
@@ -610,6 +631,7 @@
     <string name="voice_choice_footer">Голоса Mnemo — нейросеть на вашем сервере: бесплатно, текст никуда не уходит. Если сервер недоступен, ответ прозвучит голосом телефона.</string>
     <string name="voice_companion">Собеседник</string>
     <string name="voice_f1">Mnemo — женский</string>
+    <string name="voice_lost">Связь с сервером пропала. Ответ появится в чате.</string>
     <string name="voice_m1">Mnemo — мужской</string>
     <string name="voice_n">Голос %1$d</string>
     <string name="voice_neural_sub">Нейроголос, звучит естественно</string>
@@ -627,6 +649,9 @@
     <string name="voice_server_error">Ошибка на сервере.</string>
     <string name="voice_slow">Сервер долго не отвечает. Ответ будет в чате.</string>
     <string name="voice_speed">Скорость голоса</string>
+    <string name="voice_stop">Стоп</string>
+    <string name="voice_stopped">Остановлено.</string>
+    <string name="voice_stopping">Останавливаю…</string>
     <string name="voice_system">Голос телефона</string>
     <string name="voice_system_sub">Работает без сервера, звучит проще</string>
     <string name="voice_test">Привет! Я Mnemo. Нажмите кнопку на кулоне, задайте вопрос и нажмите ещё раз, когда договорите.</string>

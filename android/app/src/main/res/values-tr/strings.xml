@@ -5,6 +5,10 @@
     <string name="about_footer">Mnemo kendi sunucunuzda çalışır: kayıtlar, dökümler ve günlük sizde kalır.</string>
     <string name="add">Ekle</string>
     <string name="add_photos">Fotoğraf ekle</string>
+    <string name="agent_asks">netleştirmek istiyor</string>
+    <string name="agent_claude_about">Aboneliğinizle Claude, Mnemo verilerinize erişimle. Ayarlardan bağlanır</string>
+    <string name="agent_gpt_about">Mnemo ile aynı araçlara sahip bir OpenAI modeli. Model, Modeller bölümünden değişir</string>
+    <string name="agent_mnemo_about">Konuşmalarınızı, etkinliklerinizi, kişileri ve görevleri bilir; cevaplarını bunlara dayandırır</string>
     <string name="ago">%1$s önce</string>
     <string name="ai_models">Yapay zekâ modelleri</string>
     <string name="ai_models_sub">Her görev için model, fiyatlar ve harcama</string>
@@ -16,6 +20,7 @@
     <string name="ask_anything">Bir şey sorun</string>
     <string name="assistant">Asistan</string>
     <string name="assistant_answer">Düğme sorusunun cevabı</string>
+    <string name="assistant_answer_hide">Cevabı gizle</string>
     <string name="audio_keep">Kayıt sesi</string>
     <string name="audio_keep_after">Yazıya döküldükten sonra sil</string>
     <string name="audio_keep_after_sub">Ses sunucuda yalnızca birkaç dakika kalır</string>
@@ -50,6 +55,8 @@
     <string name="cd_task_open">Tamamlandı olarak işaretle</string>
     <string name="cd_voice_input">Sesle söyle</string>
     <string name="charging">Şarj oluyor</string>
+    <string name="chat_about">Konu: %1$s</string>
+    <string name="chat_about_drop">Bununla ilgili değil</string>
     <string name="chat_empty_text">Asistan internette arar, konuşmalarınızı hatırlar, görev oluşturur ve entegrasyonları kullanır. Kolye düğmesiyle sorulan sorular da burada görünür.</string>
     <string name="chat_empty_title">Bir şey sorun</string>
     <string name="chat_hint_1">Bu sabah ne konuştum?</string>
@@ -65,6 +72,8 @@
     <string name="claude_disconnect_q">Claude bağlantısı kesilsin mi?</string>
     <string name="claude_disconnect_text">Token sunucudan silinecek. Kod ve commit\'ler kalır.</string>
     <string name="claude_intro">Claude modu aynı Mnemo asistanıdır, sadece daha akıllı: Claude aboneliğinizle çalışır, hafızanızı, konuşmalarınızı, görevlerinizi ve kişileri görür, internette arama yapabilir. Claude · kod modu uygulamanın kendisini değiştirir: Mnemo kodunu düzenler, commit eder ve siz isteyince («yayınla») GitHub\'a gönderir; ardından sunucu ve uygulama kendiliğinden güncellenir.</string>
+    <string name="claude_mode_assistant">Asistan</string>
+    <string name="claude_mode_code">Mnemo kodu</string>
     <string name="claude_model">Model</string>
     <string name="claude_model_default">Varsayılan</string>
     <string name="claude_new_session">Yeni oturum başlat</string>
@@ -94,7 +103,10 @@
     <string name="control">Kontrol</string>
     <string name="copied">Kopyalandı</string>
     <string name="copy">Kopyala</string>
+    <string name="copy_all">Kopyala</string>
+    <string name="copy_failed">Kopyalanamadı: sunucuyla bağlantı yok</string>
     <string name="copy_report">Raporu kopyala</string>
+    <string name="copying">Kopyalanıyor…</string>
     <string name="data">Veriler</string>
     <string name="day_conversations">Günün konuşmaları</string>
     <string name="day_feed">Günün hikâyesi</string>
@@ -130,6 +142,7 @@
     <string name="diary_settings_footer">Yalnızca günün olaylarıyla ilgili fotoğraflar eklenir. Ekran görüntüleri ve belgeler atlanır.</string>
     <string name="different_people">Farklı kişiler</string>
     <string name="disconnected_for">%1$s bağlantısız</string>
+    <string name="discuss_in_chat">Sohbette konuş</string>
     <string name="done_text">%1$s bağlı ve kaydediyor. Uygulamayı kapatabilirsiniz; kayıt arka planda sürer.</string>
     <string name="done_title">Hazır</string>
     <string name="dont_know">Bilmiyorum, etiketi kaldır</string>
@@ -200,6 +213,11 @@
     <string name="howto_two_sub">Konuşmanın son dakikası hafızada bir nota dönüşür</string>
     <string name="ignore_voice">Bu sesi yok say</string>
     <string name="ignore_voice_sub">TV, radyo, yabancı biri: cümleleri özetlere, görevlere ve asistan cevaplarına girmez</string>
+    <string name="inbox">Bildirimler</string>
+    <string name="inbox_clear">Bildirimleri temizle</string>
+    <string name="inbox_empty_text">Görev soruları, hatırlatmalar ve sabah özetleri, bildirim panelinden kaydırsanız bile burada kalır</string>
+    <string name="inbox_empty_title">Bildirim yok</string>
+    <string name="inbox_note">Bildirimler yalnızca bu telefonda saklanır, son 80 tanesi.</string>
     <string name="install_by_link">Bağlantıdan yükle</string>
     <string name="installed_ok">Yüklendi</string>
     <string name="integrations">Entegrasyonlar</string>
@@ -555,6 +573,7 @@
     <string name="tab_tasks">Görevler</string>
     <string name="talk_today">Bugünkü konuşmalar</string>
     <string name="task_accept">Görevlere ekle</string>
+    <string name="task_delete_q">Görev silinsin mi?</string>
     <string name="task_deleted">Görev silindi</string>
     <string name="task_dismiss">Kaldır</string>
     <string name="task_prompt_added">Görevlere eklendi</string>
@@ -575,6 +594,8 @@
     <string name="tasks_empty_text">Asistan görevleri konuşmalarınızda bulur. Kolye düğmesine basıp “bir görev oluştur…” da diyebilirsiniz.</string>
     <string name="tasks_empty_title">Açık görev yok</string>
     <string name="tasks_footer">Yeni görevler bağlı servislere gider: Ayarlar → Entegrasyonlar.</string>
+    <string name="tasks_removed">Silinenler</string>
+    <string name="tasks_removed_empty">Silinmiş görev yok.</string>
     <string name="tasks_suggested">Önerilenler</string>
     <string name="tasks_suggested_note">Bir anlaşmaya benziyor ama emin değilim. ✓ görevlere ekler, ✕ kaldırır.</string>
     <string name="test_voice">Sesi dene</string>
@@ -610,6 +631,7 @@
     <string name="voice_choice_footer">Mnemo sesleri kendi sunucunuzdaki bir sinir ağıdır: ücretsiz, metin dışarı çıkmaz. Sunucuya ulaşılamazsa telefonun sesi yanıtlar.</string>
     <string name="voice_companion">Muhatap</string>
     <string name="voice_f1">Mnemo — kadın</string>
+    <string name="voice_lost">Sunucuyla bağlantı koptu. Cevap sohbette görünecek.</string>
     <string name="voice_m1">Mnemo — erkek</string>
     <string name="voice_n">Ses %1$d</string>
     <string name="voice_neural_sub">Doğal sesli sinir ağı sesi</string>
@@ -627,6 +649,9 @@
     <string name="voice_server_error">Sunucu hatası.</string>
     <string name="voice_slow">Sunucu yavaş yanıt veriyor. Cevap sohbette olacak.</string>
     <string name="voice_speed">Ses hızı</string>
+    <string name="voice_stop">Durdur</string>
+    <string name="voice_stopped">Durduruldu.</string>
+    <string name="voice_stopping">Durduruluyor…</string>
     <string name="voice_system">Telefon sesi</string>
     <string name="voice_system_sub">Sunucusuz çalışır, daha sade duyulur</string>
     <string name="voice_test">Merhaba! Ben Mnemo. Kolye düğmesine basın, sorunuzu sorun ve bitince tekrar basın.</string>

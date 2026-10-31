@@ -14,8 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -48,6 +51,10 @@ fun TasksTab() {
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
     var showDone by rememberSaveable { mutableStateOf(false) }
+    var showRemoved by rememberSaveable { mutableStateOf(false) }
+    // смахнутая задача удаляется только после подтверждения
+    var confirm by remember { mutableStateOf<TaskItem?>(null) }
+    val removedRes by Repo.removedTasks.state.collectAsState()
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -74,6 +81,7 @@ fun TasksTab() {
             } catch (e: Exception) {
                 Repo.tasks.refresh()
             }
+            if (showRemoved) Repo.removedTasks.refresh()
         }
     }
 
@@ -88,6 +96,7 @@ fun TasksTab() {
             } catch (e: Exception) {
                 Repo.tasks.refresh()
             }
+            Repo.removedTasks.edit { list -> list.filter { it.id != t.id } }
         }
     }
 
@@ -130,13 +139,13 @@ fun TasksTab() {
                         }
                     }
                     itemsIndexed(open, key = { _, t -> t.id }) { i, t ->
-                        Grouped(i, open.size, inset = 50.dp) { SwipeToDelete({ delete(t) }) { TaskRow(t, { toggle(t) }) } }
+                        Grouped(i, open.size, inset = 50.dp) { SwipeToDelete({ confirm = t }) { TaskRow(t, { toggle(t) }) } }
                     }
                     if (suggested.isNotEmpty()) {
                         item(key = "suggested-title") { SectionTitle(stringResource(R.string.tasks_suggested)) }
                         itemsIndexed(suggested, key = { _, t -> "s" + t.id }) { i, t ->
                             Grouped(i, suggested.size, inset = 16.dp) {
-                                SwipeToDelete({ delete(t) }) { SuggestedTaskRow(t, onAnswer = { accept ->
+                                SwipeToDelete({ confirm = t }) { SuggestedTaskRow(t, onAnswer = { accept ->
                                     val next = if (accept) "open" else "dismissed"
                                     Repo.tasks.edit { l -> if (accept) l.map { if (it.id == t.id) it.copy(status = next) else it }
                                         else l.filter { it.id != t.id } }
@@ -167,8 +176,34 @@ fun TasksTab() {
                             val shown = done.take(50)
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
                                 Grouped(i, shown.size, inset = 50.dp) {
-                                    SwipeToDelete({ delete(t) }) { TaskRow(t, { toggle(t) }) }
+                                    SwipeToDelete({ confirm = t }) { TaskRow(t, { toggle(t) }) }
                                 }
+                            }
+                        }
+                    }
+                    // удалённые: видно, что смахнули, и можно вернуть
+                    item(key = "removed-title") {
+                        SectionTitle(stringResource(R.string.tasks_removed), Modifier.quietTap {
+                            showRemoved = !showRemoved
+                            if (showRemoved) scope.launch { Repo.removedTasks.refresh() }
+                        }) {
+                            Icon(if (showRemoved) Icons.ChevronDown else Icons.Chevron, null, tint = Mn.c.graphite,
+                                modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    if (showRemoved) {
+                        val gone = removedRes.data
+                        when {
+                            gone == null && removedRes.error != null -> item(key = "removed-error") {
+                                ErrorBlock(removedRes.error, { scope.launch { Repo.removedTasks.refresh() } })
+                            }
+                            gone == null -> item(key = "removed-loading") { LoadingBlock() }
+                            gone.isEmpty() -> item(key = "removed-empty") {
+                                Txt(stringResource(R.string.tasks_removed_empty), T.caption, Mn.c.graphite,
+                                    Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
+                            }
+                            else -> itemsIndexed(gone, key = { _, t -> "r" + t.id }) { i, t ->
+                                Grouped(i, gone.size, inset = 16.dp) { RemovedTaskRow(t) { restore(t) } }
                             }
                         }
                     }
@@ -178,6 +213,25 @@ fun TasksTab() {
                     }
                 }
             }
+        }
+        confirm?.let { t ->
+            AlertDialog(
+                onDismissRequest = { confirm = null },
+                containerColor = Mn.c.paper,
+                title = { Text(stringResource(R.string.task_delete_q), style = T.section, color = Mn.c.ink) },
+                text = { Text(t.text, style = T.body, color = Mn.c.graphite, maxLines = 4) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirm = null
+                        delete(t)
+                    }) { Text(stringResource(R.string.delete), color = Mn.c.red, style = T.bodyStrong) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirm = null }) {
+                        Text(stringResource(R.string.cancel), color = Mn.c.ink, style = T.bodyStrong)
+                    }
+                },
+            )
         }
         // «Задача удалена · Вернуть»
         AnimatedVisibility(removed != null, Modifier.align(Alignment.BottomCenter),
@@ -199,7 +253,8 @@ fun TasksTab() {
 }
 
 /**
- * Свайп в сторону — удалить: под строкой проступает красная корзина, на пороге — лёгкая отдача.
+ * Свайп влево — удалить: под строкой проступает красная корзина, на пороге — лёгкая отдача, затем вопрос
+ * «Удалить задачу?» (строка возвращается на место). Вправо не смахивается — случайно не удалить.
  * Для TalkBack то же действие доступно как «Удалить задачу».
  */
 @Composable
@@ -208,18 +263,17 @@ fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit) {
     val c = Mn.c
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { v ->
-            if (v != SwipeToDismissBoxValue.Settled) {
-                onDelete()
-                true
-            } else false
+            if (v == SwipeToDismissBoxValue.EndToStart) onDelete()
+            false  // строка возвращается: удаляем только после подтверждения
         },
-        positionalThreshold = { it * 0.33f },
+        positionalThreshold = { it * 0.4f },
     )
     val armed = state.targetValue != SwipeToDismissBoxValue.Settled
     LaunchedEffect(armed) { if (armed) haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
     val label = stringResource(R.string.cd_delete_task)
     SwipeToDismissBox(
         state = state,
+        enableDismissFromStartToEnd = false,
         modifier = Modifier.semantics {
             customActions = listOf(CustomAccessibilityAction(label) { onDelete(); true })
         },
@@ -343,5 +397,21 @@ private fun SuggestedTaskRow(t: TaskItem, onAnswer: (Boolean) -> Unit) {
         Spacer(Modifier.width(6.dp))
         IconCircle(Icons.Close, stringResource(R.string.task_dismiss), { onAnswer(false) }, size = 38.dp,
             background = c.raised, tint = c.graphite)
+    }
+}
+
+
+/** Удалённая задача: текст зачёркнут, рядом «Вернуть». */
+@Composable
+private fun RemovedTaskRow(t: TaskItem, onRestore: () -> Unit) {
+    val c = Mn.c
+    Row(Modifier.fillMaxWidth().background(c.paper).padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Txt(t.text, T.body.copy(textDecoration = TextDecoration.LineThrough), c.graphite, maxLines = 2)
+            t.conversationTitle?.takeIf { it.isNotBlank() }?.let { Txt(it, T.caption, c.faint, maxLines = 1) }
+        }
+        Txt(stringResource(R.string.trash_restore), T.smallStrong, c.lens, maxLines = 1,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp)).quietTap(onRestore).padding(horizontal = 10.dp, vertical = 8.dp))
     }
 }
