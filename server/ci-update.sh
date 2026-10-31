@@ -15,6 +15,15 @@ main() {
   local DIR BRANCH OLD NEW BASE changed services f s
   DIR="$(cd "$(dirname "$0")/.." && pwd)"
   BRANCH="${MNEMO_BRANCH:-main}"
+  rolled=""
+
+  # ssh ... status — только состояние сервера (для CI после обновления), ничего не меняет
+  if [ "${SSH_ORIGINAL_COMMAND:-}" = "status" ]; then
+    cd "$DIR/server"
+    PORT=$(grep -E '^GATEWAY_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2); PORT="${PORT:-8090}"
+    diag
+    return 0
+  fi
 
   cd "$DIR"
   OLD=$(git rev-parse HEAD)
@@ -54,8 +63,10 @@ main() {
   done <<< "$changed"
   say "Пересобираю: ${services:- ничего (код образов не менялся)}"
 
+  tidy
   for s in $services; do
     check_space "$s"
+    [ "$s" = gateway ] && keep_prev "$s"  # прошлую версию держим только для gateway: без него нет связи, а места мало
     docker compose build -q "$s"
     if [ "$s" = gateway ] || [ "$s" = claude ]; then wait_claude; fi
     docker compose up -d --no-deps "$s"
@@ -67,20 +78,101 @@ main() {
   docker compose up -d --remove-orphans
   tidy
 
-  local ok=0
-  for _ in $(seq 1 45); do
-    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then ok=1; break; fi
-    sleep 2
-  done
   docker compose ps --format 'table {{.Service}}\t{{.Status}}'
-  if [ "$ok" != 1 ]; then
-    # в аннотацию — только состояния сервисов и названия исключений, не сами логи (логи CI публичные)
-    echo "::error title=Gateway не ответил::$(docker compose ps --format '{{.Service}}: {{.Status}}' | tr '\n' ';') ошибки: $(docker compose logs gateway --tail 200 2>&1 | grep -oE '[A-Za-z]+(Error|Exception)' | sort -u | tr '\n' ' ')"
+  if ! healthy 150; then
+    # в аннотации — только состояния, ресурсы и названия ошибок, не сами логи (логи CI публичные)
+    echo "::error title=Gateway не ответил::после обновления сервер не отвечает — откатываю"
+    diag
+    if [ -n "$rolled" ]; then
+      rollback
+      if healthy 120; then
+        echo "::error title=Откат::новая версия не запустилась, сервер работает на прошлой версии"
+      else
+        echo "::error title=Откат не помог::сервер не отвечает и на прошлой версии"
+        diag
+      fi
+    fi
     echo "Gateway не ответил. Логи: docker compose logs gateway --tail 100"
     exit 1
   fi
+  drop_prev
   echo "$NEW" > .deployed
   say "Готово: $(curl -fsS "http://127.0.0.1:${PORT}/health/full" 2>/dev/null || echo '?'), свободно $(free_mb) МБ"
+}
+
+# обновление прервалось на середине (например, не собрался следующий сервис), а уже обновлённые не
+# поднялись — вернуть их прошлую версию, чтобы сервер не остался лежать
+on_exit() {
+  local rc=$?
+  if [ "$rc" != 0 ] && [ -n "${rolled:-}" ] && [ "${rolled_back:-0}" = 0 ] && ! healthy 60; then
+    echo "::error title=Откат::обновление прервалось, сервер не отвечает — возвращаю прошлую версию"
+    rollback
+    healthy 120 && echo "::notice title=Откат::сервер работает на прошлой версии"
+  fi
+  return 0
+}
+trap on_exit EXIT
+
+# сервер отвечает (ждём до N секунд)
+healthy() {
+  local i
+  for i in $(seq 1 $(( $1 / 3 ))); do
+    if curl -fsS -m 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then return 0; fi
+    sleep 3
+  done
+  return 1
+}
+
+# перед сборкой запомнить работающий образ (имя:prev), чтобы откатиться, если новая версия не поднимется
+keep_prev() {
+  local cid img id
+  cid=$(docker compose ps -q "$1" 2>/dev/null | head -1 || true)
+  [ -n "$cid" ] || return 0
+  img=$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null || true)
+  id=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true)
+  img="${img%%:*}"
+  if [ -n "$img" ] && [ -n "$id" ] && docker tag "$id" "$img:prev" 2>/dev/null; then
+    rolled="$rolled $1=$img"
+  fi
+}
+
+rollback() {
+  local pair s img
+  rolled_back=1
+  for pair in $rolled; do
+    s="${pair%%=*}"; img="${pair#*=}"
+    say "Откат $s на прошлую версию"
+    docker tag "$img:prev" "$img:latest" 2>/dev/null || continue
+    docker compose up -d --no-deps --no-build "$s" || true
+  done
+}
+
+drop_prev() {
+  local pair
+  for pair in $rolled; do docker rmi "${pair#*=}:prev" >/dev/null 2>&1 || true; done
+  tidy
+}
+
+# состояние сервера строками ::notice:: — без логов и секретов
+diag() {
+  trap - ERR
+  local ps cs ex mem
+  ps=$(docker compose ps -a --format '{{.Service}}: {{.Status}}' 2>/dev/null | tr '\n' ';' || true)
+  cs=$(for c in $(docker compose ps -aq 2>/dev/null || true); do
+         docker inspect -f '{{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$c" 2>/dev/null || true
+       done | tr '\n' ';')
+  ex=$(for s in gateway stt agent db; do
+         printf '%s: %s; ' "$s" "$(docker compose logs "$s" --tail 300 2>&1 \
+           | grep -oE '[A-Za-z]+(Error|Exception)|No space left on device|Illegal instruction|out of memory|Killed|PANIC' \
+           | sort | uniq -c | sort -rn | head -5 | awk '{print $2"x"$1}' | tr '\n' ' ' || true)"
+       done)
+  mem=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo '?')
+  echo "::notice title=Сервисы::$ps"
+  echo "::notice title=Контейнеры::$cs"
+  echo "::notice title=Ресурсы::диск свободно $(free_mb) МБ из $(df -Pm / | awk 'NR==2{print $2}') МБ, память доступно ${mem} МБ"
+  echo "::notice title=Ошибки в логах::$ex"
+  echo "::notice title=Health::$(curl -sS -m 5 "http://127.0.0.1:${PORT:-8090}/health/full" 2>&1 | head -c 400 || true)"
+  trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 
 say() { printf '\n==> %s\n' "$*"; }

@@ -106,3 +106,11 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
             "root@$HOST" update
+      - name: Server status
+        if: always()
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+        # состояние сервисов, диска и памяти — строками-аннотациями (без логов и секретов)
+        run: |
+          [ -f ~/.ssh/deploy ] || exit 0
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "root@$HOST" status || true

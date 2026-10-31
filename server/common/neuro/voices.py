@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import wave
@@ -28,7 +29,7 @@ from urllib.parse import quote
 import numpy as np
 import requests
 
-from . import config
+from . import config, safeload
 from .audio import SAMPLE_RATE
 
 log = logging.getLogger("neuro.voices")
@@ -41,6 +42,8 @@ MODEL_URL = config.env(
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
     + quote(SPEAKER_MODEL + ".onnx"))
 MODEL_DIR = Path(config.env("SPEAKER_MODEL_DIR", "/models/speakers"))
+MIN_DISK_MB = int(config.env("SPEAKER_MIN_DISK_MB", "300"))  # модель ~80 МБ — с запасом
+MIN_MEM_MB = int(config.env("SPEAKER_MIN_MEM_MB", "500"))
 VOICE_DIR = Path(config.env("VOICE_DIR", "/data/voices"))
 BACKEND = config.env("SPEAKER_BACKEND", "wespeaker")  # wespeaker | spectral
 
@@ -123,6 +126,9 @@ class _WeSpeaker:
         import onnxruntime as ort  # noqa: PLC0415 — тяжёлый импорт только в STT
 
         path = MODEL_DIR / (SPEAKER_MODEL + ".onnx")
+        short = safeload.shortage(MODEL_DIR, 50 if path.exists() else MIN_DISK_MB, MIN_MEM_MB)
+        if short:
+            raise RuntimeError(short)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             log.info("downloading speaker model %s", MODEL_URL)
@@ -133,6 +139,11 @@ class _WeSpeaker:
                     for block in r.iter_content(1 << 20):
                         f.write(block)
             tmp.rename(path)
+        if os.environ.get("NEURO_PROBE") != "1":
+            # сначала пробный запуск в отдельном процессе: не подошла модель — падает проба, а не расшифровка
+            ok, why = safeload.probe("from neuro import voices; voices._probe_body()", timeout=240)
+            if not ok:
+                raise ProbeFailed(f"speaker model probe failed: {why}")
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = int(config.env("SPEAKER_THREADS", "2"))
         self.session = ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
@@ -142,6 +153,18 @@ class _WeSpeaker:
         feats = fbank(pcm16.astype(np.float32))  # модель ждёт сэмплы в масштабе int16
         out = self.session.run(None, {self.input: feats[None]})[0][0]
         return out / (np.linalg.norm(out) + 1e-9)
+
+
+class ProbeFailed(RuntimeError):
+    pass
+
+
+def _probe_body():
+    """Выполняется в отдельном процессе: загрузить модель и снять отпечаток с 3 секунд шума."""
+    m = _WeSpeaker()
+    v = m.embed((np.random.default_rng(1).standard_normal(48000) * 3000).astype(np.int16))
+    if not np.isfinite(v).all():
+        raise SystemExit(3)
 
 
 class _Spectral:
@@ -164,6 +187,7 @@ class _Spectral:
 _lock = threading.Lock()
 _model = None
 _failed_at = 0.0
+_retry_sec = 600.0
 
 
 class Unavailable(RuntimeError):
@@ -173,19 +197,21 @@ class Unavailable(RuntimeError):
 def model():
     """Модель отпечатков (загружается один раз). Отпечатки разных моделей несравнимы, поэтому
     при ошибке загрузки не подменяем модель, а пробуем снова через 10 минут."""
-    global _model, _failed_at
+    global _model, _failed_at, _retry_sec
     if _model is not None:
         return _model
     if not _lock.acquire(blocking=False):
         raise Unavailable("speaker model is loading")  # качается в фоне — этот кусок без подписей
     try:
         if _model is None:
-            if _failed_at and time.monotonic() - _failed_at < 600:
+            if _failed_at and time.monotonic() - _failed_at < _retry_sec:
                 raise Unavailable("speaker model is not loaded yet")
             try:
                 _model = _WeSpeaker() if BACKEND == "wespeaker" else _Spectral()
             except Exception as exc:  # noqa: BLE001
                 _failed_at = time.monotonic()
+                # модель не подходит серверу — пробуем снова через 6 часов, а не каждые 10 минут
+                _retry_sec = 6 * 3600.0 if isinstance(exc, ProbeFailed) else 600.0
                 log.exception("speaker model unavailable, voices are not recognized for now")
                 raise Unavailable(str(exc)) from exc
         return _model

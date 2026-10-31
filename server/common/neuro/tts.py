@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import os
 import tarfile
 import threading
 import time
@@ -20,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import requests
 
-from . import config
+from . import config, safeload
 
 log = logging.getLogger("neuro.tts")
 
@@ -37,6 +38,9 @@ VOICES = {"f1": 0, "m1": 5}
 DEFAULT_VOICE = "f1"
 LANGS = {"ru", "en", "tr", "es", "de", "fr", "it", "pt", "pl", "uk"}
 MAX_CHARS = 1200
+MIN_DISK_MB = int(config.env("TTS_MIN_DISK_MB", "600"))   # скачать и распаковать модель (~260 МБ) с запасом
+MIN_MEM_MB = int(config.env("TTS_MIN_MEM_MB", "700"))     # модель в памяти — около 300 МБ, оставляем соседям
+WARMUP_DELAY = float(config.env("TTS_WARMUP_DELAY", "45"))  # сначала сервер поднимается, потом голос
 
 _lock = threading.Lock()       # модель одна, генерация по очереди
 _load_lock = threading.Lock()
@@ -68,48 +72,82 @@ def _download():
     return target
 
 
+def _create():
+    import sherpa_onnx  # noqa: PLC0415 — тяжёлый импорт только когда нужен голос
+
+    d = MODEL_DIR / MODEL_NAME
+    cfg = sherpa_onnx.OfflineTtsConfig(
+        model=sherpa_onnx.OfflineTtsModelConfig(
+            supertonic=sherpa_onnx.OfflineTtsSupertonicModelConfig(
+                duration_predictor=str(d / "duration_predictor.int8.onnx"),
+                text_encoder=str(d / "text_encoder.int8.onnx"),
+                vector_estimator=str(d / "vector_estimator.int8.onnx"),
+                vocoder=str(d / "vocoder.int8.onnx"),
+                tts_json=str(d / "tts.json"),
+                unicode_indexer=str(d / "unicode_indexer.bin"),
+                voice_style=str(d / "voice.bin"),
+            ),
+            num_threads=THREADS,
+            provider="cpu",
+        ),
+    )
+    if not cfg.validate():
+        raise RuntimeError("bad TTS config")
+    return sherpa_onnx.OfflineTts(cfg)
+
+
+def _probe_body():
+    """Выполняется в отдельном процессе: загрузить модель и сказать короткую фразу."""
+    import sherpa_onnx  # noqa: PLC0415
+
+    gen = sherpa_onnx.GenerationConfig()
+    gen.sid = VOICES[DEFAULT_VOICE]
+    gen.num_steps = 2
+    gen.extra["lang"] = "ru"
+    audio = _create().generate("Проверка голоса.", gen)
+    if not len(audio.samples):
+        raise SystemExit(3)
+
+
+_retry_sec = 600.0
+
+
 def engine():
-    """Модель загружается один раз; при ошибке — повтор не раньше чем через 10 минут (а ответ — системным голосом)."""
-    global _engine, _failed_at
+    """Модель загружается один раз, после пробного запуска в отдельном процессе (safeload): если она не
+    подходит серверу, падает проба, а не весь сервер. Пока голоса нет — ответы звучат голосом телефона."""
+    global _engine, _failed_at, _retry_sec
     if _engine is not None:
         return _engine
     with _load_lock:
         if _engine is not None:
             return _engine
-        if _failed_at and time.monotonic() - _failed_at < 600:
-            raise Unavailable("tts model is not available yet")
+        if _failed_at and time.monotonic() - _failed_at < _retry_sec:
+            raise Unavailable("tts model is not available")
+        _retry_sec = 600.0  # сеть недоступна и т. п. — повтор через 10 минут
         try:
-            import sherpa_onnx  # noqa: PLC0415 — тяжёлый импорт только когда нужен голос
-
-            d = _download()
-            cfg = sherpa_onnx.OfflineTtsConfig(
-                model=sherpa_onnx.OfflineTtsModelConfig(
-                    supertonic=sherpa_onnx.OfflineTtsSupertonicModelConfig(
-                        duration_predictor=str(d / "duration_predictor.int8.onnx"),
-                        text_encoder=str(d / "text_encoder.int8.onnx"),
-                        vector_estimator=str(d / "vector_estimator.int8.onnx"),
-                        vocoder=str(d / "vocoder.int8.onnx"),
-                        tts_json=str(d / "tts.json"),
-                        unicode_indexer=str(d / "unicode_indexer.bin"),
-                        voice_style=str(d / "voice.bin"),
-                    ),
-                    num_threads=THREADS,
-                    provider="cpu",
-                ),
-            )
-            if not cfg.validate():
-                raise RuntimeError("bad TTS config")
-            _engine = sherpa_onnx.OfflineTts(cfg)
+            downloaded = (MODEL_DIR / MODEL_NAME / "tts.json").exists()
+            short = safeload.shortage(MODEL_DIR, 150 if downloaded else MIN_DISK_MB, MIN_MEM_MB)
+            if short:
+                _retry_sec = 1800.0
+                raise RuntimeError(short)
+            _download()
+            if os.environ.get("NEURO_PROBE") != "1":
+                ok, why = safeload.probe("from neuro import tts; tts._probe_body()", timeout=300)
+                if not ok:
+                    _retry_sec = 6 * 3600.0  # модель не подходит этому серверу — не мучаем его каждые 10 минут
+                    raise RuntimeError(f"TTS probe failed: {why}")
+            _engine = _create()
             log.info("TTS ready: %s", MODEL_NAME)
             return _engine
         except Exception as exc:  # noqa: BLE001
             _failed_at = time.monotonic()
-            log.exception("TTS model unavailable")
+            log.warning("TTS unavailable, answers use the phone voice: %s", exc)
             raise Unavailable(str(exc)) from exc
 
 
 def warm_up():
     def run():
+        time.sleep(WARMUP_DELAY)
         try:
             engine()
         except Unavailable:

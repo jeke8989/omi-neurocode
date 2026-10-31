@@ -2,6 +2,13 @@
 # Отдельный проект docker compose — не трогает Jarvis и другие контейнеры на сервере.
 name: neurosoft
 
+# логи контейнеров — не больше 3 × 20 МБ на сервис (иначе за месяцы записи они съедают диск)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 x-app-env: &app-env
   DATABASE_URL: postgresql://neuro:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/neuro
   AUDIO_DIR: /data/audio
@@ -10,6 +17,7 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: neuro
       POSTGRES_USER: neuro
@@ -27,6 +35,7 @@ services:
       context: .
       dockerfile: gateway/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment: *app-env
     ports:
@@ -46,12 +55,14 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 180s   # первый запуск после обновления (перенос базы) — не перезапускать раньше времени
 
   stt:
     build:
       context: .
       dockerfile: stt/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment: *app-env
     volumes:
@@ -67,6 +78,7 @@ services:
       context: .
       dockerfile: agent/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment: *app-env
     volumes:
@@ -83,6 +95,7 @@ services:
       context: .
       dockerfile: claude/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     environment:
       TZ: ${TZ:-Europe/Moscow}
       CLAUDE_REPO_URL: ${CLAUDE_REPO_URL:-https://github.com/jeke8989/omi-neurocode.git}
