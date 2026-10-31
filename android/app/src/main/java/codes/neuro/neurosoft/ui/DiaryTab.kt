@@ -399,10 +399,6 @@ fun DayScreen(day: String) {
                 }
                 convs.forEachIndexed { i, conv -> Grouped(i, convs.size) { ConversationRow(conv, fmt) } }
             }
-            if (d != null) {
-                Txt(stringResource(R.string.diary_footer), T.caption, c.faint,
-                    Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 20.dp), align = TextAlign.Center)
-            }
         }
     }
 }

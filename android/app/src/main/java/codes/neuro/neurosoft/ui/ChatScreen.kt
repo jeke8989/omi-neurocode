@@ -213,11 +213,6 @@ private fun AgentSwitch(agent: String, onAgent: (String) -> Unit) {
                 }
             }
         }
-        Txt(stringResource(when (agent) {
-            "claude" -> R.string.agent_claude_about
-            "gpt" -> R.string.agent_gpt_about
-            else -> R.string.agent_mnemo_about
-        }), T.tiny, c.graphite, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), maxLines = 2)
     }
 }
 

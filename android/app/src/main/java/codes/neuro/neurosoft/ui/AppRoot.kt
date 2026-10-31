@@ -69,6 +69,8 @@ private fun Screen(route: Route) {
         is Route.Event -> EventScreen(route.id, route.day)
         Route.Trash -> TrashScreen()
         Route.Inbox -> InboxScreen()
+        Route.ExtensionBuilder -> ExtensionBuilderScreen()
+        Route.McpAccess -> McpAccessScreen()
         is Route.Chat -> ChatScreen(route.prefill, route.context, route.contextTitle)
         Route.Search -> SearchScreen()
         is Route.Day -> DayScreen(route.day)

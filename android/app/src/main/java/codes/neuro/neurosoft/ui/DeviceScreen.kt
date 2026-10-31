@@ -157,7 +157,7 @@ fun DeviceScreen() {
         }
 
         // ---------------------------------------------------------- записи без телефона
-        Group(stringResource(R.string.offline_title), footer = stringResource(R.string.offline_footer)) {
+        Group(stringResource(R.string.offline_title)) {
             val o = device.offline
             item {
                 ListRow(

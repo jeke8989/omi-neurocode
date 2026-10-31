@@ -320,10 +320,6 @@ fun HomeTab() {
                         }
                     }
                     if (feed.grouped && feed.loose.isNotEmpty() && day == today) {
-                        item(key = "loose-note") {
-                            Txt(stringResource(R.string.events_loose_note), T.caption, Mn.c.graphite,
-                                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
-                        }
                     }
                 }
             }

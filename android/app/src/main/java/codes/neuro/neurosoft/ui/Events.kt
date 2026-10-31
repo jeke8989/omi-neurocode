@@ -161,9 +161,7 @@ fun EventScreen(id: Long, day: String) {
                     }
                 }
                 item(key = "parts-title") {
-                    SectionTitle(plural(R.plurals.event_parts, e.fragments.size)) {
-                        Txt(stringResource(R.string.event_parts_note), T.caption, c.graphite)
-                    }
+                    SectionTitle(plural(R.plurals.event_parts, e.fragments.size))
                 }
                 val parts = e.fragments.sortedBy { isoMillis(it.startedAt) }
                 itemsIndexed(parts, key = { _, f -> f.id }) { i, f -> Grouped(i, parts.size) { ConversationRow(f, fmt) } }
@@ -195,7 +193,7 @@ fun TrashScreen() {
             items == null -> LoadingBlock()
             items.isEmpty() -> EmptyBlock(Icons.Trash, stringResource(R.string.trash_empty_title),
                 stringResource(R.string.trash_empty_text))
-            else -> Group(footer = stringResource(R.string.trash_footer)) {
+            else -> Group {
                 items.forEach { t ->
                     item {
                         ListRow(t.title ?: t.preview ?: stringResource(R.string.untitled),

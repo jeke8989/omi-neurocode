@@ -159,10 +159,6 @@ fun TasksTab() {
                                 }) }
                             }
                         }
-                        item(key = "suggested-note") {
-                            Txt(stringResource(R.string.tasks_suggested_note), T.caption, Mn.c.graphite,
-                                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
-                        }
                     }
                     if (done.isNotEmpty()) {
                         item {
@@ -206,10 +202,6 @@ fun TasksTab() {
                                 Grouped(i, gone.size, inset = 16.dp) { RemovedTaskRow(t) { restore(t) } }
                             }
                         }
-                    }
-                    item {
-                        Txt(stringResource(R.string.tasks_footer), T.caption, Mn.c.graphite,
-                            Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp))
                     }
                 }
             }

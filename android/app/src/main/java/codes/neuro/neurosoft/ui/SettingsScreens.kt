@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -176,7 +178,7 @@ fun SettingsScreen() {
         }
 
         val bioAvailable = codes.neuro.neurosoft.AppLock.biometricAvailable(LocalContext.current)
-        Group(stringResource(R.string.security), footer = stringResource(R.string.security_footer)) {
+        Group(stringResource(R.string.security)) {
             val active = codes.neuro.neurosoft.AppLock.active.value
             item {
                 ToggleRow(stringResource(R.string.lock_pin), active, { on ->
@@ -296,8 +298,6 @@ fun SettingsScreen() {
             }
             item { ListRow(stringResource(R.string.version), icon = Icons.Info, value = BuildConfig.VERSION_NAME) }
         }
-        Txt(stringResource(R.string.about_footer), T.caption, c.faint,
-            Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 20.dp), align = TextAlign.Center)
     }
 }
 
@@ -324,13 +324,13 @@ fun VoiceSettingsScreen() {
     var ttsVoice by remember { mutableStateOf(prefs.ttsVoice) }
 
     SettingsPage(stringResource(R.string.voice_and_button)) {
-        Group(stringResource(R.string.pendant_button), footer = stringResource(R.string.button_footer)) {
+        Group(stringResource(R.string.pendant_button)) {
             item { ToggleRow(stringResource(R.string.button_actions), actions, {
                 actions = it
                 prefs.buttonActions = it
             }, icon = Icons.Hand, subtitle = stringResource(R.string.button_actions_sub)) }
         }
-        Group(stringResource(R.string.voice_reply), footer = stringResource(R.string.voice_reply_footer)) {
+        Group(stringResource(R.string.voice_reply)) {
             listOf(
                 Triple("always", R.string.voice_reply_always, Icons.Speaker),
                 Triple("headphones", R.string.voice_reply_headphones, Icons.Bluetooth),
@@ -363,7 +363,7 @@ fun VoiceSettingsScreen() {
                     }
                 }
         }
-        Group(stringResource(R.string.voice_choice), footer = stringResource(R.string.voice_choice_footer)) {
+        Group(stringResource(R.string.voice_choice)) {
             listOf(
                 Triple("f1", R.string.voice_f1, R.string.voice_neural_sub),
                 Triple("m1", R.string.voice_m1, R.string.voice_neural_sub),
@@ -454,7 +454,7 @@ fun DiarySettingsScreen() {
 
     SettingsPage(stringResource(R.string.diary_and_photos)) {
         error?.let { StaleNote(it) }
-        Group(footer = stringResource(R.string.diary_settings_footer)) {
+        Group {
             item { ToggleRow(stringResource(R.string.day_feed), f?.diary ?: true, { set(mapOf("diary" to it)) },
                 icon = Icons.Book, subtitle = stringResource(R.string.day_feed_sub), enabled = f != null) }
             item {
@@ -494,8 +494,6 @@ fun DiarySettingsScreen() {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items((1..6).toList()) { n -> Chip("$n", n == f.photosPerDay, { set(mapOf("photos_per_day" to n)) }) }
             }
-            Txt(stringResource(R.string.photos_per_day_footer), T.caption, Mn.c.graphite,
-                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
         }
     }
 }
@@ -523,7 +521,7 @@ fun themeTitle(mode: String): String = stringResource(when (mode) {
 fun ThemeScreen() {
     val current = ThemeMode.state.value
     SettingsPage(stringResource(R.string.theme)) {
-        Group(footer = stringResource(R.string.theme_footer), inset = 22.dp) {
+        Group(inset = 22.dp) {
             listOf("system", "light", "dark").forEach { mode ->
                 item {
                     ListRow(themeTitle(mode), onClick = { ThemeMode.set(mode) },
@@ -581,7 +579,7 @@ fun LanguageScreen() {
     val current = Core.prefs.language
     val options = listOf("" to stringResource(R.string.lang_system)) + Lang.supported
     SettingsPage(stringResource(R.string.app_language)) {
-        Group(footer = stringResource(R.string.language_footer), inset = 22.dp) {
+        Group(inset = 22.dp) {
             options.forEach { (code, name) ->
                 item {
                     ListRow(name, onClick = {
@@ -607,7 +605,7 @@ fun SttLanguageScreen() {
     val current = res.data?.sttLanguage ?: "app"
     SettingsPage(stringResource(R.string.speech_language)) {
         error?.let { StaleNote(it) }
-        Group(footer = stringResource(R.string.speech_language_footer), inset = 22.dp) {
+        Group(inset = 22.dp) {
             (listOf("app", "auto") + Lang.supported.map { it.first }).forEach { code ->
                 item {
                     ListRow(sttChoiceTitle(code), subtitle = if (code == "auto") stringResource(R.string.stt_auto_sub) else null,
@@ -671,36 +669,79 @@ fun AudioKeepScreen() {
 // ======================================================================= память
 @Composable
 fun MemoriesScreen() {
-    var state by remember { mutableStateOf<Res<List<MemoryItem>>>(Res(loading = true)) }
+    // 0 — вы просили запомнить (кнопка), 1 — заметил Mnemo, 2 — архив (лишнее, можно вернуть)
+    var tab by rememberSaveable { mutableStateOf(0) }
+    var state by remember { mutableStateOf<Res<Pair<List<MemoryItem>, Int>>>(Res(loading = true)) }
     val scope = rememberCoroutineScope()
     val fmt = rememberFmt()
+    val c = Mn.c
     fun reload() {
         scope.launch {
             state = try {
-                Res(Api.memories())
+                Res(Api.memories(archived = tab == 2))
             } catch (e: Exception) {
                 Res(error = e)
             }
         }
     }
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(tab) { reload() }
+    fun act(m: MemoryItem, block: suspend () -> Unit) {
+        state = state.data?.let { (list, n) -> Res(list.filter { it.id != m.id } to n) } ?: state
+        scope.launch {
+            try {
+                block()
+            } catch (_: Exception) {
+            }
+            reload()
+        }
+    }
     SettingsPage(stringResource(R.string.memory)) {
-        val items = state.data
+        val archivedCount = state.data?.second ?: 0
+        LazyRowChips(listOf(stringResource(R.string.memory_asked), stringResource(R.string.memory_noticed),
+            stringResource(R.string.memory_archive) + if (archivedCount > 0) " $archivedCount" else ""), tab) { tab = it }
+        val all = state.data?.first
+        val items = all?.filter { m ->
+            when (tab) {
+                0 -> m.source == "button"
+                1 -> m.source != "button"
+                else -> true
+            }
+        }
         when {
             items == null && state.error != null -> ErrorBlock(state.error, { reload() })
             items == null -> LoadingBlock()
-            items.isEmpty() -> EmptyBlock(Icons.Bookmark, stringResource(R.string.memory_empty_title),
-                stringResource(R.string.memory_empty_text))
-            else -> Group(footer = stringResource(R.string.memory_footer)) {
+            items.isEmpty() -> EmptyBlock(Icons.Bookmark, stringResource(when (tab) {
+                0 -> R.string.memory_asked_empty
+                1 -> R.string.memory_noticed_empty
+                else -> R.string.memory_archive_empty
+            }), "")
+            else -> Group(inset = 56.dp) {
                 items.forEach { m ->
                     item {
                         ListRow(m.text, subtitle = listOfNotNull(
-                            fmt.dayShortTitle(fmt.dayOf(m.createdAt)) + ", " + fmt.time(m.createdAt),
-                            m.conversationTitle,
-                        ).joinToString(", "), icon = if (m.source == "button") Icons.Tap else Icons.Bookmark)
+                            fmt.dayShortTitle(fmt.dayOf(m.createdAt)), m.conversationTitle,
+                        ).joinToString(", "), icon = if (m.source == "button") Icons.Tap else Icons.Bookmark) {
+                            if (tab == 2) {
+                                Txt(stringResource(R.string.trash_restore), T.smallStrong, c.lens,
+                                    Modifier.quietTap { act(m) { Api.archiveMemory(m.id, false) } }.padding(8.dp))
+                            } else {
+                                IconCircle(Icons.Close, stringResource(R.string.memory_to_archive),
+                                    { act(m) { Api.archiveMemory(m.id, true) } }, size = 32.dp,
+                                    background = c.raised, tint = c.graphite)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** Ряд переключателей-чипов (вкладки внутри страницы настроек). */
+@Composable
+fun LazyRowChips(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.forEachIndexed { i, l -> Chip(l, i == selected, { onSelect(i) }) }
     }
 }

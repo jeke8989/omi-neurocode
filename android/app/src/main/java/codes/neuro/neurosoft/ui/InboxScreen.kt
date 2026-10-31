@@ -127,9 +127,6 @@ fun InboxScreen() {
                     }
                 }
             }
-            item(key = "note") {
-                Txt(stringResource(R.string.inbox_note), T.caption, c.graphite, Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp))
-            }
         }
     }
 }

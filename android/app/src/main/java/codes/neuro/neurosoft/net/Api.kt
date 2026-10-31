@@ -209,13 +209,23 @@ data class ClaudeInfo(
 )
 
 data class ExtSetting(val key: String, val title: String, val secret: Boolean, val required: Boolean,
-                      val hint: String?, val filled: Boolean, val value: String?)
+                      val hint: String?, val filled: Boolean, val value: String?, val type: String = "text")
 data class ExtTool(val name: String, val title: String, val description: String)
 data class Extension(
     val id: String, val name: String, val icon: String?, val description: String, val author: String?,
     val version: String?, val hosts: List<String>, val tools: List<ExtTool>, val settings: List<ExtSetting>,
     val taskSync: String?, val enabled: Boolean, val ready: Boolean, val installed: Boolean, val verified: Boolean,
+    /** На какие события подписана (вебхук, n8n…) и сколько уже отправлено. */
+    val events: List<ExtEvent> = emptyList(), val delivery: ExtDelivery? = null, val sourceUrl: String? = null,
 )
+
+data class ExtEvent(val event: String, val title: String?, val toUserUrl: Boolean)
+data class ExtDelivery(val sent: Int, val waiting: Int, val failed: Int, val lastSent: String?, val error: String?)
+
+/** Черновик интеграции от ассистента: manifest (как есть, для установки), что она умеет, что сделать владельцу. */
+data class ExtDraft(val manifest: JSONObject?, val preview: Extension?, val notes: String?)
+
+data class McpInfo(val enabled: Boolean, val since: String?, val token: String? = null, val url: String)
 
 data class Features(val diary: Boolean, val photoStyle: Boolean, val photoAi: Boolean = true, val style: String, val photosPerDay: Int,
                     val styles: List<Pair<String, String>>, val language: String = "ru",
@@ -527,8 +537,19 @@ object Api {
         call("POST", "/api/tasks/$id", JSONObject().put("status", status))
     }
 
-    suspend fun memories(): List<MemoryItem> =
-        JSONObject(call("GET", "/api/memories")).getJSONArray("items").map { memory(it) }
+    suspend fun memories(archived: Boolean = false): Pair<List<MemoryItem>, Int> {
+        val o = JSONObject(call("GET", "/api/memories" + if (archived) "?archived=1" else ""))
+        return o.getJSONArray("items").map { memory(it) } to o.optInt("archived")
+    }
+
+    /** В архив / вернуть из архива. */
+    suspend fun archiveMemory(id: Long, archived: Boolean) {
+        call("POST", "/api/memories/$id", JSONObject().put("archived", archived))
+    }
+
+    suspend fun deleteMemory(id: Long) {
+        call("DELETE", "/api/memories/$id")
+    }
 
     // ---------------------------------------------------------------- модели
     suspend fun models(all: Boolean = false): ModelsInfo {
@@ -664,11 +685,37 @@ object Api {
         tools = o.optJSONArray("tools").map { ExtTool(it.optString("name"), it.optString("title"), it.optString("description")) },
         settings = o.optJSONArray("settings").map {
             ExtSetting(it.optString("key"), it.optString("title"), it.optBoolean("secret"), it.optBoolean("required"),
-                it.str("hint"), it.optBoolean("filled"), it.str("value"))
+                it.str("hint"), it.optBoolean("filled"), it.str("value"), it.optString("type", "text"))
         },
         taskSync = o.str("task_sync"), enabled = o.optBoolean("enabled", false),
         ready = o.optBoolean("ready", false), installed = installed, verified = o.optBoolean("verified", false),
+        events = o.optJSONArray("events").map { ExtEvent(it.optString("event"), it.str("title"), it.optBoolean("to_user_url")) },
+        delivery = o.optJSONObject("delivery")?.let {
+            ExtDelivery(it.optInt("sent"), it.optInt("waiting"), it.optInt("failed"), it.str("last_sent"), it.str("error"))
+        },
+        sourceUrl = o.str("source_url"),
     )
+
+    /** «Создать с ассистентом»: описание словами (и правка прошлого черновика) -> черновик манифеста. */
+    suspend fun draftExtension(description: String, previous: JSONObject? = null, feedback: String? = null): ExtDraft {
+        val body = JSONObject().put("description", description)
+        if (previous != null) body.put("previous", previous)
+        if (!feedback.isNullOrBlank()) body.put("feedback", feedback)
+        val o = JSONObject(call("POST", "/api/extensions/draft", body))
+        return ExtDraft(o.optJSONObject("manifest"), o.optJSONObject("preview")?.let { extension(it, false) }, o.str("notes"))
+    }
+
+    suspend fun installManifest(manifest: JSONObject) {
+        call("POST", "/api/extensions/install", JSONObject().put("manifest", manifest))
+    }
+
+    // ---------------------------------------------------------------- Mnemo в других программах (MCP)
+    private fun mcp(o: JSONObject) = McpInfo(o.optBoolean("enabled"), o.str("since"), o.str("token"),
+        Core.prefs.serverUrl.trimEnd('/') + o.optString("path", "/mcp"))
+
+    suspend fun mcpInfo(): McpInfo = mcp(JSONObject(call("GET", "/api/mcp")))
+    suspend fun mcpNewKey(): McpInfo = mcp(JSONObject(call("POST", "/api/mcp", JSONObject())))
+    suspend fun mcpOff(): McpInfo = mcp(JSONObject(call("DELETE", "/api/mcp")))
 
     // ---------------------------------------------------------------- дневник
     suspend fun features(): Features = features(JSONObject(call("GET", "/api/features")))

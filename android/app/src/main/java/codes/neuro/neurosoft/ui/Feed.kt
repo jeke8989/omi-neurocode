@@ -90,6 +90,8 @@ sealed interface Route {
     data class Event(val id: Long, val day: String) : Route
     data object Trash : Route
     data object Inbox : Route
+    data object ExtensionBuilder : Route
+    data object McpAccess : Route
     /** context — «event:12», «conversation:5», «day:2026-10-31»: чат открыт с этого экрана, агент сразу видит его. */
     data class Chat(val prefill: String? = null, val context: String? = null, val contextTitle: String? = null) : Route
     data object Search : Route

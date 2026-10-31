@@ -263,10 +263,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.peopleSections(
     if (unknown.isNotEmpty()) {
         item(key = "unknown-title") { SectionTitle(stringResource(R.string.people_unknown)) }
         items(unknown.size, key = { "u-${unknown[it].id}" }) { i -> Grouped(i, unknown.size, inset = 70.dp) { PersonRow(unknown[i], fmt) } }
-        item(key = "unknown-note") {
-            Txt(stringResource(R.string.people_unknown_note), T.caption, Mn.c.graphite,
-                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
-        }
     }
     if (ignored.isNotEmpty()) {
         item(key = "ignored-title") { SectionTitle(stringResource(R.string.people_ignored)) }
@@ -484,7 +480,7 @@ fun PersonScreen(id: Long) {
 
                 if (p.ref.name == null && !p.ref.isOwner || editing) {
                     Group(stringResource(R.string.person_name_title),
-                        footer = if (p.ref.name == null) stringResource(R.string.person_name_footer) else null) {
+                        footer = null) {
                         item { FieldRow(stringResource(R.string.name), name, { name = it }, stringResource(R.string.name_hint)) }
                         if (d.suggestions.isNotEmpty() && p.ref.name == null) {
                             item {
@@ -845,7 +841,6 @@ fun VoicesSettingsScreen() {
     }
 
     SettingsPage(stringResource(R.string.voices_title)) {
-        Txt(stringResource(R.string.voices_intro), T.small, c.graphite, Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
         if ((res.error as? ApiException)?.kind == ApiException.Kind.NOT_FOUND) {
             Txt(stringResource(R.string.people_server_old_text), T.small, c.amber, Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
         }
