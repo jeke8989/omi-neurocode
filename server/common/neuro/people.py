@@ -134,6 +134,16 @@ PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.number, p.samples, p.
        p.first_seen, p.last_seen,
        (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations"""
 
+# Голос, услышанный только в одном разговоре, — «Собеседник»: не показываем в «Людях», «Созвездии» и
+# подсказках, пока он не встретится снова (или пока владелец сам его не назовёт).
+RECURRING = 2
+VISIBLE_SQL = f"""(p.name IS NOT NULL OR p.is_owner OR
+    (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING})"""
+
+
+def transient(p: dict) -> bool:
+    return not p.get("name") and not p.get("is_owner") and (p.get("conversations") or 0) < RECURRING
+
 
 def _with_sample(p: dict | None) -> dict | None:
     if p is not None:
@@ -160,16 +170,18 @@ def set_settings(conn, enabled: bool | None = None, others: bool | None = None) 
 
 def list_people(conn) -> dict:
     people = conn.execute(
-        f"""SELECT {PERSON_COLUMNS} FROM people p
+        f"""SELECT {PERSON_COLUMNS} FROM people p WHERE {VISIBLE_SQL}
             ORDER BY p.is_owner DESC, p.ignored, (p.name IS NULL), p.last_seen DESC NULLS LAST""").fetchall()
     for p in people:
         _with_sample(p)
     suggestions = conn.execute(
-        """SELECT g.id, g.person_id, g.name, g.evidence, g.conversation_id, c.title AS conversation_title,
-                  p.number, p.is_owner
+        f"""SELECT g.id, g.person_id, coalesce(t.name, g.name) AS name, g.evidence, g.conversation_id,
+                  c.title AS conversation_title, p.number, p.is_owner, g.target_id, t.is_owner AS target_owner
            FROM person_suggestions g JOIN people p ON p.id = g.person_id
+           LEFT JOIN people t ON t.id = g.target_id
            LEFT JOIN conversations c ON c.id = g.conversation_id
-           WHERE g.status = 'pending' AND p.name IS NULL
+           WHERE g.status = 'pending' AND p.name IS NULL AND NOT p.is_owner
+             AND (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}
            ORDER BY g.id DESC LIMIT 20""").fetchall()
     owner = voices.suggest_owner(conn)
     return {"people": people, "suggestions": suggestions, "owner_candidate": _with_sample(owner),
@@ -204,6 +216,8 @@ def person_detail(conn, pid: int) -> dict | None:
            FROM segments s1 JOIN segments s2 ON s2.conversation_id = s1.conversation_id
            JOIN people o ON o.id = s2.person_id
            WHERE s1.person_id = %s AND s2.person_id <> %s AND NOT o.ignored
+             AND (o.name IS NOT NULL OR o.is_owner OR (SELECT count(DISTINCT x.conversation_id) FROM segments x
+                                                      WHERE x.person_id = o.id) >= 2)
            GROUP BY o.id ORDER BY conversations DESC LIMIT 8""", (pid, pid)).fetchall()
     p["suggestions"] = conn.execute(
         "SELECT id, name, evidence FROM person_suggestions WHERE person_id = %s AND status = 'pending'",
@@ -279,12 +293,17 @@ def assign_segment(conn, segment_id: int, person_id: int | None = None, name: st
 
 
 def answer_suggestion(conn, sid: int, accept: bool) -> dict | None:
-    g = conn.execute("SELECT id, person_id, name FROM person_suggestions WHERE id = %s", (sid,)).fetchone()
+    g = conn.execute("SELECT id, person_id, name, target_id FROM person_suggestions WHERE id = %s", (sid,)).fetchone()
     if g is None:
         return None
     if not accept:
         conn.execute("UPDATE person_suggestions SET status = 'rejected' WHERE id = %s", (sid,))
         return {"id": sid, "status": "rejected"}
+    if g["target_id"]:
+        # «Голос 7 похож на Анну» — да: это она, голоса объединяются
+        voices.merge_people(conn, g["person_id"], g["target_id"])
+        conn.execute("UPDATE person_suggestions SET status = 'accepted' WHERE id = %s", (sid,))
+        return {"id": sid, "status": "accepted", "person_id": g["target_id"], "merged": True}
     same = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) AND id <> %s ORDER BY id LIMIT 1",
                         (g["name"], g["person_id"])).fetchone()
     if same:
@@ -303,7 +322,7 @@ def participants_sql(alias: str = "c") -> str:
                FROM (SELECT p.id, p.name, p.number, p.is_owner,
                             sum(extract(epoch FROM s.ended_at - s.started_at)) AS sec
                      FROM segments s JOIN people p ON p.id = s.person_id
-                     WHERE s.conversation_id = {alias}.id AND NOT p.ignored
+                     WHERE s.conversation_id = {alias}.id AND NOT p.ignored AND {VISIBLE_SQL}
                      GROUP BY p.id ORDER BY sec DESC LIMIT 6) x), '[]'::json)"""
 
 
@@ -314,7 +333,7 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
         f"""SELECT c.id, c.title, c.emoji, c.started_at, c.last_activity AS ended_at, c.topics,
                    greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
                    coalesce((SELECT array_agg(DISTINCT s.person_id) FROM segments s JOIN people p ON p.id = s.person_id
-                             WHERE s.conversation_id = c.id AND NOT p.ignored), '{{}}') AS people,
+                             WHERE s.conversation_id = c.id AND NOT p.ignored AND {VISIBLE_SQL}), '{{}}') AS people,
                    (SELECT ph.id FROM photos ph
                     WHERE ph.taken_at BETWEEN c.started_at - interval '15 minutes'
                                           AND c.last_activity + interval '15 minutes'
@@ -342,7 +361,7 @@ def graph(conn, days: int = 90, tz: str = "UTC") -> dict:
 # ---------------------------------------------------------------- для агента
 def people_overview(conn) -> str:
     rows = conn.execute(
-        f"""SELECT {PERSON_COLUMNS} FROM people p WHERE NOT p.ignored
+        f"""SELECT {PERSON_COLUMNS} FROM people p WHERE NOT p.ignored AND {VISIBLE_SQL}
             ORDER BY p.is_owner DESC, (p.name IS NULL), p.last_seen DESC NULLS LAST LIMIT 40""").fetchall()
     if not rows:
         return "Кулон пока не различает голоса (никого не запомнил)."

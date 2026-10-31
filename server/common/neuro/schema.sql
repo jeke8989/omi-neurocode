@@ -309,3 +309,22 @@ CREATE TABLE IF NOT EXISTS pair_requests (
     status      TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Голоса: модель отпечатков (отпечатки разных моделей несравнимы), решение по всему разговору
+ALTER TABLE people ADD COLUMN IF NOT EXISTS backend TEXT;
+UPDATE people SET backend = 'wespeaker_en_voxceleb_resnet34_LM' WHERE backend IS NULL AND centroid IS NOT NULL
+    AND EXISTS (SELECT 1 FROM voiceprints v WHERE v.person_id = people.id AND v.backend = 'wespeaker');
+UPDATE voiceprints SET backend = 'wespeaker_en_voxceleb_resnet34_LM' WHERE backend = 'wespeaker';
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS embed_backend TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS voices_done BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE person_suggestions ADD COLUMN IF NOT EXISTS target_id BIGINT REFERENCES people(id) ON DELETE CASCADE;
+
+-- Задачи: вид (моя / жду от / напоминание), уверенность и фраза-доказательство, настоящий срок
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'mine';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS confidence REAL;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS evidence TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+-- фразы, проверенные на «напомни / создай задачу»
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS task_checked BOOLEAN NOT NULL DEFAULT false;
+UPDATE segments SET task_checked = true WHERE NOT task_checked AND started_at < now() - interval '1 day';

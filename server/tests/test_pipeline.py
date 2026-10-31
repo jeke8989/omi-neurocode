@@ -23,6 +23,7 @@ os.environ.update({
     "LLM_MODEL": "",
     "TZ": "Europe/Moscow",
     "SPEAKER_BACKEND": "spectral",
+    "SPEAKER_MIN_NEW_SEC": "2",  # синтетические диалоги короткие; в жизни — 8 с
     "VOICE_DIR": tempfile.mkdtemp(prefix="neuro-voices-"),
 })
 
@@ -127,7 +128,11 @@ def test_full_pipeline(conn, monkeypatch):
     assert conn.execute("SELECT count(*) AS n FROM conversations").fetchone()["n"] == 2
 
     # --- Агент без LLM: заголовок из первых слов ---
-    conn.execute("UPDATE conversations SET last_activity = now() - interval '10 minutes'")
+    conn.execute("UPDATE conversations SET last_activity = now() - interval '9 minutes'")
+    agent.summarize_conversations(conn)  # голоса разговора ещё не решены — итоги ждут
+    assert conn.execute("SELECT count(*) AS n FROM conversations WHERE status = 'done'").fetchone()["n"] == 0
+    stt.finalize_voices(conn)  # STT решил, кто говорил (тоны — без голосов)
+    assert conn.execute("SELECT bool_and(voices_done) AS ok FROM conversations").fetchone()["ok"]
     agent.summarize_conversations(conn)
     rows = conn.execute("SELECT status, title, summary FROM conversations ORDER BY id").fetchall()
     assert [r["status"] for r in rows] == ["done", "done"]
@@ -142,8 +147,17 @@ def test_full_pipeline(conn, monkeypatch):
         if system.startswith(agent.SUMMARY_SYSTEM):
             assert "по-русски" in system  # язык приложения по умолчанию
             return {"title": "Отчёт к пятнице", "summary": "Договорились подготовить отчёт.",
-                    "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "assignee": None, "target": "notion"},
-                              {"text": "Починить синхронизацию", "due": "null", "target": "github"}, {"text": ""}],
+                    "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "who": "Владелец", "kind": "mine",
+                               "confidence": 0.9, "evidence": "подготовлю отчёт к пятнице", "target": "notion"},
+                              {"text": "Починить синхронизацию", "due": "null", "target": "github", "confidence": 0.8,
+                               "evidence": "починю синхронизацию"},
+                              # обсуждение, а не договорённость — не задача
+                              {"text": "Посмотреть билеты", "confidence": 0.3, "evidence": "может, посмотрим билеты"},
+                              # дубль в том же ответе — одна задача
+                              {"text": "Подготовить  отчёт", "confidence": 0.9, "evidence": "подготовлю отчёт"},
+                              # сомнительно — в «Предложенные»
+                              {"text": "Позвонить в банк", "confidence": 0.55, "evidence": "надо бы в банк позвонить"},
+                              {"text": ""}],
                     "memories": ["Отчёт нужен к пятнице"]}
         if system.startswith(agent.REMEMBER_SYSTEM):
             return {"memory": "Отчёт к пятнице", "tasks": []}
@@ -163,13 +177,15 @@ def test_full_pipeline(conn, monkeypatch):
     agent.summarize_conversations(conn)
     c1 = conn.execute(f"SELECT * FROM conversations WHERE id = {first}").fetchone()
     assert c1["status"] == "done" and c1["title"] == "Отчёт к пятнице"
-    tasks = conn.execute("SELECT text, due, target, source FROM tasks ORDER BY id").fetchall()
+    tasks = conn.execute("SELECT text, due, target, source FROM tasks WHERE status = 'open' ORDER BY id").fetchall()
     assert [(t["text"], t["due"], t["target"]) for t in tasks] == [
         ("Подготовить отчёт", "пятница", "notion"), ("Починить синхронизацию", None, "github")]
+    assert [r["text"] for r in conn.execute("SELECT text FROM tasks WHERE status = 'suggested'").fetchall()] == [
+        "Позвонить в банк"]
     # повторный пересчёт не дублирует задачи
     conn.execute(f"UPDATE conversations SET status = 'open', updated_at = now() - interval '1 hour' WHERE id = {first}")
     agent.summarize_conversations(conn)
-    assert conn.execute("SELECT count(*) AS n FROM tasks").fetchone()["n"] == 2
+    assert conn.execute("SELECT count(*) AS n FROM tasks").fetchone()["n"] == 3  # 2 задачи + 1 предложенная
 
     # --- Кнопка: события ещё «свежие» — не трогаем; потом обрабатываем ---
     agent.process_events(conn)
@@ -201,7 +217,10 @@ def test_full_pipeline(conn, monkeypatch):
     monkeypatch.setattr(agent.requests, "post", lambda url, **k: (sent.append((url, k["json"])), Resp(url))[1])
     agent.export_tasks(conn)
     assert len(sent) == 3 and all("notion.com" in u for u, _ in sent)  # GitHub не настроен -> всё в Notion
-    assert conn.execute("SELECT count(*) AS n FROM tasks WHERE exported_at IS NULL").fetchone()["n"] == 0
+    # предложенная задача никуда не уходит, пока её не приняли
+    assert conn.execute("SELECT count(*) AS n FROM tasks WHERE exported_at IS NULL AND status = 'open'"
+                        ).fetchone()["n"] == 0
+    assert conn.execute("SELECT exported_at FROM tasks WHERE status = 'suggested'").fetchone()["exported_at"] is None
 
     # --- Уборка старого аудио ---
     monkeypatch.setattr(agent.config, "KEEP_AUDIO_DAYS", 0)

@@ -533,11 +533,13 @@ async def api_conversation(request: Request):
             seg["sure"] = seg["voice_score"] is not None and seg["voice_score"] >= match
         ids = sorted({seg["person_id"] for seg in conv["segments"] if seg["person_id"]})
         conv["people"] = await (await conn.execute(
-            "SELECT id, name, number, is_owner, ignored FROM people WHERE id = ANY(%s)", (ids,)
+            """SELECT p.id, p.name, p.number, p.is_owner, p.ignored, NOT """ + people.VISIBLE_SQL + """ AS transient
+               FROM people p WHERE p.id = ANY(%s)""", (ids,)
         )).fetchall() if ids else []
         conv["tasks"] = await (await conn.execute(
-            """SELECT id, text, due, assignee, person_id, target, status, source, exported_at, export_ref
-               FROM tasks WHERE conversation_id = %s ORDER BY id""", (cid,)
+            """SELECT id, text, due, due_at, assignee, person_id, kind, confidence, evidence, target, status, source,
+                      exported_at, export_ref
+               FROM tasks WHERE conversation_id = %s AND status <> 'dismissed' ORDER BY id""", (cid,)
         )).fetchall()
         conv["memories"] = await (await conn.execute(
             "SELECT id, text, source, created_at FROM memories WHERE conversation_id = %s ORDER BY id", (cid,)
@@ -563,7 +565,8 @@ async def api_tasks(request: Request):
     status = request.query_params.get("status", "open")
     async with await aconnect() as conn:
         rows = await (await conn.execute(
-            """SELECT t.id, t.conversation_id, t.text, t.due, t.assignee, t.person_id, t.target, t.status, t.source,
+            """SELECT t.id, t.conversation_id, t.text, t.due, t.due_at, t.assignee, t.person_id, t.kind, t.confidence,
+                      t.evidence, t.target, t.status, t.source,
                       t.exported_at, t.export_ref, t.created_at, c.title AS conversation_title,
                       coalesce((SELECT json_agg(json_build_object(
                                     'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref,
@@ -571,7 +574,7 @@ async def api_tasks(request: Request):
                                 FROM task_exports e LEFT JOIN extensions x ON x.id = e.ext_id
                                 WHERE e.task_id = t.id), '[]'::json) AS exports
                FROM tasks t LEFT JOIN conversations c ON c.id = t.conversation_id
-               WHERE (%s = 'all' OR t.status = %s)
+               WHERE (%s = 'all' AND t.status <> 'dismissed' OR t.status = %s)
                ORDER BY t.created_at DESC LIMIT 300""",
             (status, status),
         )).fetchall()
@@ -587,8 +590,8 @@ async def api_task_update(request: Request):
     except ValueError:
         return Json({"error": "bad json"}, status_code=400)
     status = body.get("status")
-    if status not in ("open", "done"):
-        return Json({"error": "status must be open or done"}, status_code=400)
+    if status not in ("open", "done", "dismissed"):
+        return Json({"error": "status must be open, done or dismissed"}, status_code=400)
     async with await aconnect() as conn:
         res = await conn.execute(
             "UPDATE tasks SET status = %s, updated_at = now() WHERE id = %s", (status, tid)
@@ -632,6 +635,11 @@ async def ws_ask(websocket: WebSocket):
             return
         codec = int(start.get("codec") or 21)
         client_id = str(start.get("id") or "") or None
+        voice = str(start.get("voice") or "")  # нейроголос телефона: начнём озвучку ответа сразу
+        try:
+            speed = float(start.get("rate") or 1.0)
+        except (TypeError, ValueError):
+            speed = 1.0
         # press — вопрос заканчивается только повторным нажатием (паузы не обрывают), auto — по паузе
         press = str(start.get("mode") or "press") != "auto"
         await websocket.send_json({"type": "listening"})
@@ -675,6 +683,8 @@ async def ws_ask(websocket: WebSocket):
         log.info("ask from %s: %.1fs audio, end=%s", device, len(pcm) / 32000, reason)
 
         reply = await answer_voice(device, client_id, bytes(pcm))
+        if voice in tts.VOICES and reply.get("answer"):
+            tts.prewarm(reply["answer"], voice, i18n.normalize(str(start.get("lang") or "ru")), speed)
         await websocket.send_text(json.dumps(reply, ensure_ascii=False))
         log.info("ask answered in %sms (%s): %s", reply.get("latency_ms"), reply.get("level"),
                  (reply.get("answer") or "")[:80])
@@ -1374,6 +1384,32 @@ async def api_segment_audio(request: Request):
     return Response(pcm_to_wav(pcm), media_type="audio/wav", headers={"Cache-Control": "private, max-age=300"})
 
 
+async def api_tts(request: Request):
+    """Нейроголос: {"text", "voice": f1|m1, "lang", "speed"} -> audio/wav. 503 — модель ещё грузится
+    (телефон тогда говорит системным голосом)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None or not str(body.get("text") or "").strip():
+        return Json({"error": "text is required"}, status_code=400)
+    try:
+        speed = float(body.get("speed") or 1.0)
+    except (TypeError, ValueError):
+        speed = 1.0
+    try:
+        data = await anyio.to_thread.run_sync(
+            tts.synthesize, str(body["text"]), str(body.get("voice") or tts.DEFAULT_VOICE),
+            i18n.normalize(str(body.get("lang") or "ru")), speed)
+    except tts.Unavailable:
+        return Json({"error": "voice is loading"}, status_code=503)
+    except ValueError:
+        return Json({"error": "nothing to say"}, status_code=400)
+    except Exception:  # noqa: BLE001
+        log.exception("tts failed")
+        return Json({"error": "tts failed"}, status_code=500)
+    return Response(data, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
+
+
 async def api_graph(request: Request):
     """«Созвездие»: люди, темы и разговоры за N дней (по умолчанию 90)."""
     if not _authorized(request.headers, request.query_params):
@@ -1394,6 +1430,8 @@ async def lifespan(app):
         await conn.execute(
             "UPDATE agent_runs SET status = 'failed', answer = coalesce(answer, 'Прервано перезапуском сервера') "
             "WHERE status = 'running'")
+    if config.env("TTS_ENABLED", "1") == "1":
+        tts.warm_up()  # нейроголос качается в фоне, пока не готов — телефон говорит системным
     background = [asyncio.create_task(idle_finalizer()), asyncio.create_task(periodic_reconcile())]
     log.info("gateway started")
     try:
@@ -1453,6 +1491,7 @@ app = Starlette(
         Route("/api/segments/{id:int}/person", api_segment_person, methods=["POST"]),
         Route("/api/segments/{id:int}/audio", api_segment_audio),
         Route("/api/graph", api_graph),
+        Route("/api/tts", api_tts, methods=["POST"]),
         WebSocketRoute("/ws/audio", ws_audio),
         WebSocketRoute("/ws/ask", ws_ask),
     ],

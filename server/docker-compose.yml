@@ -35,6 +35,7 @@ services:
       - audio:/data/audio
       - photos:/data/photos
       - voices:/data/voices
+      - whisper-models:/models   # нейроголос (модель ~130 МБ скачивается сама)
     depends_on:
       db:
         condition: service_healthy

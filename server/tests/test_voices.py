@@ -80,7 +80,7 @@ class Untimed:
         return [Seg(0.0, len(pcm) / 2 / SR, None, f"реплика {Untimed.calls}")]
 
 
-def run_chunk(conn, pcm, stt, minutes_ago=30):  # noqa: F811
+def run_chunk(conn, pcm, stt, minutes_ago=30, finalize=True):  # noqa: F811
     from stt import worker
     path = tempfile.mktemp(suffix=".pcm", dir=os.environ["AUDIO_DIR"])
     with open(path, "wb") as f:
@@ -91,6 +91,11 @@ def run_chunk(conn, pcm, stt, minutes_ago=30):  # noqa: F811
            RETURNING id, device_id, started_at, duration_ms, path, attempts""",
         (DEVICE, minutes_ago, len(pcm) // 32, path)).fetchone()
     worker.process(conn, stt, chunk)
+    if finalize:
+        from neuro import voices
+        conv = conn.execute("SELECT conversation_id FROM segments WHERE chunk_id = %s LIMIT 1", (chunk["id"],)).fetchone()
+        if conv:
+            voices.finalize_conversation(conn, conv["conversation_id"])
     return conn.execute(
         "SELECT id, speaker, person_id, voice_score, text, embedding IS NOT NULL AS has_emb FROM segments "
         "WHERE chunk_id = %s ORDER BY started_at, id", (chunk["id"],)).fetchall()
@@ -234,7 +239,8 @@ def test_summary_names_tasks_topics_and_suggestions(clean, monkeypatch):
     def fake_json(conn_, task, system, user, **kw):
         seen["system"], seen["user"] = system, user
         return {"title": "Отчёт к пятнице", "emoji": "📊", "summary": "Договорились об отчёте.",
-                "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "assignee": "Голос 2", "target": "notion"}],
+                "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "who": "Голос 2", "kind": "mine",
+                           "confidence": 0.9, "evidence": "Анна, сделаешь? — Да, к пятнице", "target": "notion"}],
                 "memories": [], "topics": ["Отчёт", "сроки", "отчёт"],
                 "speakers": [{"voice": "Голос 2", "name": "Анна", "evidence": "Анна, сделаешь?"}]}
 
@@ -242,13 +248,19 @@ def test_summary_names_tasks_topics_and_suggestions(clean, monkeypatch):
     monkeypatch.setattr(llm, "chat_json", fake_json)
     conn.execute("UPDATE conversations SET status = 'processing' WHERE id = %s", (conv_id,))
     agent.summarize_one(conn, conv_id)
+    # голос Анны пока звучал один раз — подсказку не показываем
+    assert people.list_people(conn)["suggestions"] == []
+    pcm2, spans2 = dialog((ANNA, 2.5), (OWNER, 3.0))
+    rows2 = run_chunk(conn, pcm2, Timed(spans2), minutes_ago=10)
+    assert rows2[0]["person_id"] == anna_id  # второй разговор — тот же голос
 
     assert "Владелец (Женя):" in seen["user"] and "Голос 2:" in seen["user"]
     assert '"speakers"' in seen["system"] and '"topics"' in seen["system"]
     conv = conn.execute("SELECT topics FROM conversations WHERE id = %s", (conv_id,)).fetchone()
     assert conv["topics"] == ["отчёт", "сроки"]
-    task = conn.execute("SELECT assignee, person_id FROM tasks WHERE conversation_id = %s", (conv_id,)).fetchone()
-    assert task["person_id"] == anna_id
+    task = conn.execute("SELECT assignee, person_id, kind, status FROM tasks WHERE conversation_id = %s",
+                        (conv_id,)).fetchone()
+    assert task["person_id"] == anna_id and task["kind"] == "waiting" and task["status"] == "open"
     sug = people.list_people(conn)["suggestions"]
     assert len(sug) == 1 and sug[0]["person_id"] == anna_id and sug[0]["name"] == "Анна"
 
@@ -345,7 +357,7 @@ def test_people_http_api(clean):
     owner_id, anna_id = rows[0]["person_id"], rows[1]["person_id"]
     client = Asgi(gw.app)
     r = client.get("/api/people")
-    assert r.status_code == 200 and len(r.json()["people"]) == 2
+    assert r.status_code == 200 and r.json()["people"] == []  # голоса прозвучали один раз — пока не показываем
     assert client.get("/api/people", auth=False).status_code == 401
 
     r = client.post(f"/api/people/{anna_id}", json={"name": "Анна"})
@@ -360,8 +372,9 @@ def test_people_http_api(clean):
     assert {p["id"] for p in conv["people"]} == {owner_id, anna_id}
     assert conv["segments"][0]["sure"] is True and conv["segments"][0]["has_audio"] is True
 
+    assert {p["id"]: p["transient"] for p in conv["people"]} == {owner_id: True, anna_id: False}
     lst = client.get("/api/conversations").json()["items"]
-    assert {p["id"] for p in lst[0]["people"]} == {owner_id, anna_id}
+    assert {p["id"] for p in lst[0]["people"]} == {anna_id}  # единичный безымянный голос в ленте не показываем
 
     r = client.get(f"/api/segments/{rows[1]['id']}/audio")
     assert r.status_code == 200 and r.content[:4] == b"RIFF" and len(r.content) > 32000
@@ -407,3 +420,49 @@ def test_button_question_teaches_owner_voice(clean):
     voices.enroll_owner(conn)
     after = conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (owner_voice,)).fetchone()["n"]
     assert after == before
+
+
+def test_short_voice_does_not_become_a_person(clean, monkeypatch):
+    """Голос, сказавший пару слов, не заводит «Голос N» (раньше так и плодились дубли)."""
+    conn = clean
+    from neuro import voices
+    monkeypatch.setattr(voices, "MIN_NEW_PERSON_SEC", 8.0)
+    pcm, spans = dialog((OWNER, 5.0), (ANNA, 2.5), (OWNER, 4.0))
+    rows = run_chunk(conn, pcm, Timed(spans))
+    assert rows[0]["person_id"] and rows[0]["person_id"] == rows[2]["person_id"]
+    assert rows[1]["person_id"] is None  # Анна говорила 2.5 с — пока без подписи
+    assert conn.execute("SELECT count(*) AS n FROM people").fetchone()["n"] == 1
+
+
+def test_whole_conversation_decides_and_dedupe_suggests(clean):
+    """Голоса решаются по всему разговору; похожий на названного — подсказка, безымянные дубли склеиваются."""
+    conn = clean
+    from neuro import people, voices
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5))
+    rows = run_chunk(conn, pcm, Timed(spans), minutes_ago=40)
+    anna = rows[1]["person_id"]
+    people.update_person(conn, anna, {"name": "Анна"})
+    # дубль Анны: отдельный безымянный человек с тем же голосом
+    m = voices.model()
+    dup = voices.new_unknown(conn, m.embed(synth(**ANNA, sec=3, seed=41)), 3.0, 100.0)
+    assert voices.dedupe(conn)["suggested"] == 0  # дубль ни разу не звучал в разговорах — не спрашиваем
+    conv_ids = [r["id"] for r in conn.execute("SELECT id FROM conversations ORDER BY id").fetchall()]
+    for i, cid in enumerate([conv_ids[0], conv_ids[0]]):
+        conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status)
+                        VALUES ('x', now(), now(), 'done') RETURNING id""")
+    extra = [r["id"] for r in conn.execute("SELECT id FROM conversations ORDER BY id DESC LIMIT 2").fetchall()]
+    for cid in extra:
+        conn.execute("""INSERT INTO segments (conversation_id, device_id, started_at, ended_at, text, person_id)
+                        VALUES (%s, 'x', now(), now(), 'привет', %s)""", (cid, dup["id"]))
+    res = voices.dedupe(conn)
+    assert res["suggested"] == 1
+    sug = people.list_people(conn)["suggestions"]
+    assert sug[0]["person_id"] == dup["id"] and sug[0]["name"] == "Анна"
+    assert people.answer_suggestion(conn, sug[0]["id"], True)["merged"] is True
+    assert conn.execute("SELECT count(*) AS n FROM people WHERE id = %s", (dup["id"],)).fetchone()["n"] == 0
+    # два безымянных одинаковых — склеиваются сами
+    a = voices.new_unknown(conn, m.embed(synth(**BORIS, sec=3, seed=51)), 3.0, 100.0)
+    b = voices.new_unknown(conn, m.embed(synth(**BORIS, sec=3, seed=52)), 3.0, 100.0)
+    assert voices.dedupe(conn)["merged"] == 1
+    left = {r["id"] for r in conn.execute("SELECT id FROM people").fetchall()}
+    assert (a["id"] in left) != (b["id"] in left)

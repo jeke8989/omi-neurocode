@@ -4,3 +4,4 @@ psycopg[binary]>=3.2,<4
 numpy>=1.26
 tzdata
 requests>=2.31
+sherpa-onnx>=1.13.6,<1.14

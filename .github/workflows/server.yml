@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: common:.
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
-        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py tests/test_tasks.py tests/test_tts.py
       - name: Voice model on real recordings
         working-directory: server
         env:
@@ -40,10 +40,18 @@ jobs:
           SPEAKER_TEST_DATA: /tmp/sr-data
         run: |
           mkdir -p /tmp/speaker-model
-          curl -fsSL -o /tmp/speaker-model/wespeaker_en_voxceleb_resnet34_LM.onnx \
-            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34_LM.onnx
+          curl -fsSL -o /tmp/speaker-model/wespeaker_en_voxceleb_resnet152_LM.onnx \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet152_LM.onnx
           git clone --depth 1 https://github.com/csukuangfj/sr-data /tmp/sr-data
           pytest -q -rs tests/test_voices_model.py
+      - name: Neural voice (Supertonic via sherpa-onnx)
+        working-directory: server
+        env:
+          PYTHONPATH: common:.
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
+          TTS_REAL: "1"
+          TTS_DIR: /tmp/tts
+        run: pytest -q -rs tests/test_tts.py
 
   docker-e2e:
     needs: tests
@@ -60,6 +68,7 @@ jobs:
           cp .env.example .env
           sed -i 's/^API_TOKEN=.*/API_TOKEN=e2e-token/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=e2epass/' .env
           sed -i 's/^STT_PROVIDER=.*/STT_PROVIDER=fake/; s/^CONVERSATION_IDLE_SEC=.*/CONVERSATION_IDLE_SEC=5/; s/^SPEECH_MIN_MS=.*/SPEECH_MIN_MS=0/' .env
+          echo "TTS_ENABLED=0" >> .env
           docker compose up -d --build
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && break; sleep 2; done
       - name: E2E over WebSocket

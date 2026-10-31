@@ -11,6 +11,7 @@ import requests
 
 from neuro import config, db, llm
 from neuro import agent_core, diary, extensions, i18n, people, retention
+from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
 
@@ -23,18 +24,17 @@ SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают рас
 {{"title": "название разговора, до 8 слов",
  "emoji": "одно эмодзи, которое лучше всего передаёт тему разговора",
  "summary": "о чём говорили и к чему пришли, 2–6 предложений; называй людей по именам, если они известны",
- "tasks": [{TASK_SCHEMA}],
+ "tasks": [{tasklib.SCHEMA}],
  "memories": ["важные факты, решения и договорённости, которые стоит помнить долго"],
  {people.SUMMARY_PEOPLE_FIELDS}}}
-Правила: задачи — только явные поручения, обещания и договорённости из разговора, ничего не выдумывай.
-Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "-",
-summary = "", списки пустые.
+{tasklib.RULES}
+Нет задач — пустой список. Если запись пустая или это шум и обрывки, title = "-", summary = "", списки пустые.
 {people.SUMMARY_PEOPLE_RULES}"""
 
 REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кнопку «запомни это». Тебе дан фрагмент расшифровки перед нажатием
 (может содержать ошибки распознавания). Верни строго JSON:
-{{"memory": "что именно стоит запомнить, 1–2 предложения", "tasks": [{TASK_SCHEMA}]}}
-Задачи — только если во фрагменте есть явное поручение или договорённость, иначе пустой список."""
+{{"memory": "что именно стоит запомнить, 1–2 предложения", "tasks": [{tasklib.SCHEMA}]}}
+{tasklib.RULES}"""
 
 
 def first_words(segs: list[dict], n: int = 7, lang: str = i18n.DEFAULT) -> str:
@@ -51,6 +51,8 @@ SELECT c.id, c.attempts FROM conversations c
 WHERE c.status = 'open'
   AND c.last_activity < now() - %(idle)s * interval '1 second'
   AND c.updated_at < now() - c.attempts * interval '2 minutes'
+  -- итоги — после того как STT решил, кто говорил (имена в итогах), но не дольше 10 минут
+  AND (c.voices_done OR c.last_activity < now() - interval '10 minutes')
   AND NOT EXISTS (
       SELECT 1 FROM audio_chunks a
       WHERE a.device_id = c.device_id AND a.status IN ('pending', 'processing')
@@ -98,30 +100,31 @@ def summarize_one(conn, conv_id: int):
     if not segs:
         title = i18n.t(lang, "conversation.empty")
     elif llm.configured() and text_len >= 40:
-        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + i18n.write_in(lang), transcript_text(segs))
+        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + i18n.write_in(lang),
+                               tasklib.context(conn, segs[0]["started_at"]) + "\n\n" + transcript_text(segs))
         title = str(result.get("title") or "").strip()
         if not title or title == "-":
             title = i18n.t(lang, "conversation.empty") if not result.get("summary") else first_words(segs, lang=lang)
         title = title[:200]
         emoji = str(result.get("emoji") or "💬").strip()[:8] or "💬"
         summary = str(result.get("summary") or "").strip() or None
-        tasks = clean_tasks(result.get("tasks"))
         memories = clean_list(result.get("memories"))
         try:
-            topics = people.apply_summary(conn, conv_id, segs, result, tasks)
+            topics = people.apply_summary(conn, conv_id, segs, result, [])
         except Exception:  # noqa: BLE001 — люди и темы не должны мешать итогам
             log.exception("conversation %s: people/topics failed", conv_id)
+        tasks = tasklib.classify(conn, result.get("tasks"), people.labels_map(segs), tasklib.owner_spoke(conn, segs))
     else:
         title = first_words(segs, lang=lang)
 
     with conn.transaction():
         conn.execute(
             """DELETE FROM tasks WHERE conversation_id = %s AND source = 'conversation'
-                   AND status = 'open' AND exported_at IS NULL""",
+                   AND status IN ('open', 'suggested') AND exported_at IS NULL""",
             (conv_id,),
         )
         conn.execute("DELETE FROM memories WHERE conversation_id = %s AND source = 'conversation'", (conv_id,))
-        insert_tasks(conn, conv_id, tasks, "conversation")
+        tasklib.save(conn, conv_id, tasks, "conversation")
         insert_memories(conn, conv_id, memories, "conversation")
         # Если пока мы думали, пришли новые фразы, STT вернул статус 'open' — тогда разговор пересчитаем позже.
         conn.execute(
@@ -199,14 +202,14 @@ def handle_remember(conn, ev: dict, segs: list[dict]):
         memory = i18n.t(i18n.lang(conn), "memory.mark", when=when)
     elif llm.configured():
         result = llm.chat_json(conn, "remember", REMEMBER_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
-                               transcript_text(segs))
+                               tasklib.context(conn, ev["ts"]) + "\n\n" + transcript_text(segs))
         memory = str(result.get("memory") or "").strip() or " ".join(s["text"] for s in segs)
-        tasks = clean_tasks(result.get("tasks"))
+        tasks = tasklib.classify(conn, result.get("tasks"), people.labels_map(segs), None, source="button")
     else:
         memory = " ".join(s["text"] for s in segs)
     with conn.transaction():
         insert_memories(conn, conv_id, [f"{memory}"], "button")
-        insert_tasks(conn, conv_id, tasks, "button")
+        tasklib.save(conn, conv_id, tasks, "button")
         set_event(conn, ev["id"], "done", memory[:500])
     log.info("remember @%s: %s", when, memory[:120])
 
@@ -228,6 +231,44 @@ def handle_command(conn, ev: dict, segs: list[dict]):
         reply = spoken
     set_event(conn, ev["id"], "done", reply[:500])
     log.info("offline question: %s -> %s", spoken[:80], reply[:80])
+
+
+# ---------------------------------------------------------------------------
+# 2б. «Напомни… / создай задачу…» в любом разговоре — задача через минуту, не дожидаясь конца разговора
+# ---------------------------------------------------------------------------
+def quick_tasks(conn):
+    rows = conn.execute(
+        people.SEGMENT_SELECT + """ WHERE NOT s.task_checked AND s.started_at < now() - interval '45 seconds'
+                                   ORDER BY s.started_at LIMIT 300""").fetchall()
+    if not rows:
+        return
+    conn.execute("UPDATE segments SET task_checked = true WHERE id = ANY(%s)", ([r["id"] for r in rows],))
+    if not llm.configured():
+        return
+    owner_known = conn.execute("SELECT 1 FROM people WHERE is_owner").fetchone() is not None
+    done_until = None
+    for seg in rows:
+        if not tasklib.TRIGGER.search(seg["text"] or ""):
+            continue
+        # только голос владельца: чужое «напомни» (собеседник, телевизор) задачей не становится
+        if owner_known and seg["person_id"] and not seg["person_owner"]:
+            continue
+        if done_until and seg["started_at"] <= done_until:
+            continue
+        window = conn.execute(
+            people.SEGMENT_SELECT + """ WHERE s.device_id = (SELECT device_id FROM segments WHERE id = %s)
+                                       AND s.started_at BETWEEN %s AND %s ORDER BY s.started_at""",
+            (seg["id"], seg["started_at"] - timedelta(seconds=60), seg["started_at"] + timedelta(seconds=45))).fetchall()
+        done_until = seg["started_at"] + timedelta(seconds=45)
+        try:
+            result = llm.chat_json(conn, "remember", tasklib.QUICK_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
+                                   tasklib.context(conn, seg["started_at"]) + "\n\n" + transcript_text(window))
+        except Exception:  # noqa: BLE001
+            log.exception("quick task from segment %s failed", seg["id"])
+            continue
+        found = tasklib.classify(conn, result.get("tasks"), people.labels_map(window), None, source="voice")
+        res = tasklib.save(conn, seg["conversation_id"], found, "voice")
+        log.info("quick task from «%s»: %s", (seg["text"] or "")[:60], res)
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +394,7 @@ def main():
         try:
             with db.connect() as conn:
                 while True:
+                    quick_tasks(conn)
                     summarize_conversations(conn)
                     process_events(conn)
                     export_tasks(conn)

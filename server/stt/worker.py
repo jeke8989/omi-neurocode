@@ -192,6 +192,7 @@ UPDATE conversations SET
     started_at = least(started_at, %(start)s),
     last_activity = greatest(last_activity, %(end)s),
     status = 'open',
+    voices_done = false,
     updated_at = now()
 WHERE id = %(id)s
 """
@@ -291,12 +292,16 @@ def attach_people(conn, pcm: bytes, segs: list[Seg], seg_ids: list[int], labels:
     done = 0
     for sid, seg, local in zip(seg_ids, segs, labels):
         pid, score = mapping.get(local, (None, 0.0)) if local is not None else (None, 0.0)
-        if pid is None:
+        if local is None:
             continue
+        # отпечаток храним и у неузнанных фраз: по ним после разговора решается, кто это
         emb = voices.embed_span(pcm, seg.start, seg.end)
-        conn.execute("UPDATE segments SET person_id = %s, voice_score = %s, embedding = %s WHERE id = %s",
-                     (pid, round(score, 3), voices.vec(emb) if emb is not None else None, sid))
-        done += 1
+        conn.execute(
+            """UPDATE segments SET person_id = %s, voice_score = %s, embedding = %s, embed_backend = %s
+               WHERE id = %s""",
+            (pid, round(score, 3) if pid else None, voices.vec(emb) if emb is not None else None,
+             voices.backend_name() if emb is not None else None, sid))
+        done += 1 if pid else 0
     return done
 
 
@@ -351,6 +356,23 @@ def process(conn, stt, chunk: dict):
              chunk["id"], len(segs), len(local_voices), named, conv_id, took, chunk["duration_ms"] / 1000)
 
 
+def finalize_voices(conn):
+    """Разговор закончился — решаем, кто в нём говорил, по всем его фразам (до итогов агента)."""
+    if not voices.enabled(conn):
+        conn.execute("UPDATE conversations SET voices_done = true WHERE NOT voices_done")
+        return
+    for conv_id in voices.pending_conversations(conn, max(60, config.CONVERSATION_IDLE_SEC - 30)):
+        try:
+            res = voices.finalize_conversation(conn, conv_id)
+            log.info("conversation %s: voices %d, signed %d, new %d", conv_id, res["voices"], res["named"],
+                     res["new"])
+        except voices.Unavailable:
+            return
+        except Exception:  # noqa: BLE001
+            log.exception("conversation %s: voices failed", conv_id)
+            conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
+
+
 def main():
     db.wait_and_migrate()
     provider_cls = PROVIDERS.get(config.STT_PROVIDER)
@@ -359,6 +381,7 @@ def main():
     stt = provider_cls()
     log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE or "app")
     voices.warm_up()
+    migrated = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -369,19 +392,32 @@ def main():
                         conn.execute(REQUEUE_STUCK_SQL)
                         conn.execute(RETRY_FAILED_SQL)
                         last_requeue = time.monotonic()
+                    if not migrated and voices.ready():
+                        try:
+                            voices.migrate_backend(conn)
+                            migrated = True
+                        except voices.Unavailable:
+                            pass
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: model migration failed")
+                            migrated = True
                     try:
                         if voices.enroll_owner(conn):
                             log.info("voices: owner voice updated from button questions")
                     except Exception:  # noqa: BLE001
                         log.exception("voices: owner enrollment failed")
-                    if time.monotonic() - last_consolidate > 600:
+                    finalize_voices(conn)
+                    if time.monotonic() - last_consolidate > 3600:
                         last_consolidate = time.monotonic()
                         try:
-                            merged = voices.consolidate(conn)
-                            if merged:
-                                log.info("voices: merged %d duplicate voices", merged)
+                            res = voices.dedupe(conn)
+                            if res["merged"] or res["suggested"]:
+                                log.info("voices: merged %d duplicate voices, %d suggestions", res["merged"],
+                                         res["suggested"])
+                        except voices.Unavailable:
+                            pass
                         except Exception:  # noqa: BLE001
-                            log.exception("voices: consolidate failed")
+                            log.exception("voices: dedupe failed")
                     chunk = conn.execute(CLAIM_SQL).fetchone()
                     if chunk is None:
                         time.sleep(1.5)

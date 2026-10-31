@@ -1,12 +1,19 @@
 """Голоса: кто говорит в разговоре.
 
-1. Кусок записи делится на отрезки речи по паузам (VAD по громкости).
-2. Для каждого отрезка ≥ 1 с считается «отпечаток голоса» — вектор из модели WeSpeaker ResNet34
-   (ONNX, работает на процессоре сервера, бесплатно, звук никуда не уходит).
-3. Соседние отрезки одного голоса склеиваются в реплики; голоса куска сравниваются с людьми:
-   похож — подписываем имя, нет — заводим «Голос N». Подтверждённые имена дообучают узнавание.
+1. Кусок записи делится на отрезки речи по паузам; длинные отрезки — окнами по 3 с (смена говорящего
+   без паузы). У каждого отрезка ≥ 1 с — «отпечаток голоса» из модели WeSpeaker (ONNX, на процессоре
+   сервера, звук никуда не уходит).
+2. Пока разговор идёт, фразы подписываются предварительно: только если голос уверенно похож на уже
+   известного человека. Новые люди по коротким кускам не заводятся — отсюда раньше были дубли.
+3. Когда разговор закончился, все отрезки разговора собираются в голоса (кластеры) — у каждого десятки
+   секунд речи вместо 2–5 — и уже по ним решается, кто это. Новый «Голос N» — только если говорил
+   ≥ 8 с и не похож ни на кого.
+4. Сравнение с человеком — и со средним отпечатком, и с несколькими лучшими образцами: голос в машине
+   и в комнате звучит по-разному.
+5. Раз в час — уборка дублей: похожие безымянные голоса склеиваются, похожие на названных — подсказка
+   «Голос 7 похож на Анну — объединить?».
 
-Если модель недоступна, работает простой спектральный отпечаток — хуже, но пайплайн не ломается.
+Если модель недоступна, работает простой спектральный отпечаток (тесты) — хуже, но пайплайн не ломается.
 """
 from __future__ import annotations
 
@@ -16,6 +23,7 @@ import time
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import requests
@@ -25,33 +33,46 @@ from .audio import SAMPLE_RATE
 
 log = logging.getLogger("neuro.voices")
 
+# ResNet152: на коротких отрезках разделяет голоса заметно лучше ResNet34 (проверено на записях людей),
+# в ~3 раза медленнее — около 2 с процессора на 30 с записи.
+SPEAKER_MODEL = config.env("SPEAKER_MODEL", "wespeaker_en_voxceleb_resnet152_LM")
 MODEL_URL = config.env(
     "SPEAKER_MODEL_URL",
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
-    "wespeaker_en_voxceleb_resnet34_LM.onnx")
+    + quote(SPEAKER_MODEL + ".onnx"))
 MODEL_DIR = Path(config.env("SPEAKER_MODEL_DIR", "/models/speakers"))
 VOICE_DIR = Path(config.env("VOICE_DIR", "/data/voices"))
 BACKEND = config.env("SPEAKER_BACKEND", "wespeaker")  # wespeaker | spectral
 
 FRAME = 20 * SAMPLE_RATE // 1000  # 20 мс
 MIN_EMBED_SEC = 1.0               # короче — отпечаток ненадёжен
-MIN_NEW_VOICE_SEC = 2.0           # новый «Голос N» заводим только по уверенному отрезку
+MIN_NEW_VOICE_SEC = 2.0           # дообучение — только по уверенным отрезкам
+MIN_NEW_PERSON_SEC = config.env_float("SPEAKER_MIN_NEW_SEC", 8.0)  # новый «Голос N» — если говорил столько
+MIN_MATCH_SEC = 3.0               # «похоже, но не уверены» подписываем, только если речи достаточно
+TOP_K = 3                         # сравнение с лучшими образцами человека
 
 
 @dataclass
 class Thresholds:
-    same: float      # два отрезка одного куска — один голос
+    same: float      # два отрезка одного разговора — один голос
     match: float     # голос = известный человек
     maybe: float     # похоже, но не уверены («Анна?»)
     learn: float     # достаточно уверенно, чтобы дообучить отпечаток
-    merge: float     # два неизвестных голоса — один и тот же
+    merge: float     # два безымянных голоса — один человек (склеиваем сами)
+    suggest: float   # безымянный похож на названного — спрашиваем
 
 
 THRESHOLDS = {
-    # подобрано на записях разных людей: один человек 0.50–0.77, разные — не выше 0.36
-    "wespeaker": Thresholds(same=0.45, match=0.50, maybe=0.40, learn=0.60, merge=0.62),
+    # один человек 0.50–0.77, разные — не выше 0.36 (ResNet34, записи людей)
+    "wespeaker_en_voxceleb_resnet34_LM": Thresholds(same=0.45, match=0.50, maybe=0.40, learn=0.60, merge=0.62,
+                                                     suggest=0.48),
+    # ResNet152: один человек ≥ 0.54 (3 с) и 0.59 (целиком), разные — до 0.30
+    "wespeaker_en_voxceleb_resnet152_LM": Thresholds(same=0.40, match=0.47, maybe=0.37, learn=0.55, merge=0.60,
+                                                      suggest=0.44),
+    "wespeaker_en_voxceleb_resnet293_LM": Thresholds(same=0.40, match=0.47, maybe=0.37, learn=0.55, merge=0.60,
+                                                      suggest=0.44),
     # запасной MFCC-отпечаток (тесты): один голос ≥ 0.998, разные синтетические — не выше 0.95
-    "spectral": Thresholds(same=0.975, match=0.975, maybe=0.96, learn=0.985, merge=0.99),
+    "spectral": Thresholds(same=0.975, match=0.975, maybe=0.96, learn=0.985, merge=0.99, suggest=0.97),
 }
 
 
@@ -101,7 +122,7 @@ class _WeSpeaker:
     def __init__(self):
         import onnxruntime as ort  # noqa: PLC0415 — тяжёлый импорт только в STT
 
-        path = MODEL_DIR / Path(MODEL_URL).name
+        path = MODEL_DIR / (SPEAKER_MODEL + ".onnx")
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             log.info("downloading speaker model %s", MODEL_URL)
@@ -182,12 +203,18 @@ def warm_up():
     threading.Thread(target=run, name="voices-warmup", daemon=True).start()
 
 
+def ready() -> bool:
+    """Модель уже загружена (не ждём скачивания)."""
+    return _model is not None
+
+
 def backend_name() -> str:
-    return "wespeaker" if BACKEND == "wespeaker" else "spectral"
+    """Имя модели отпечатков: отпечатки разных моделей несравнимы, поэтому хранится у каждого."""
+    return SPEAKER_MODEL if BACKEND == "wespeaker" else "spectral"
 
 
 def thresholds() -> Thresholds:
-    return THRESHOLDS[backend_name()]
+    return THRESHOLDS.get(backend_name(), THRESHOLDS["wespeaker_en_voxceleb_resnet34_LM"])
 
 
 def cosine(a, b) -> float:
@@ -335,19 +362,47 @@ def vec(v) -> list[float]:
 
 
 def people_vectors(conn) -> list[dict]:
+    """Люди с отпечатком текущей модели."""
     return conn.execute(
-        "SELECT id, name, is_owner, ignored, centroid FROM people WHERE centroid IS NOT NULL").fetchall()
+        """SELECT id, name, is_owner, ignored, centroid FROM people
+           WHERE centroid IS NOT NULL AND backend = %s""", (backend_name(),)).fetchall()
 
 
-def best_person(conn, emb: np.ndarray) -> tuple[dict | None, float]:
+def _prints(conn, person_id: int, limit: int = 60) -> list[np.ndarray]:
+    rows = conn.execute(
+        """SELECT embedding FROM voiceprints WHERE person_id = %s AND backend = %s
+           ORDER BY confirmed DESC, id DESC LIMIT %s""", (person_id, backend_name(), limit)).fetchall()
+    return [np.asarray(r["embedding"], dtype=np.float32) for r in rows]
+
+
+def score_person(conn, emb: np.ndarray, person: dict) -> float:
+    """Похожесть голоса на человека: лучшее из «со средним отпечатком» и «с 3 самыми похожими образцами»."""
+    sim = cosine(emb, person["centroid"])
+    prints = _prints(conn, person["id"])
+    if prints:
+        sims = sorted((cosine(emb, p) for p in prints), reverse=True)[:TOP_K]
+        sim = max(sim, float(np.mean(sims)))
+    return sim
+
+
+def match_person(conn, emb: np.ndarray, exclude: set[int] | frozenset = frozenset(),
+                 people: list[dict] | None = None) -> tuple[dict | None, float]:
+    """Самый похожий человек. Образцы смотрим у трёх лучших по среднему отпечатку — быстро и точно."""
+    cands = [p for p in (people if people is not None else people_vectors(conn))
+             if p["id"] not in exclude and len(p["centroid"]) == len(emb)]
+    if not cands:
+        return None, -1.0
+    top = sorted(cands, key=lambda p: cosine(emb, p["centroid"]), reverse=True)[:3]
     best, best_sim = None, -1.0
-    for p in people_vectors(conn):
-        if len(p["centroid"]) != len(emb):
-            continue  # отпечаток другой модели
-        sim = cosine(emb, p["centroid"])
+    for p in top:
+        sim = score_person(conn, emb, p)
         if sim > best_sim:
             best, best_sim = p, sim
     return best, best_sim
+
+
+def best_person(conn, emb: np.ndarray) -> tuple[dict | None, float]:
+    return match_person(conn, emb)
 
 
 def recompute_centroid(conn, person_id: int):
@@ -359,8 +414,8 @@ def recompute_centroid(conn, person_id: int):
         return
     c = np.mean([np.asarray(r["embedding"], dtype=np.float32) for r in rows], axis=0)
     c = c / (np.linalg.norm(c) + 1e-9)
-    conn.execute("UPDATE people SET centroid = %s, samples = %s, updated_at = now() WHERE id = %s",
-                 (vec(c), len(rows), person_id))
+    conn.execute("UPDATE people SET centroid = %s, samples = %s, backend = %s, updated_at = now() WHERE id = %s",
+                 (vec(c), len(rows), backend_name(), person_id))
 
 
 def add_voiceprint(conn, person_id: int, emb: np.ndarray, seconds: float, confirmed: bool = False,
@@ -406,13 +461,19 @@ def purge_unnamed(conn) -> int:
 
 
 # ======================================================================= узнавание
-def new_unknown(conn, emb: np.ndarray, seconds: float, loudness: float) -> dict:
+def new_unknown(conn, emb: np.ndarray, seconds: float, loudness: float,
+                prints: list[tuple[np.ndarray, float]] | None = None) -> dict:
+    """Новый «Голос N». prints — лучшие отрезки голоса (отпечаток, секунды) для узнавания в будущем."""
     number = conn.execute("SELECT coalesce(max(number), 0) + 1 AS n FROM people").fetchone()["n"]
     p = conn.execute(
-        """INSERT INTO people (number, centroid, samples, speech_sec, loudness, first_seen, last_seen)
-           VALUES (%s, %s, 0, 0, %s, now(), now()) RETURNING id, name, is_owner, ignored, centroid""",
-        (number, vec(emb), loudness)).fetchone()
-    add_voiceprint(conn, p["id"], emb, seconds)
+        """INSERT INTO people (number, centroid, samples, speech_sec, loudness, first_seen, last_seen, backend)
+           VALUES (%s, %s, 0, 0, %s, now(), now(), %s) RETURNING id, name, is_owner, ignored, centroid""",
+        (number, vec(emb), loudness, backend_name())).fetchone()
+    for e, sec in (prints or [(emb, seconds)]):
+        conn.execute(
+            """INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed)
+               VALUES (%s, %s, %s, %s, false)""", (p["id"], vec(e), round(sec, 2), backend_name()))
+    recompute_centroid(conn, p["id"])
     return p
 
 
@@ -434,42 +495,284 @@ def sample_path(person_id: int) -> Path:
 
 
 def identify(conn, voices: list[LocalVoice], pcm: bytes, turns: list[Turn]) -> dict[int, tuple[int | None, float]]:
-    """Голоса куска -> люди. Возвращает {локальный номер: (person_id или None, сходство)}.
-
-    Похож на известного (≥ maybe) — подписываем им; уверенно похож и говорил ≥ 2 с — дообучаем.
-    Незнакомый голос, говоривший ≥ 2 с, становится «Голосом N» — если разрешено запоминать собеседников
-    (или владелец ещё не найден: иначе его не из кого будет выбрать)."""
+    """Предварительные подписи куска (пока разговор идёт): {локальный голос: (person_id или None, сходство)}.
+    Подписываем только уверенно узнанных; новых людей здесь не заводим — это решается по всему разговору."""
     th = thresholds()
-    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
-    allow_new = others_enabled(conn) or not has_owner(conn)
+    people = people_vectors(conn)
     out: dict[int, tuple[int | None, float]] = {}
     for v in voices:
-        emb = v.centroid
-        person, sim = best_person(conn, emb)
-        longest = max((t for t in turns if t.local == v.index), key=lambda t: t.end - t.start, default=None)
-        if person is not None and sim >= th.maybe:
-            pid = person["id"]
-            if sim >= th.learn and v.seconds >= MIN_NEW_VOICE_SEC:
-                add_voiceprint(conn, pid, emb, v.seconds)
-        elif v.seconds >= MIN_NEW_VOICE_SEC and allow_new:
-            person = new_unknown(conn, emb, v.seconds, v.loudness)
-            pid, sim = person["id"], 1.0
+        person, sim = match_person(conn, v.centroid, people=people)
+        if person is not None and (sim >= th.match or sim >= th.maybe and v.seconds >= MIN_MATCH_SEC):
+            out[v.index] = (person["id"], sim)
         else:
             out[v.index] = (None, max(sim, 0.0))
-            continue
-        if longest is not None and (longest.end - longest.start) >= 2 * SAMPLE_RATE \
-                and not sample_path(pid).exists():
-            try:
-                save_sample(pid, x[longest.start:longest.end])
-            except OSError:
-                log.warning("cannot save voice sample for person %s", pid)
-        conn.execute(
-            """UPDATE people SET speech_sec = speech_sec + %s, last_seen = now(),
-                   first_seen = coalesce(first_seen, now()),
-                   loudness = CASE WHEN loudness IS NULL THEN %s ELSE loudness * 0.9 + %s * 0.1 END
-               WHERE id = %s""", (round(v.seconds, 1), v.loudness, v.loudness, pid))
-        out[v.index] = (pid, sim)
     return out
+
+
+# ======================================================================= решение по всему разговору
+@dataclass
+class _Cluster:
+    segs: list = field(default_factory=list)   # (id, секунды, отпечаток)
+    weight: float = 0.0
+    total: np.ndarray | None = None
+
+    def add(self, sid: int, sec: float, emb: np.ndarray):
+        self.segs.append((sid, sec, emb))
+        w = max(sec, 0.5)
+        self.total = emb * w if self.total is None else self.total + emb * w
+        self.weight += w
+
+    @property
+    def centroid(self) -> np.ndarray:
+        return _norm(self.total)
+
+    @property
+    def seconds(self) -> float:
+        return sum(sec for _, sec, _ in self.segs)
+
+
+def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict[int, int]) -> list[_Cluster]:
+    """Агломеративная кластеризация отрезков по голосу (центроидная связь). Отрезки, которые пользователь
+    подписал разными людьми, в один голос не склеиваются."""
+    clusters: list[_Cluster] = []
+    owners: list[set[int]] = []
+    for sid, sec, emb in units:
+        c = _Cluster()
+        c.add(sid, sec, emb)
+        clusters.append(c)
+        owners.append({pinned[sid]} if sid in pinned else set())
+    while len(clusters) > 1:
+        best, bi, bj = -1.0, -1, -1
+        cents = [c.centroid for c in clusters]
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                if owners[i] and owners[j] and owners[i] != owners[j]:
+                    continue
+                sim = float(cents[i] @ cents[j])
+                if sim > best:
+                    best, bi, bj = sim, i, j
+        if best < th:
+            break
+        for sid, sec, emb in clusters[bj].segs:
+            clusters[bi].add(sid, sec, emb)
+        owners[bi] |= owners[bj]
+        del clusters[bj], owners[bj]
+    return clusters
+
+
+def finalize_conversation(conn, conv_id: int) -> dict:
+    """Кто говорил в разговоре — по всем его отрезкам. Ручные подписи («Кто это?») сохраняются и служат опорой."""
+    th = thresholds()
+    segs = conn.execute(
+        """SELECT s.id, s.chunk_id, s.speaker, s.person_id, s.voice_score, s.embedding, s.embed_backend,
+                  extract(epoch FROM s.ended_at - s.started_at) AS sec, s.started_at
+           FROM segments s WHERE s.conversation_id = %s ORDER BY s.started_at, s.id""", (conv_id,)).fetchall()
+    manual = {s["id"]: s["person_id"] for s in segs if s["person_id"] and (s["voice_score"] or 0) >= 0.999}
+    units = [(s["id"], float(s["sec"] or 0), np.asarray(s["embedding"], dtype=np.float32)) for s in segs
+             if s["embedding"] and s["embed_backend"] == backend_name()]
+    result = {"voices": 0, "named": 0, "new": 0}
+    if not units:
+        conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
+        return result
+    clusters = _cluster(units, th.same, manual)
+    allow_new = others_enabled(conn) or not has_owner(conn)
+    people = people_vectors(conn)
+    assign: dict[int, tuple[int | None, float]] = {}
+    used: set[int] = set()
+    # сначала голоса с ручной подписью, потом — по убыванию количества речи
+    order = sorted(clusters, key=lambda c: (not any(sid in manual for sid, _, _ in c.segs), -c.seconds))
+    for c in order:
+        result["voices"] += 1
+        pins = [manual[sid] for sid, _, _ in c.segs if sid in manual]
+        pid, score = None, 0.0
+        if pins:
+            pid, score = max(set(pins), key=pins.count), 1.0
+        else:
+            person, sim = match_person(conn, c.centroid, exclude=used, people=people)
+            if person is not None and (sim >= th.match or sim >= th.maybe and c.seconds >= MIN_MATCH_SEC):
+                pid, score = person["id"], sim
+            elif c.seconds >= MIN_NEW_PERSON_SEC and allow_new:
+                best = sorted(c.segs, key=lambda t: -t[1])[:8]
+                p = new_unknown(conn, c.centroid, c.seconds, 0.0,
+                                prints=[(emb, sec) for _, sec, emb in best if sec >= MIN_EMBED_SEC])
+                people = people_vectors(conn)
+                pid, score = p["id"], 1.0
+                result["new"] += 1
+                _keep_sample(conn, pid, best[0][0])
+        if pid is None:
+            for sid, _, _ in c.segs:
+                assign[sid] = (None, 0.0)
+            continue
+        used.add(pid)
+        result["named"] += 1
+        for sid, _, emb in c.segs:
+            assign[sid] = (pid, 1.0 if sid in manual else score)
+        # дообучение: уверенный голос — 2 самых длинных отрезка, если ещё не в образцах
+        if score >= th.learn and not pins:
+            for sid, sec, emb in sorted(c.segs, key=lambda t: -t[1])[:2]:
+                if sec >= MIN_NEW_VOICE_SEC:
+                    conn.execute("DELETE FROM voiceprints WHERE segment_id = %s", (sid,))
+                    conn.execute(
+                        """INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed, segment_id)
+                           VALUES (%s, %s, %s, %s, false, %s)""", (pid, vec(emb), round(sec, 2), backend_name(), sid))
+            recompute_centroid(conn, pid)
+        conn.execute(
+            """UPDATE people SET speech_sec = speech_sec + %s, last_seen = greatest(coalesce(last_seen, now()), now()),
+                   first_seen = coalesce(first_seen, now()) WHERE id = %s""", (round(c.seconds, 1), pid))
+        if not sample_path(pid).exists():
+            _keep_sample(conn, pid, max(c.segs, key=lambda t: t[1])[0])
+    # короткие фразы без отпечатка — к голосу того же куска (тот же локальный голос) или соседней фразы
+    by_local: dict[tuple, int | None] = {}
+    for s in segs:
+        if s["id"] in assign and assign[s["id"]][0]:
+            by_local.setdefault((s["chunk_id"], s["speaker"]), assign[s["id"]][0])
+    last_pid = None
+    for s in segs:
+        if s["id"] in manual:
+            last_pid = manual[s["id"]]
+            continue
+        if s["id"] in assign:
+            pid, score = assign[s["id"]]
+        else:
+            pid = by_local.get((s["chunk_id"], s["speaker"]))
+            score = 0.6 if pid else 0.0
+        conn.execute("UPDATE segments SET person_id = %s, voice_score = %s WHERE id = %s",
+                     (pid, round(score, 3) if pid else None, s["id"]))
+        last_pid = pid or last_pid
+    conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
+    return result
+
+
+def _keep_sample(conn, person_id: int, segment_id: int):
+    """Запись голоса для «Кто это?» — из звука фразы, если он ещё хранится на сервере."""
+    row = conn.execute(
+        """SELECT a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
+                  extract(epoch FROM s.ended_at - s.started_at) AS dur
+           FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id WHERE s.id = %s""", (segment_id,)).fetchone()
+    if not row or not row["path"] or not Path(row["path"]).exists():
+        return
+    try:
+        with open(row["path"], "rb") as f:
+            f.seek(max(0, int(float(row["off"]) * SAMPLE_RATE)) * 2)
+            data = f.read(int(min(float(row["dur"]), 6.0) * SAMPLE_RATE) * 2)
+        if len(data) >= SAMPLE_RATE:  # хотя бы полсекунды
+            save_sample(person_id, np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16))
+    except OSError:
+        log.warning("cannot save voice sample for person %s", person_id)
+
+
+def pending_conversations(conn, idle_sec: int) -> list[int]:
+    """Разговоры, которые закончились, а голоса по ним ещё не решены."""
+    rows = conn.execute(
+        """SELECT c.id FROM conversations c
+           WHERE NOT c.voices_done AND c.last_activity < now() - %s * interval '1 second'
+             AND NOT EXISTS (SELECT 1 FROM audio_chunks a WHERE a.device_id = c.device_id
+                             AND a.status IN ('pending', 'processing') AND a.started_at <= c.last_activity)
+           ORDER BY c.last_activity LIMIT 5""", (idle_sec,)).fetchall()
+    return [r["id"] for r in rows]
+
+
+# ======================================================================= уборка дублей
+def dedupe(conn) -> dict:
+    """Безымянные голоса, похожие друг на друга, склеиваем сами. Безымянный, похожий на названного
+    человека (или владельца), — подсказка «это он?»: двух разных людей с одним голосом не склеиваем молча."""
+    th = thresholds()
+    # голос, прозвучавший в одном разговоре и не встретившийся 30 дней, забываем сам
+    stale = conn.execute(
+        """SELECT p.id FROM people p
+           WHERE p.name IS NULL AND NOT p.is_owner AND p.last_seen < now() - interval '30 days'
+             AND (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) <= 1""").fetchall()
+    for r in stale:
+        forget_person(conn, r["id"])
+    people = conn.execute(
+        """SELECT p.id, p.name, p.is_owner, p.ignored, p.centroid, p.speech_sec,
+                  (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations
+           FROM people p
+           WHERE p.centroid IS NOT NULL AND p.backend = %s
+           ORDER BY p.is_owner DESC, (p.name IS NOT NULL) DESC, p.speech_sec DESC""", (backend_name(),)).fetchall()
+    merged, suggested = 0, len(stale) * 0
+    gone: set[int] = set()
+    for b in reversed(people):  # сначала самые «слабые» безымянные
+        if b["id"] in gone or b["name"] or b["is_owner"]:
+            continue
+        others = [p for p in people if p["id"] != b["id"] and p["id"] not in gone]
+        target, sim = match_person(conn, np.asarray(b["centroid"], dtype=np.float32), people=others)
+        if target is None:
+            continue
+        if not target["name"] and not target["is_owner"] and sim >= th.merge:
+            merge_people(conn, b["id"], target["id"])
+            gone.add(b["id"])
+            merged += 1
+        elif (target["name"] or target["is_owner"]) and sim >= th.suggest and (b["conversations"] or 0) >= 2:
+            label_name = target["name"] or "Я"
+            seen = conn.execute(
+                """SELECT 1 FROM person_suggestions WHERE person_id = %s AND target_id = %s
+                       AND status IN ('pending', 'rejected')""", (b["id"], target["id"])).fetchone()
+            if not seen:
+                conn.execute(
+                    """INSERT INTO person_suggestions (person_id, name, target_id, evidence)
+                       VALUES (%s, %s, %s, %s)""",
+                    (b["id"], label_name, target["id"], f"голос похож на {round(sim * 100)}%"))
+                suggested += 1
+    return {"merged": merged, "suggested": suggested}
+
+
+def consolidate(conn) -> int:
+    return dedupe(conn)["merged"]
+
+
+# ======================================================================= смена модели
+def migrate_backend(conn) -> int:
+    """Модель отпечатков сменилась: отпечатки старой несравнимы. Пересчитываем людей по записи голоса
+    (6 с, есть у каждого) и по фразам, звук которых ещё хранится. Возвращает число пересчитанных людей."""
+    rows = conn.execute(
+        "SELECT id, name, is_owner FROM people WHERE backend IS DISTINCT FROM %s", (backend_name(),)).fetchall()
+    done = 0
+    m = model()
+    for p in rows:
+        prints: list[tuple[np.ndarray, float]] = []
+        sp = sample_path(p["id"])
+        if sp.exists():
+            try:
+                with wave.open(str(sp)) as w:
+                    x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+                if len(x) >= SAMPLE_RATE * MIN_EMBED_SEC:
+                    prints.append((m.embed(x), len(x) / SAMPLE_RATE))
+            except (OSError, wave.Error):
+                pass
+        segs = conn.execute(
+            """SELECT s.id, a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
+                      extract(epoch FROM s.ended_at - s.started_at) AS dur
+               FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id
+               WHERE s.person_id = %s AND a.path IS NOT NULL
+                 AND s.ended_at - s.started_at >= interval '2 seconds'
+               ORDER BY s.voice_score DESC NULLS LAST, s.started_at DESC LIMIT 15""", (p["id"],)).fetchall()
+        for s in segs:
+            if not s["path"] or not Path(s["path"]).exists():
+                continue
+            try:
+                with open(s["path"], "rb") as f:
+                    f.seek(max(0, int(float(s["off"]) * SAMPLE_RATE)) * 2)
+                    data = f.read(int(min(float(s["dur"]), 12.0) * SAMPLE_RATE) * 2)
+                x = np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16)
+                if len(x) >= SAMPLE_RATE * MIN_EMBED_SEC:
+                    e = m.embed(x)
+                    prints.append((e, len(x) / SAMPLE_RATE))
+                    conn.execute("UPDATE segments SET embedding = %s, embed_backend = %s WHERE id = %s",
+                                 (vec(e), backend_name(), s["id"]))
+            except OSError:
+                continue
+        for e, sec in prints:
+            conn.execute(
+                """INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (p["id"], vec(e), round(sec, 2), backend_name(), bool(p["name"] or p["is_owner"])))
+        recompute_centroid(conn, p["id"])
+        conn.execute("UPDATE people SET backend = %s WHERE id = %s", (backend_name(), p["id"]))
+        done += 1
+    if done:
+        log.info("voices: %d people moved to model %s", done, backend_name())
+    return done
 
 
 # ======================================================================= голос владельца по кнопке
@@ -590,38 +893,15 @@ def merge_people(conn, source: int, target: int):
         log.warning("cannot move voice sample %s -> %s", source, target)
 
 
-def consolidate(conn) -> int:
-    """Склеивает голоса, которые оказались одним человеком (по мере накопления отпечатков).
-    Двух названных разными именами людей не склеивает никогда."""
-    th = thresholds()
-    people = conn.execute(
-        """SELECT id, name, is_owner, centroid, speech_sec FROM people
-           WHERE centroid IS NOT NULL ORDER BY is_owner DESC, (name IS NOT NULL) DESC, speech_sec DESC"""
-    ).fetchall()
-    gone: set[int] = set()
-    for i, a in enumerate(people):
-        if a["id"] in gone:
-            continue
-        for b in people[i + 1:]:
-            if b["id"] in gone or len(a["centroid"]) != len(b["centroid"]):
-                continue
-            if (a["name"] or a["is_owner"]) and (b["name"] or b["is_owner"]):
-                continue
-            if cosine(a["centroid"], b["centroid"]) >= th.merge:
-                merge_people(conn, b["id"], a["id"])  # a — названный или говоривший дольше
-                gone.add(b["id"])
-    return len(gone)
-
-
 def assign_segment(conn, segment_id: int, person_id: int):
     """Правка вручную: эта фраза — этого человека. Её отпечаток уходит к нему как подтверждённый."""
-    row = conn.execute("SELECT embedding, person_id, started_at, ended_at FROM segments WHERE id = %s",
+    row = conn.execute("SELECT embedding, embed_backend, person_id, started_at, ended_at FROM segments WHERE id = %s",
                        (segment_id,)).fetchone()
     if row is None:
         return
     conn.execute("UPDATE segments SET person_id = %s, voice_score = 1 WHERE id = %s", (person_id, segment_id))
     conn.execute("DELETE FROM voiceprints WHERE segment_id = %s", (segment_id,))
-    if row["embedding"]:
+    if row["embedding"] and row["embed_backend"] == backend_name():
         sec = max(1.0, (row["ended_at"] - row["started_at"]).total_seconds())
         add_voiceprint(conn, person_id, np.asarray(row["embedding"], dtype=np.float32), sec, confirmed=True,
                        segment_id=segment_id)
