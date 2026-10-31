@@ -14,6 +14,7 @@ import codes.neuro.neurosoft.net.Graph
 import codes.neuro.neurosoft.net.ModelTask
 import codes.neuro.neurosoft.net.PeopleInfo
 import codes.neuro.neurosoft.net.TaskItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -34,6 +35,10 @@ class Cached<T>(private val loader: suspend () -> T) {
             _state.update { it.copy(loading = true) }
             val data = loader()
             _state.value = Res(data)
+        } catch (e: CancellationException) {
+            // экран ушёл или сменился день — это не ошибка, показывать нечего
+            _state.update { it.copy(loading = false) }
+            throw e
         } catch (e: Exception) {
             _state.update { it.copy(loading = false, error = e) }
         } finally {
@@ -100,6 +105,7 @@ sealed interface Route {
     data object Claude : Route
     data object Server : Route
     data object Theme : Route
+    data object PinSetup : Route
     data class Map(val day: String, val lat: Double? = null, val lon: Double? = null) : Route
 }
 

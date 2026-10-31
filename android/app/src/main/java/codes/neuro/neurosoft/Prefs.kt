@@ -97,6 +97,29 @@ class Prefs(context: Context) {
         get() = sp.getString("tts_voice", "f1") ?: "f1"
         set(value) = sp.edit().putString("tts_voice", value).apply()
 
+    /** Защита приложения: хеш ПИН-кода (PBKDF2) и соль; пусто — защиты нет. */
+    var pinHash: String
+        get() = sp.getString("pin_hash", "") ?: ""
+        set(value) = sp.edit().putString("pin_hash", value).apply()
+
+    var pinSalt: String
+        get() = sp.getString("pin_salt", "") ?: ""
+        set(value) = sp.edit().putString("pin_salt", value).apply()
+
+    var pinTries: Int
+        get() = sp.getInt("pin_tries", 0)
+        set(value) = sp.edit().putInt("pin_tries", value).apply()
+
+    /** Входить по отпечатку или лицу (ПИН — запасной). */
+    var lockBiometric: Boolean
+        get() = sp.getBoolean("lock_biometric", false)
+        set(value) = sp.edit().putBoolean("lock_biometric", value).apply()
+
+    /** Через сколько секунд в фоне приложение закрывается: 0 — сразу. */
+    var lockAfterSec: Int
+        get() = sp.getInt("lock_after", 60)
+        set(value) = sp.edit().putInt("lock_after", value).apply()
+
     /** «Это задача?» — спрашивать в уведомлении про задачи, в которых ассистент не уверен. */
     var taskPrompts: Boolean
         get() = sp.getBoolean("task_prompts", true)

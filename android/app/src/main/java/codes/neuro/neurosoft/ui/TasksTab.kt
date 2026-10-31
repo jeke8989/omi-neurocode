@@ -2,17 +2,36 @@
 
 package codes.neuro.neurosoft.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
@@ -37,6 +56,41 @@ fun TasksTab() {
         }
     }
 
+    // удалённая свайпом задача: несколько секунд можно вернуть
+    var removed by remember { mutableStateOf<TaskItem?>(null) }
+    LaunchedEffect(removed) {
+        if (removed != null) {
+            delay(5_000)
+            removed = null
+        }
+    }
+
+    fun delete(t: TaskItem) {
+        Repo.tasks.edit { list -> list.filter { it.id != t.id } }
+        removed = t
+        scope.launch {
+            try {
+                Api.setTaskStatus(t.id, "dismissed")
+            } catch (e: Exception) {
+                Repo.tasks.refresh()
+            }
+        }
+    }
+
+    fun restore(t: TaskItem) {
+        removed = null
+        Repo.tasks.edit { list -> if (list.any { it.id == t.id }) list else listOf(t) + list }
+        scope.launch {
+            try {
+                // предложенная задача после «Вернуть» — уже обычная: владелец сам решил её оставить
+                Api.setTaskStatus(t.id, if (t.status == "done") "done" else "open")
+                Repo.tasks.refresh()
+            } catch (e: Exception) {
+                Repo.tasks.refresh()
+            }
+        }
+    }
+
     fun toggle(t: TaskItem) {
         val next = if (t.status == "done") "open" else "done"
         Repo.tasks.edit { list -> list.map { if (it.id == t.id) it.copy(status = next) else it } }
@@ -55,6 +109,7 @@ fun TasksTab() {
         modifier = Modifier.fillMaxSize(),
     ) {
         val all = res.data
+        Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
             when {
                 all == null && res.error != null -> item { ErrorBlock(res.error, { scope.launch { Repo.tasks.refresh() } }) }
@@ -75,13 +130,13 @@ fun TasksTab() {
                         }
                     }
                     itemsIndexed(open, key = { _, t -> t.id }) { i, t ->
-                        Grouped(i, open.size, inset = 50.dp) { TaskRow(t, { toggle(t) }) }
+                        Grouped(i, open.size, inset = 50.dp) { SwipeToDelete({ delete(t) }) { TaskRow(t, { toggle(t) }) } }
                     }
                     if (suggested.isNotEmpty()) {
                         item(key = "suggested-title") { SectionTitle(stringResource(R.string.tasks_suggested)) }
                         itemsIndexed(suggested, key = { _, t -> "s" + t.id }) { i, t ->
                             Grouped(i, suggested.size, inset = 16.dp) {
-                                SuggestedTaskRow(t, onAnswer = { accept ->
+                                SwipeToDelete({ delete(t) }) { SuggestedTaskRow(t, onAnswer = { accept ->
                                     val next = if (accept) "open" else "dismissed"
                                     Repo.tasks.edit { l -> if (accept) l.map { if (it.id == t.id) it.copy(status = next) else it }
                                         else l.filter { it.id != t.id } }
@@ -92,7 +147,7 @@ fun TasksTab() {
                                             Repo.tasks.refresh()
                                         }
                                     }
-                                })
+                                }) }
                             }
                         }
                         item(key = "suggested-note") {
@@ -111,7 +166,9 @@ fun TasksTab() {
                         if (showDone) {
                             val shown = done.take(50)
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
-                                Grouped(i, shown.size, inset = 50.dp) { TaskRow(t, { toggle(t) }) }
+                                Grouped(i, shown.size, inset = 50.dp) {
+                                    SwipeToDelete({ delete(t) }) { TaskRow(t, { toggle(t) }) }
+                                }
                             }
                         }
                     }
@@ -122,6 +179,62 @@ fun TasksTab() {
                 }
             }
         }
+        // «Задача удалена · Вернуть»
+        AnimatedVisibility(removed != null, Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            val t = removed
+            Row(
+                Modifier.padding(16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Mn.c.ink)
+                    .padding(start = 18.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Txt(stringResource(R.string.task_deleted), T.body, Mn.c.onInk, Modifier.weight(1f), maxLines = 1)
+                Txt(stringResource(R.string.trash_restore), T.bodyStrong, Mn.c.lens, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).quietTap { t?.let { restore(it) } }
+                        .padding(horizontal = 12.dp, vertical = 10.dp))
+            }
+        }
+        }
+    }
+}
+
+/**
+ * Свайп в сторону — удалить: под строкой проступает красная корзина, на пороге — лёгкая отдача.
+ * Для TalkBack то же действие доступно как «Удалить задачу».
+ */
+@Composable
+fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    val c = Mn.c
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { v ->
+            if (v != SwipeToDismissBoxValue.Settled) {
+                onDelete()
+                true
+            } else false
+        },
+        positionalThreshold = { it * 0.33f },
+    )
+    val armed = state.targetValue != SwipeToDismissBoxValue.Settled
+    LaunchedEffect(armed) { if (armed) haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+    val label = stringResource(R.string.cd_delete_task)
+    SwipeToDismissBox(
+        state = state,
+        modifier = Modifier.semantics {
+            customActions = listOf(CustomAccessibilityAction(label) { onDelete(); true })
+        },
+        backgroundContent = {
+            val fromStart = state.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+            val iconScale by animateFloatAsState(if (armed) 1.15f else 0.85f, label = "trash")
+            Box(
+                Modifier.fillMaxSize().background(c.red).padding(horizontal = 24.dp),
+                contentAlignment = if (fromStart) Alignment.CenterStart else Alignment.CenterEnd,
+            ) {
+                Icon(Icons.Trash, null, tint = Color.White, modifier = Modifier.size(24.dp).scale(iconScale))
+            }
+        },
+    ) {
+        Box(Modifier.fillMaxWidth().background(c.paper)) { content() }
     }
 }
 

@@ -175,6 +175,44 @@ fun SettingsScreen() {
                 value = themeTitle(ThemeMode.state.value), onClick = { Nav.push(Route.Theme) }) }
         }
 
+        val bioAvailable = codes.neuro.neurosoft.AppLock.biometricAvailable(LocalContext.current)
+        Group(stringResource(R.string.security), footer = stringResource(R.string.security_footer)) {
+            val active = codes.neuro.neurosoft.AppLock.active.value
+            item {
+                ToggleRow(stringResource(R.string.lock_pin), active, { on ->
+                    if (on) Nav.push(Route.PinSetup) else codes.neuro.neurosoft.AppLock.disable()
+                }, icon = Icons.Lock, subtitle = stringResource(R.string.lock_pin_sub))
+            }
+            if (active) {
+                if (bioAvailable) {
+                    item {
+                        var bio by remember { mutableStateOf(Core.prefs.lockBiometric) }
+                        ToggleRow(stringResource(R.string.lock_biometric), bio, {
+                            bio = it
+                            Core.prefs.lockBiometric = it
+                        }, icon = Icons.Fingerprint)
+                    }
+                }
+                item {
+                    var after by remember { mutableStateOf(Core.prefs.lockAfterSec) }
+                    ListRow(stringResource(R.string.lock_after), icon = Icons.Clock, value = stringResource(when (after) {
+                        0 -> R.string.lock_after_now
+                        60 -> R.string.lock_after_1
+                        else -> R.string.lock_after_5
+                    }), onClick = {
+                        after = when (after) {
+                            0 -> 60
+                            60 -> 300
+                            else -> 0
+                        }
+                        Core.prefs.lockAfterSec = after
+                    })
+                }
+                item { ListRow(stringResource(R.string.lock_change), icon = Icons.Edit, chevron = true,
+                    onClick = { Nav.push(Route.PinSetup) }) }
+            }
+        }
+
         Group(stringResource(R.string.language)) {
             val code = Lang.code(Core.prefs)
             item { ListRow(stringResource(R.string.app_language), icon = Icons.Globe, chevron = true,

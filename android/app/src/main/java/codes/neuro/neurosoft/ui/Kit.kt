@@ -383,7 +383,8 @@ fun errorText(e: Throwable?): String = when ((e as? ApiException)?.kind) {
     ApiException.Kind.PAIR_BAD -> stringResource(R.string.pair_bad)
     ApiException.Kind.PAIR_EXPIRED -> stringResource(R.string.pair_expired)
     ApiException.Kind.PAIR_LOCKED -> stringResource(R.string.pair_locked)
-    null -> e?.message ?: stringResource(R.string.err_unknown)
+    // служебные тексты исключений (часто по-английски) не показываем — только понятное объяснение
+    null -> stringResource(if (e is java.io.IOException) R.string.err_network else R.string.err_unknown)
 }
 
 @Composable
@@ -407,7 +408,7 @@ fun ErrorBlock(e: Throwable?, onRetry: () -> Unit, modifier: Modifier = Modifier
 /** Плашка «данные могли устареть»: показываем кэш и честно говорим, что сервер недоступен. */
 @Composable
 fun StaleNote(e: Throwable?, modifier: Modifier = Modifier) {
-    if (e == null) return
+    if (e == null || e is kotlin.coroutines.cancellation.CancellationException) return
     Row(
         modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

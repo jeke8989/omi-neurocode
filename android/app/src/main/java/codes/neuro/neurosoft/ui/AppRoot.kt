@@ -33,6 +33,10 @@ import androidx.compose.ui.Modifier
 
 @Composable
 fun AppRoot() {
+    if (codes.neuro.neurosoft.AppLock.locked.value) {
+        LockScreen()
+        return
+    }
     val top = Nav.stack.last()
     val holder = rememberSaveableStateHolder()
     PairRequestDialog()
@@ -82,6 +86,7 @@ private fun Screen(route: Route) {
         Route.VoicesSettings -> VoicesSettingsScreen()
         Route.AudioKeep -> AudioKeepScreen()
         Route.Theme -> ThemeScreen()
+        Route.PinSetup -> PinSetupScreen()
         is Route.Map -> MapScreen(route.day, route.lat, route.lon)
         Route.Claude -> ClaudeScreen()
         Route.Server -> ServerScreen()
