@@ -363,3 +363,6 @@ ALTER TABLE locations ADD COLUMN IF NOT EXISTS pos TEXT;
 ALTER TABLE locations ALTER COLUMN lat DROP NOT NULL;
 ALTER TABLE locations ALTER COLUMN lon DROP NOT NULL;
 ALTER TABLE photos ADD COLUMN IF NOT EXISTS pos TEXT;
+
+-- Карта воспоминаний: яркость события (оценка модели при сборке дня)
+ALTER TABLE day_events ADD COLUMN IF NOT EXISTS vivid REAL;

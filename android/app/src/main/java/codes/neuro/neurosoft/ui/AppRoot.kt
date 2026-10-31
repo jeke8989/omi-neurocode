@@ -87,6 +87,7 @@ private fun Screen(route: Route) {
         Route.AudioKeep -> AudioKeepScreen()
         Route.Theme -> ThemeScreen()
         Route.PinSetup -> PinSetupScreen()
+        Route.Sky -> SkyScreen()
         is Route.Map -> MapScreen(route.day, route.lat, route.lon)
         Route.Claude -> ClaudeScreen()
         Route.Server -> ServerScreen()

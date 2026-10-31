@@ -81,7 +81,9 @@ data class GraphConversation(val id: Long, val title: String?, val emoji: String
 /** Событие в «Созвездии»: звезда-событие, связанная с другими через общих людей и темы. */
 data class GraphEvent(val id: Long, val title: String?, val emoji: String?, val kind: String, val startedAt: String,
                       val durationSec: Int, val people: List<Long>, val topics: List<String>, val photoId: Long?,
-                      val firstConversation: Long?, val fragments: Int = 1, val day: String? = null)
+                      val firstConversation: Long?, val fragments: Int = 1, val day: String? = null,
+                      /** Яркость воспоминания 0..1 (крупнее звезда на карте). */
+                      val vivid: Float = 0.3f, val summary: String? = null)
 data class Graph(val people: List<Person>, val topics: List<GraphTopic>, val conversations: List<GraphConversation>,
                  val events: List<GraphEvent> = emptyList())
 
@@ -800,6 +802,7 @@ object Api {
                     topics = e.optJSONArray("topics").strings(), photoId = e.longOrNull("photo_id"),
                     firstConversation = e.longOrNull("first_conversation"), fragments = e.optInt("fragments", 1),
                     day = e.str("day")?.take(10),
+                    vivid = e.optDouble("vivid", 0.3).toFloat(), summary = e.str("summary"),
                 )
             },
         )

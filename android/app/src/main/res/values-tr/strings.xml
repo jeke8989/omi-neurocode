@@ -491,15 +491,24 @@
     <string name="size_b">%1$d B</string>
     <string name="size_kb">%1$d KB</string>
     <string name="size_mb">%1$s MB</string>
+    <string name="sky_all">Tüm zamanlar</string>
     <string name="sky_description">Takımyıldız: %1$d kişi, %2$d konu</string>
-    <string name="sky_empty">Konuşmalarınızdaki kişiler ve konular burada görünecek</string>
+    <string name="sky_empty">Konuştuğunuz kişiler ve aralarındaki bağlar burada görünecek</string>
     <string name="sky_events_description">Etkinlik takımyıldızı: %1$d</string>
     <string name="sky_events_empty">Günlerinizin etkinlikleri burada görünecek</string>
+    <string name="sky_expand">Tam ekran aç</string>
+    <string name="sky_memories_empty">Anılarınız burada görünecek: canlı olanlar büyük yıldızlar, çevrelerinde onlarla bağlantılı anlar</string>
     <string name="sky_mode_events">Etkinlikler</string>
+    <string name="sky_mode_memories">Anılar</string>
     <string name="sky_mode_people">Kişiler</string>
+    <string name="sky_month">Ay</string>
     <string name="sky_play">Zamanı oynat</string>
     <string name="sky_summary">%1$s, %2$s</string>
+    <string name="sky_tap_to_open">Açmak için dokunun</string>
     <string name="sky_title">Takımyıldız</string>
+    <string name="sky_week">Hafta</string>
+    <string name="sky_zoom_in">Yakınlaştır</string>
+    <string name="sky_zoom_out">Uzaklaştır</string>
     <string name="source_agent">asistan</string>
     <string name="source_button">düğme</string>
     <string name="source_voice">sesle</string>
@@ -662,6 +671,10 @@
     <plurals name="keep_days">
         <item quantity="one">%d gün sakla</item>
         <item quantity="other">%d gün sakla</item>
+    </plurals>
+    <plurals name="memories_count">
+        <item quantity="one">%d anı</item>
+        <item quantity="other">%d anı</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d kişi</item>

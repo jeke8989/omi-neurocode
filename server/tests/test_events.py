@@ -31,7 +31,7 @@ def test_fragments_become_events_and_junk_goes_to_trash(conn, monkeypatch):  # n
 
     def fake(conn_, task, system, user, **kw):
         assert task == "summary" and "#%d" % a in user and "задач 1" in user
-        return {"events": [{"id": None, "title": "Обед с Анной", "emoji": "🍝", "kind": "встреча",
+        return {"events": [{"id": None, "title": "Обед с Анной", "emoji": "🍝", "kind": "встреча", "vivid": 0.85,
                             "summary": "Обедали и обсудили отпуск.", "fragments": [a, b]}],
                 "junk": [{"fragment": noise, "reason": "шум"}, {"fragment": tv, "reason": "телевизор"}]}
 
@@ -53,6 +53,9 @@ def test_fragments_become_events_and_junk_goes_to_trash(conn, monkeypatch):  # n
     assert "Обед с Анной" in titles and "Звонок маме" in titles
     lunch = next(e for e in data["events"] if e["title"] == "Обед с Анной")
     assert sorted(f["id"] for f in lunch["fragments"]) == sorted([a, b])
+    # карта воспоминаний: яркость — оценка модели плюс признаки (длительность и т. п.)
+    vivid = {e["title"]: e["vivid"] for e in client.get("/api/graph?days=30").json()["events"]}
+    assert vivid["Обед с Анной"] >= 0.85 > vivid["Звонок маме"] >= 0.3
     trash = client.get("/api/trash").json()["items"]
     assert [t["id"] for t in trash] == [noise] and trash[0]["junk_reason"] == "шум"
     assert client.post(f"/api/conversations/{noise}/restore", json={}).json() == {"restored": 1}

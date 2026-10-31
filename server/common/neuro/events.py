@@ -29,7 +29,9 @@ GROUP_SYSTEM = f"""Ты собираешь день владельца носи�
 Верни строго JSON без пояснений:
 {{"events": [{{"id": "номер существующего события или null", "title": "название события, до 6 слов",
    "emoji": "одно эмодзи", "kind": "{' | '.join(KINDS)}",
-   "summary": "что было и к чему пришли, 1–3 предложения", "fragments": [номера фрагментов]}}],
+   "summary": "что было и к чему пришли, 1–3 предложения",
+   "vivid": "0..1 — насколько это яркое воспоминание",
+   "fragments": [номера фрагментов]}}],
  "junk": [{{"fragment": номер, "reason": "шум | телевизор | обрывок | не разговор"}}]}}
 Правила:
 • Событие — одна ситуация: то же место и время, те же люди или одна тема. Фрагменты подряд с разрывом
@@ -37,7 +39,9 @@ GROUP_SYSTEM = f"""Ты собираешь день владельца носи�
 • Если фрагмент продолжает уже существующее событие — добавь его туда (верни id события).
 • Мусор — только то, в чём нет смысла: шум, обрывки из нескольких слов, телевизор или радио, случайные
   чужие фразы. Фрагмент с задачей, договорённостью или важным фактом — не мусор.
-• Каждый фрагмент — ровно в одном событии или в мусоре."""
+• Каждый фрагмент — ровно в одном событии или в мусоре.
+• vivid — яркость воспоминания: 0.8–1 — сильные эмоции, важное решение, новый человек или место, праздник,
+  что-то необычное; 0.4–0.7 — содержательная встреча или разговор; 0.1–0.3 — рутина, бытовые мелочи."""
 
 REVIEW_SYSTEM = """Ты перепроверяешь задачи, которые ассистент достал из разговоров за день. Строгие правила:
 задача — только договорённость о действии с участием владельца (он пообещал или согласился, ему пообещали,
@@ -165,16 +169,20 @@ def _apply(conn, day: date, result: dict, by_id: dict, existing: set[int], final
         title = " ".join(str(ev.get("title") or by_id[ids[0]]["title"] or "…").split())[:120]
         emoji = (str(ev.get("emoji") or "").strip() or None)
         summary = " ".join(str(ev.get("summary") or "").split())[:1000] or None
+        try:
+            vivid = max(0.0, min(1.0, float(ev.get("vivid"))))
+        except (TypeError, ValueError):
+            vivid = None
         if eid not in existing:
             eid = conn.execute(
-                """INSERT INTO day_events (day, started_at, ended_at, title, emoji, kind, summary)
-                   VALUES (%s, now(), now(), %s, %s, %s, %s) RETURNING id""",
-                (day, crypto.seal(title), emoji, kind, crypto.seal(summary))).fetchone()["id"]
+                """INSERT INTO day_events (day, started_at, ended_at, title, emoji, kind, summary, vivid)
+                   VALUES (%s, now(), now(), %s, %s, %s, %s, %s) RETURNING id""",
+                (day, crypto.seal(title), emoji, kind, crypto.seal(summary), vivid)).fetchone()["id"]
         else:
             conn.execute(
                 """UPDATE day_events SET title = %s, emoji = coalesce(%s, emoji), kind = %s,
-                       summary = coalesce(%s, summary), updated_at = now() WHERE id = %s""",
-                (crypto.seal(title), emoji, kind, crypto.seal(summary), eid))
+                       summary = coalesce(%s, summary), vivid = coalesce(%s, vivid), updated_at = now() WHERE id = %s""",
+                (crypto.seal(title), emoji, kind, crypto.seal(summary), vivid, eid))
         conn.execute("UPDATE conversations SET event_id = %s WHERE id = ANY(%s)", (eid, ids))
         placed.update(ids)
         touched.add(eid)
@@ -299,3 +307,18 @@ def tick(conn):
             """INSERT INTO diary_days (day, status) VALUES (%s, 'pending')
                ON CONFLICT (day) DO UPDATE SET status = 'pending'""", (yesterday,))
     conn.execute("DELETE FROM conversations WHERE trashed_at < now() - %s * interval '1 day'", (TRASH_DAYS,))
+
+def vividness(e: dict) -> float:
+    """Яркость воспоминания для карты: оценка модели (или 0.3), плюс фото, люди, факты «запомни»,
+    договорённости и длительность. 0..1."""
+    v = e.get("vivid")
+    score = float(v) if v is not None else 0.3
+    if e.get("photo_id"):
+        score += 0.12
+    score += min(0.2, 0.08 * len(e.get("people") or []))
+    if e.get("memories"):
+        score += 0.12
+    if e.get("tasks"):
+        score += 0.06
+    score += min(0.12, (e.get("duration_sec") or 0) / 7200 * 0.12)
+    return round(max(0.05, min(1.0, score)), 3)

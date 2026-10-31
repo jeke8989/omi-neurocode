@@ -491,15 +491,24 @@
     <string name="size_b">%1$d Б</string>
     <string name="size_kb">%1$d КБ</string>
     <string name="size_mb">%1$s МБ</string>
+    <string name="sky_all">Всё время</string>
     <string name="sky_description">Созвездие: людей %1$d, тем %2$d</string>
-    <string name="sky_empty">Здесь появятся люди и темы ваших разговоров</string>
+    <string name="sky_empty">Здесь появятся люди, с которыми вы разговариваете, и связи между ними</string>
     <string name="sky_events_description">Созвездие событий: %1$d</string>
     <string name="sky_events_empty">Здесь появятся события ваших дней</string>
+    <string name="sky_expand">Открыть на весь экран</string>
+    <string name="sky_memories_empty">Здесь появятся ваши воспоминания: яркие — крупными звёздами, а вокруг — связанные с ними события</string>
     <string name="sky_mode_events">События</string>
+    <string name="sky_mode_memories">Воспоминания</string>
     <string name="sky_mode_people">Люди</string>
+    <string name="sky_month">Месяц</string>
     <string name="sky_play">Прокрутить время</string>
     <string name="sky_summary">%1$s, %2$s</string>
+    <string name="sky_tap_to_open">Нажмите, чтобы открыть</string>
     <string name="sky_title">Созвездие</string>
+    <string name="sky_week">Неделя</string>
+    <string name="sky_zoom_in">Приблизить</string>
+    <string name="sky_zoom_out">Отдалить</string>
     <string name="source_agent">ассистент</string>
     <string name="source_button">кнопка</string>
     <string name="source_voice">голосом</string>
@@ -670,6 +679,12 @@
         <item quantity="few">Хранить %d дня</item>
         <item quantity="many">Хранить %d дней</item>
         <item quantity="other">Хранить %d дня</item>
+    </plurals>
+    <plurals name="memories_count">
+        <item quantity="one">%d воспоминание</item>
+        <item quantity="few">%d воспоминания</item>
+        <item quantity="many">%d воспоминаний</item>
+        <item quantity="other">%d воспоминания</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d человек</item>

@@ -492,15 +492,24 @@
     <string name="size_b">%1$d B</string>
     <string name="size_kb">%1$d KB</string>
     <string name="size_mb">%1$s MB</string>
+    <string name="sky_all">All time</string>
     <string name="sky_description">Constellation: %1$d people, %2$d topics</string>
-    <string name="sky_empty">People and topics from your conversations will appear here</string>
+    <string name="sky_empty">People you talk with, and how they connect, will appear here</string>
     <string name="sky_events_description">Constellation of events: %1$d</string>
     <string name="sky_events_empty">Events from your days will appear here</string>
+    <string name="sky_expand">Open full screen</string>
+    <string name="sky_memories_empty">Your memories will appear here: vivid ones as large stars, with related moments around them</string>
     <string name="sky_mode_events">Events</string>
+    <string name="sky_mode_memories">Memories</string>
     <string name="sky_mode_people">People</string>
+    <string name="sky_month">Month</string>
     <string name="sky_play">Play through time</string>
     <string name="sky_summary">%1$s, %2$s</string>
+    <string name="sky_tap_to_open">Tap to open</string>
     <string name="sky_title">Constellation</string>
+    <string name="sky_week">Week</string>
+    <string name="sky_zoom_in">Zoom in</string>
+    <string name="sky_zoom_out">Zoom out</string>
     <string name="source_agent">assistant</string>
     <string name="source_button">button</string>
     <string name="source_voice">by voice</string>
@@ -663,6 +672,10 @@
     <plurals name="keep_days">
         <item quantity="one">Keep %d day</item>
         <item quantity="other">Keep %d days</item>
+    </plurals>
+    <plurals name="memories_count">
+        <item quantity="one">%d memory</item>
+        <item quantity="other">%d memories</item>
     </plurals>
     <plurals name="people">
         <item quantity="one">%d person</item>
