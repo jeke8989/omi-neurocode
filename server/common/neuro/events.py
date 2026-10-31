@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from . import diary, i18n, llm
+from . import crypto, diary, geo, i18n, llm
 
 log = logging.getLogger("neuro.events")
 
@@ -66,8 +66,7 @@ def _fragments(conn, day: date, final: bool) -> list[dict]:
         f"""SELECT c.id, c.started_at, c.last_activity, c.title, c.summary, c.event_id, c.topics,
                    (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks,
                    (SELECT count(*) FROM memories m WHERE m.conversation_id = c.id) AS memories,
-                   (SELECT coalesce(sum(array_length(regexp_split_to_array(s.text, '\\s+'), 1)), 0)
-                      FROM segments s WHERE s.conversation_id = c.id) AS words,
+                   ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk) AS texts,
                    (SELECT array_agg(DISTINCT coalesce(p.name, CASE WHEN p.is_owner THEN 'владелец' END))
                       FROM segments s JOIN people p ON p.id = s.person_id
                       WHERE s.conversation_id = c.id AND (p.name IS NOT NULL OR p.is_owner)) AS people
@@ -75,6 +74,8 @@ def _fragments(conn, day: date, final: bool) -> list[dict]:
             WHERE c.started_at >= %s AND c.started_at < %s AND c.status = 'done' AND c.trashed_at IS NULL
               AND (%s OR c.last_activity < now() - %s * interval '1 minute'){cond}
             ORDER BY c.started_at""", (start, end, final, GROUP_AFTER_MIN)).fetchall()
+    for r in rows:  # тексты зашифрованы в базе — слова считаем здесь
+        r["words"] = sum(len((t or "").split()) for t in (r.pop("texts", None) or []))
     return rows
 
 
@@ -96,8 +97,7 @@ def group_day(conn, day: date, final: bool = False) -> dict:
     if not frags:
         return {"events": 0, "junk": 0}
     start, end = diary.day_bounds(day)
-    points = conn.execute("SELECT ts, lat, lon FROM locations WHERE ts >= %s AND ts < %s ORDER BY ts",
-                          (start, end)).fetchall()
+    points = geo.points(conn, start, end)
     vs = diary.visits(points)
     for v in vs:
         v["name"] = diary.place_name(conn, v["lat"], v["lon"])
@@ -114,7 +114,7 @@ def group_day(conn, day: date, final: bool = False) -> dict:
             lines += [f"событие {e['id']} «{e['title']}» {_t(e['started_at'])}–{_t(e['ended_at'])}: фрагменты "
                       + ", ".join(f"#{x}" for x in e["fragments"]) for e in existing]
         result = llm.chat_json(conn, "summary", GROUP_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)), "\n".join(lines),
-                               usage="events")
+                               usage="events", fast=True)  # механическая группировка — без долгих рассуждений
     else:
         result = {"events": _by_gap(frags), "junk": []}
     return _apply(conn, day, result, by_id, {e["id"] for e in existing}, final)
@@ -169,12 +169,12 @@ def _apply(conn, day: date, result: dict, by_id: dict, existing: set[int], final
             eid = conn.execute(
                 """INSERT INTO day_events (day, started_at, ended_at, title, emoji, kind, summary)
                    VALUES (%s, now(), now(), %s, %s, %s, %s) RETURNING id""",
-                (day, title, emoji, kind, summary)).fetchone()["id"]
+                (day, crypto.seal(title), emoji, kind, crypto.seal(summary))).fetchone()["id"]
         else:
             conn.execute(
                 """UPDATE day_events SET title = %s, emoji = coalesce(%s, emoji), kind = %s,
                        summary = coalesce(%s, summary), updated_at = now() WHERE id = %s""",
-                (title, emoji, kind, summary, eid))
+                (crypto.seal(title), emoji, kind, crypto.seal(summary), eid))
         conn.execute("UPDATE conversations SET event_id = %s WHERE id = ANY(%s)", (eid, ids))
         placed.update(ids)
         touched.add(eid)
@@ -187,7 +187,8 @@ def _apply(conn, day: date, result: dict, by_id: dict, existing: set[int], final
         eid = conn.execute(
             """INSERT INTO day_events (day, started_at, ended_at, title, kind, summary)
                VALUES (%s, %s, %s, %s, 'другое', %s) RETURNING id""",
-            (day, f["started_at"], f["last_activity"], f["title"] or "…", f["summary"])).fetchone()["id"]
+            (day, f["started_at"], f["last_activity"], crypto.seal(f["title"] or "…"), crypto.seal(f["summary"]))
+        ).fetchone()["id"]
         conn.execute("UPDATE conversations SET event_id = %s WHERE id = %s", (eid, fid))
         touched.add(eid)
     for eid in touched:
@@ -232,7 +233,7 @@ def review_tasks(conn, day: date) -> dict:
     if not rows or not llm.configured():
         return {"reviewed": 0}
     text = "\n".join(f"{r['id']}: {r['text']} | доказательство: {r['evidence'] or '—'}" for r in rows)
-    result = llm.chat_json(conn, "summary", REVIEW_SYSTEM, text, usage="review")
+    result = llm.chat_json(conn, "summary", REVIEW_SYSTEM, text, usage="review", fast=True)
     ids = {r["id"] for r in rows}
     changed = 0
     for d in result.get("decisions") or []:

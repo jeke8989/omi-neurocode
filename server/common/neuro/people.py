@@ -9,7 +9,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from . import voices
+from . import crypto, voices
 
 log = logging.getLogger("neuro.people")
 
@@ -55,6 +55,15 @@ def labels_map(segs: list[dict]) -> dict[str, int]:
     return out
 
 
+def by_name(conn, name: str) -> list[int]:
+    """Люди с таким именем (без учёта регистра). Имена в базе зашифрованы — сравниваем здесь, а не в SQL."""
+    key = " ".join((name or "").split()).lower()
+    if not key:
+        return []
+    return [r["id"] for r in conn.execute("SELECT id, name FROM people WHERE name IS NOT NULL ORDER BY id").fetchall()
+            if " ".join((r["name"] or "").split()).lower() == key]
+
+
 def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
     """Кто это: подпись из расшифровки, имя известного человека или «я/владелец»."""
     if not who:
@@ -69,8 +78,8 @@ def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
     if m:
         row = conn.execute("SELECT id FROM people WHERE number = %s", (int(m.group(1)),)).fetchone()
         return row["id"] if row else None
-    rows = conn.execute("SELECT id FROM people WHERE lower(name) = %s", (key,)).fetchall()
-    return rows[0]["id"] if len(rows) == 1 else None
+    rows = by_name(conn, key)
+    return rows[0] if len(rows) == 1 else None
 
 
 # ---------------------------------------------------------------- итоги разговора
@@ -117,15 +126,15 @@ def apply_summary(conn, conv_id: int, segs: list[dict], result: dict, tasks: lis
         person = conn.execute("SELECT name FROM people WHERE id = %s", (pid,)).fetchone()
         if not person or person["name"]:
             continue
-        seen = conn.execute(
-            """SELECT 1 FROM person_suggestions WHERE person_id = %s AND lower(name) = lower(%s)
-                   AND status IN ('pending', 'rejected')""", (pid, name)).fetchone()
+        seen = [r for r in conn.execute(
+            """SELECT name FROM person_suggestions WHERE person_id = %s AND status IN ('pending', 'rejected')""",
+            (pid,)).fetchall() if (r["name"] or "").lower() == name.lower()]
         if seen:
             continue
         conn.execute(
             """INSERT INTO person_suggestions (person_id, name, conversation_id, evidence)
                VALUES (%s, %s, %s, %s)""",
-            (pid, name, conv_id, str(sp.get("evidence") or "").strip()[:300] or None))
+            (pid, crypto.seal_det(name), conv_id, crypto.seal(str(sp.get("evidence") or "").strip()[:300] or None)))
         log.info("conversation %s: voice of person %s may be %s", conv_id, pid, name)
     return topics
 
@@ -209,9 +218,10 @@ def person_detail(conn, pid: int) -> dict | None:
     p["tasks"] = conn.execute(
         """SELECT id, text, due, status, conversation_id FROM tasks
            WHERE person_id = %s ORDER BY status, created_at DESC LIMIT 30""", (pid,)).fetchall()
-    p["quotes"] = conn.execute(
+    p["quotes"] = [q for q in conn.execute(
         """SELECT id, text, started_at, conversation_id FROM segments
-           WHERE person_id = %s AND length(text) >= 20 ORDER BY started_at DESC LIMIT 5""", (pid,)).fetchall()
+           WHERE person_id = %s AND NOT junk ORDER BY started_at DESC LIMIT 40""", (pid,)).fetchall()
+        if len(q["text"] or "") >= 20][:5]
     p["together"] = conn.execute(
         """SELECT o.id, o.name, o.number, o.is_owner, count(DISTINCT s2.conversation_id) AS conversations
            FROM segments s1 JOIN segments s2 ON s2.conversation_id = s1.conversation_id
@@ -234,15 +244,16 @@ def update_person(conn, pid: int, body: dict) -> dict | None:
     with conn.transaction():
         if "name" in body:
             name = " ".join(str(body.get("name") or "").split())[:60] or None
-            conn.execute("UPDATE people SET name = %s, updated_at = now() WHERE id = %s", (name, pid))
+            conn.execute("UPDATE people SET name = %s, updated_at = now() WHERE id = %s",
+                         (crypto.seal_det(name), pid))
             if name:
                 voices.confirm_person(conn, pid)
-                conn.execute("UPDATE person_suggestions SET status = CASE WHEN lower(name) = lower(%s) "
-                             "THEN 'accepted' ELSE 'rejected' END WHERE person_id = %s AND status = 'pending'",
-                             (name, pid))
-                other = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) AND id <> %s LIMIT 1",
-                                     (name, pid)).fetchone()
-                same_name = other["id"] if other else None
+                for g in conn.execute("SELECT id, name FROM person_suggestions WHERE person_id = %s AND status = 'pending'",
+                                      (pid,)).fetchall():
+                    conn.execute("UPDATE person_suggestions SET status = %s WHERE id = %s",
+                                 ("accepted" if (g["name"] or "").lower() == name.lower() else "rejected", g["id"]))
+                other = [i for i in by_name(conn, name) if i != pid]
+                same_name = other[0] if other else None
         if body.get("is_owner") is True:
             conn.execute("UPDATE people SET is_owner = false WHERE is_owner AND id <> %s", (pid,))
             conn.execute("UPDATE people SET is_owner = true, ignored = false, updated_at = now() WHERE id = %s",
@@ -255,7 +266,7 @@ def update_person(conn, pid: int, body: dict) -> dict | None:
                          (bool(body["ignored"]), pid))
         if "note" in body:
             conn.execute("UPDATE people SET note = %s WHERE id = %s",
-                         (str(body.get("note") or "").strip()[:500] or None, pid))
+                         (crypto.seal(str(body.get("note") or "").strip()[:500] or None), pid))
     if body.get("is_owner") is True and not voices.others_enabled(conn):
         voices.purge_unnamed(conn)
     p = person_detail(conn, pid)
@@ -269,7 +280,7 @@ def create_named(conn, name: str) -> dict:
     number = conn.execute("SELECT coalesce(max(number), 0) + 1 AS n FROM people").fetchone()["n"]
     return conn.execute(
         """INSERT INTO people (name, number, first_seen, last_seen) VALUES (%s, %s, now(), now())
-           RETURNING id, name, number, is_owner""", (name.strip()[:60], number)).fetchone()
+           RETURNING id, name, number, is_owner""", (crypto.seal_det(name.strip()[:60]), number)).fetchone()
 
 
 def assign_segment(conn, segment_id: int, person_id: int | None = None, name: str | None = None) -> dict | None:
@@ -277,9 +288,8 @@ def assign_segment(conn, segment_id: int, person_id: int | None = None, name: st
     if conn.execute("SELECT 1 FROM segments WHERE id = %s", (segment_id,)).fetchone() is None:
         return None
     if person_id is None and name:
-        existing = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) ORDER BY id LIMIT 1",
-                                (name.strip(),)).fetchone()
-        person_id = existing["id"] if existing else create_named(conn, name)["id"]
+        existing = by_name(conn, name)
+        person_id = existing[0] if existing else create_named(conn, name)["id"]
     if person_id is None:
         old = conn.execute("SELECT person_id FROM segments WHERE id = %s", (segment_id,)).fetchone()
         conn.execute("UPDATE segments SET person_id = NULL, voice_score = NULL WHERE id = %s", (segment_id,))
@@ -305,13 +315,12 @@ def answer_suggestion(conn, sid: int, accept: bool) -> dict | None:
         voices.merge_people(conn, g["person_id"], g["target_id"])
         conn.execute("UPDATE person_suggestions SET status = 'accepted' WHERE id = %s", (sid,))
         return {"id": sid, "status": "accepted", "person_id": g["target_id"], "merged": True}
-    same = conn.execute("SELECT id FROM people WHERE lower(name) = lower(%s) AND id <> %s ORDER BY id LIMIT 1",
-                        (g["name"], g["person_id"])).fetchone()
+    same = [i for i in by_name(conn, g["name"] or "") if i != g["person_id"]]
     if same:
         # такой человек уже есть — значит, это он же другим голосовым отпечатком: объединяем
-        voices.merge_people(conn, g["person_id"], same["id"])
+        voices.merge_people(conn, g["person_id"], same[0])
         conn.execute("UPDATE person_suggestions SET status = 'accepted' WHERE id = %s", (sid,))
-        return {"id": sid, "status": "accepted", "person_id": same["id"], "merged": True}
+        return {"id": sid, "status": "accepted", "person_id": same[0], "merged": True}
     update_person(conn, g["person_id"], {"name": g["name"]})
     return {"id": sid, "status": "accepted", "person_id": g["person_id"], "merged": False}
 
@@ -394,8 +403,10 @@ def people_overview(conn) -> str:
 def person_conversations(conn, who: str, days: int = 60) -> str:
     pid = resolve(conn, who, {})
     if pid is None:
-        rows = conn.execute("SELECT id FROM people WHERE name ILIKE %s LIMIT 2", (f"%{who.strip()}%",)).fetchall()
-        pid = rows[0]["id"] if len(rows) == 1 else None
+        part = who.strip().lower()
+        rows = [r["id"] for r in conn.execute("SELECT id, name FROM people WHERE name IS NOT NULL").fetchall()
+                if part and part in (r["name"] or "").lower()]
+        pid = rows[0] if len(rows) == 1 else None
     if pid is None:
         return f"Не знаю человека «{who}» по голосу. Посмотри список людей инструментом people."
     since = datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))

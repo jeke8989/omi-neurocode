@@ -41,6 +41,11 @@ if [ -z "$current" ] || [ "$(printf '%s' "$current" | sha256sum | cut -d' ' -f1)
   if [ -n "$current" ]; then say "Меняю ключ доступа: старый был в публичном репозитории"; ROTATED=1; fi
   setenv API_TOKEN "$(openssl rand -hex 24)"
 fi
+# Ключ шифрования данных в базе (от утечек). Создаётся один раз; потеряете .env — данные не прочитать.
+if ! grep -qE '^DATA_KEY=.+' .env; then
+  setenv DATA_KEY "$(openssl rand -base64 32)"
+  say "Создан ключ шифрования DATA_KEY в server/.env — сохраните копию этого файла в надёжном месте"
+fi
 set -a; . ./.env; set +a
 PORT="${GATEWAY_PORT:-8090}"
 

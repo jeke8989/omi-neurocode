@@ -95,6 +95,13 @@ main() {
     echo "Gateway не ответил. Логи: docker compose logs gateway --tail 100"
     exit 1
   fi
+  # шифрование данных в базе (от утечек): ключ создаётся один раз и никогда не печатается
+  if ! grep -qE '^DATA_KEY=.+' .env; then
+    (umask 077; printf '\nDATA_KEY=%s\n' "$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)" >> .env)
+    echo "::notice title=Шифрование::включено — ключ DATA_KEY создан в server/.env; храните копию .env отдельно от бэкапов базы"
+    docker compose up -d   # сервисы перечитывают .env: новые данные — зашифрованы, старые зашифрует агент
+    healthy 150 || { echo "::error title=Шифрование::после включения ключа сервер не ответил"; diag; exit 1; }
+  fi
   drop_prev
   echo "$NEW" > .deployed
   say "Готово: $(curl -fsS "http://127.0.0.1:${PORT}/health/full" 2>/dev/null || echo '?'), свободно $(free_mb) МБ"

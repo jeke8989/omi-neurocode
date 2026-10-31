@@ -15,7 +15,7 @@ import difflib
 import logging
 import re
 
-from . import i18n, llm
+from . import crypto, i18n, llm
 
 log = logging.getLogger("neuro.cleanup")
 
@@ -158,7 +158,8 @@ def conversation(conn, conv_id: int) -> dict:
         lines += [f"[контекст] {_label(s)}: {s['text']}" for s in context if not s.get("junk")]
         lines += [f"#{s['id']} {_label(s)}: {s['text']}" for s in batch]
         try:
-            result = llm.chat_json(conn, "cleanup", CLEAN_SYSTEM + "\n" + i18n.write_in(lang), "\n".join(lines))
+            result = llm.chat_json(conn, "cleanup", CLEAN_SYSTEM + "\n" + i18n.write_in(lang), "\n".join(lines),
+                                   fast=True)  # правка текста — без долгих рассуждений (платный выход меньше)
         except Exception:  # noqa: BLE001 — без исправления расшифровка остаётся как была
             log.exception("conversation %s: transcript cleanup failed", conv_id)
             break
@@ -181,7 +182,7 @@ def conversation(conn, conv_id: int) -> dict:
             new = " ".join(str(item.get("text") or "").split())
             if new and new != old and acceptable(old, new):
                 conn.execute("UPDATE segments SET raw_text = coalesce(raw_text, text), text = %s WHERE id = %s",
-                             (new[:4000], sid))
+                             (crypto.seal(new[:4000]), sid))
                 changed += 1
         done_ids += list(ids)
     if done_ids:

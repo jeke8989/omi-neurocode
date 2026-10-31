@@ -25,6 +25,8 @@ os.environ.update({
     "SPEAKER_BACKEND": "spectral",
     "SPEAKER_MIN_NEW_SEC": "2",  # синтетические диалоги короткие; в жизни — 8 с
     "VOICE_DIR": tempfile.mkdtemp(prefix="neuro-voices-"),
+    # все тесты идут с шифрованием данных в базе (как на сервере)
+    "DATA_KEY": "dGVzdC1rZXktZm9yLW1uZW1vLWVuY3J5cHRpb24tMzI=",
 })
 
 from neuro import db  # noqa: E402

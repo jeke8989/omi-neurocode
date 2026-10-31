@@ -13,7 +13,8 @@ SCHEMA_SQL = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 
 def connect():
     import psycopg
-    from psycopg.rows import dict_row
+
+    from .crypto import dict_row  # строки уже расшифрованы (шифрование от утечек — crypto.py)
 
     return psycopg.connect(config.DATABASE_URL, autocommit=True, row_factory=dict_row)
 

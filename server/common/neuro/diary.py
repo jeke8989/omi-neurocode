@@ -20,7 +20,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, i18n, llm
+from . import config, crypto, i18n, llm
 from .assistant import TZ, WEEKDAYS
 
 log = logging.getLogger("neuro.diary")
@@ -90,7 +90,7 @@ def place_name(conn, lat: float, lon: float, network: bool = True) -> str | None
     """Название места (кеш в places; нет — спрашиваем OpenStreetMap, если network)."""
     lang = i18n.lang(conn)
     key = f"{lat:.3f},{lon:.3f}" if lang == "ru" else f"{lang}:{lat:.3f},{lon:.3f}"
-    row = conn.execute("SELECT name FROM places WHERE key = %s", (key,)).fetchone()
+    row = conn.execute("SELECT name FROM places WHERE key = %s", (crypto.seal_det(key),)).fetchone()
     if row:
         return row["name"]
     if not network:
@@ -109,8 +109,28 @@ def place_name(conn, lat: float, lon: float, network: bool = True) -> str | None
                                                             addr.get("city_district"), addr.get("city")) if x)
     except requests.RequestException:
         return None
-    conn.execute("INSERT INTO places (key, name) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, name))
+    conn.execute("INSERT INTO places (key, name) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                 (crypto.seal_det(key), crypto.seal(name)))
     return name
+
+
+def coords(lat, lon) -> tuple:
+    """Координаты для записи: при шифровании — только зашифрованная строка pos (lat, lon пустые)."""
+    if lat is None or lon is None:
+        return None, None, None
+    if crypto.enabled():
+        return None, None, crypto.seal(f"{float(lat):.6f},{float(lon):.6f}")
+    return lat, lon, None
+
+
+def photo_coords(p: dict) -> dict:
+    """Строка фото из базы -> lat/lon (расшифровав pos)."""
+    if p.get("lat") is None and p.get("pos"):
+        try:
+            p["lat"], p["lon"] = (float(x) for x in str(p["pos"]).split(","))
+        except ValueError:
+            pass
+    return p
 
 
 # ---------------------------------------------------------------- фото
@@ -121,10 +141,11 @@ def save_photo(conn, data: bytes, taken_at: datetime | None, lat: float | None, 
         return {"id": existing["id"], "duplicate": True}
     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     path = PHOTO_DIR / f"{sha[:32]}.jpg"
-    path.write_bytes(data)
+    crypto.write_file(path, data)
+    plat, plon, ppos = coords(lat, lon)
     row = conn.execute(
-        """INSERT INTO photos (sha256, taken_at, lat, lon, path) VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-        (sha, taken_at or datetime.now(timezone.utc), lat, lon, str(path)),
+        """INSERT INTO photos (sha256, taken_at, lat, lon, pos, path) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        (sha, taken_at or datetime.now(timezone.utc), plat, plon, ppos, str(path)),
     ).fetchone()
     return {"id": row["id"], "duplicate": False}
 
@@ -135,7 +156,7 @@ def _prepare_image(path: str) -> tuple[bytes, dict]:
     try:
         from PIL import Image, ImageOps
 
-        img = Image.open(path)
+        img = Image.open(io.BytesIO(crypto.read_file(path)))
         exif = img.getexif()
         dt = exif.get(36867) or exif.get(306)  # DateTimeOriginal / DateTime
         if dt:
@@ -155,7 +176,7 @@ def _prepare_image(path: str) -> tuple[bytes, dict]:
         img.save(buf, "JPEG", quality=85)
         return buf.getvalue(), meta
     except ImportError:
-        return Path(path).read_bytes(), meta
+        return crypto.read_file(path), meta
 
 
 def _data_url(jpeg: bytes) -> str:
@@ -172,23 +193,25 @@ def accept_photo_without_ai(conn, photo: dict):
     """Режим без ИИ: фото не отправляется модели (0 токенов). Уменьшаем, берём время и место из EXIF,
     дальше оно привязывается к событиям дня только по времени и месту."""
     jpeg, meta = _prepare_image(photo["path"])
-    Path(photo["path"]).write_bytes(jpeg)
+    crypto.write_file(photo["path"], jpeg)
+    plat, plon, ppos = coords(meta.get("lat"), meta.get("lon"))
     conn.execute(
         """UPDATE photos SET caption = NULL, status = 'analyzed', error = NULL,
-               taken_at = coalesce(%s, taken_at), lat = coalesce(lat, %s), lon = coalesce(lon, %s)
+               taken_at = coalesce(%s, taken_at), lat = coalesce(lat, %s), lon = coalesce(lon, %s),
+               pos = coalesce(pos, %s)
            WHERE id = %s""",
-        (meta.get("taken_at"), meta.get("lat"), meta.get("lon"), photo["id"]),
+        (meta.get("taken_at"), plat, plon, ppos, photo["id"]),
     )
 
 
 def analyze_photo(conn, photo: dict):
     jpeg, meta = _prepare_image(photo["path"])
-    Path(photo["path"]).write_bytes(jpeg)  # храним уже уменьшенную копию
+    crypto.write_file(photo["path"], jpeg)  # храним уже уменьшенную копию
     updates = {}
     if meta.get("taken_at"):
         updates["taken_at"] = meta["taken_at"]
-    if photo["lat"] is None and meta.get("lat") is not None:
-        updates["lat"], updates["lon"] = meta["lat"], meta["lon"]
+    if photo.get("lat") is None and not photo.get("pos") and meta.get("lat") is not None:
+        updates["lat"], updates["lon"], updates["pos"] = coords(meta["lat"], meta["lon"])
     msg = llm.chat(conn, "vision", [{"role": "user", "content": [
         {"type": "text", "text": ANALYZE_PROMPT + "\n" + i18n.write_in(i18n.lang(conn))},
         {"type": "image_url", "image_url": {"url": _data_url(jpeg)}},
@@ -199,16 +222,17 @@ def analyze_photo(conn, photo: dict):
     status = "analyzed" if kind == "moment" and score >= 4 else "skipped"
     conn.execute(
         """UPDATE photos SET caption = %s, status = %s, error = NULL,
-               taken_at = coalesce(%s, taken_at), lat = coalesce(%s, lat), lon = coalesce(%s, lon)
+               taken_at = coalesce(%s, taken_at), lat = coalesce(%s, lat), lon = coalesce(%s, lon),
+               pos = coalesce(%s, pos)
            WHERE id = %s""",
-        (f"{str(result.get('caption') or '').strip()[:300]} (оценка {score:g})", status,
-         updates.get("taken_at"), updates.get("lat"), updates.get("lon"), photo["id"]),
+        (crypto.seal(f"{str(result.get('caption') or '').strip()[:300]} (оценка {score:g})"), status,
+         updates.get("taken_at"), updates.get("lat"), updates.get("lon"), updates.get("pos"), photo["id"]),
     )
 
 
 def style_photo(conn, photo: dict, style: str):
     title, prompt = STYLES.get(style, STYLES["watercolor"])
-    jpeg = Path(photo["path"]).read_bytes()
+    jpeg = crypto.read_file(photo["path"])
     msg = llm.chat(conn, "image_style", [{"role": "user", "content": [
         {"type": "text", "text": prompt + STYLE_SUFFIX},
         {"type": "image_url", "image_url": {"url": _data_url(jpeg)}},
@@ -219,7 +243,7 @@ def style_photo(conn, photo: dict, style: str):
         raise RuntimeError("модель не вернула изображение")
     raw = base64.b64decode(url.split(",", 1)[1])
     out = Path(photo["path"]).with_name(Path(photo["path"]).stem + f"-{style}.png")
-    out.write_bytes(raw)
+    crypto.write_file(out, raw)
     conn.execute("UPDATE photos SET styled_path = %s, style = %s WHERE id = %s", (str(out), style, photo["id"]))
 
 
@@ -245,11 +269,12 @@ def material(conn, day: date) -> dict:
     questions = conn.execute(
         """SELECT question, answer, asked_at FROM questions WHERE asked_at >= %s AND asked_at < %s
            AND question <> '' ORDER BY asked_at""", (start, end)).fetchall()
-    points = conn.execute(
-        "SELECT ts, lat, lon FROM locations WHERE ts >= %s AND ts < %s ORDER BY ts", (start, end)).fetchall()
-    photos = conn.execute(
-        """SELECT id, taken_at, lat, lon, caption FROM photos WHERE taken_at >= %s AND taken_at < %s
-           AND status IN ('analyzed', 'done') ORDER BY taken_at""", (start, end)).fetchall()
+    from .geo import points as geo_points  # noqa: PLC0415 — geo импортирует diary
+
+    points = geo_points(conn, start, end)
+    photos = [photo_coords(p) for p in conn.execute(
+        """SELECT id, taken_at, lat, lon, pos, caption FROM photos WHERE taken_at >= %s AND taken_at < %s
+           AND status IN ('analyzed', 'done') ORDER BY taken_at""", (start, end)).fetchall()]
     vs = visits(points)
     for v in vs:
         v["name"] = place_name(conn, v["lat"], v["lon"])
@@ -358,10 +383,10 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
                quote = EXCLUDED.quote, highlights = EXCLUDED.highlights, places = EXCLUDED.places,
                stats = EXCLUDED.stats, cover_photo_id = EXCLUDED.cover_photo_id, status = 'done',
                content_hash = EXCLUDED.content_hash, generated_at = now(), error = NULL""",
-        (day, str(result.get("title") or "")[:120], str(result.get("summary") or "")[:3000],
-         (str(result.get("emoji") or "").strip()[:8] + " " + str(result.get("mood") or "")).strip()[:40],
-         str(result.get("quote") or "")[:300],
-         json.dumps(highlights, ensure_ascii=False), json.dumps(places, ensure_ascii=False),
+        (day, crypto.seal(str(result.get("title") or "")[:120]), crypto.seal(str(result.get("summary") or "")[:3000]),
+         crypto.seal((str(result.get("emoji") or "").strip()[:8] + " " + str(result.get("mood") or "")).strip()[:40]),
+         crypto.seal(str(result.get("quote") or "")[:300]),
+         crypto.seal_json(highlights), crypto.seal_json(places),
          json.dumps(stats), used[0] if used else None, content_hash),
     )
     if used:  # стилизуем только выбранные к событиям фото

@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: common:.
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/neuro_test
-        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py tests/test_tasks.py tests/test_tts.py tests/test_events.py tests/test_names.py tests/test_cleanup.py tests/test_geo.py
+        run: pytest -q tests/test_audio.py tests/test_pipeline.py tests/test_assistant.py tests/test_agent.py tests/test_i18n.py tests/test_voices.py tests/test_pairing.py tests/test_retention.py tests/test_claude.py tests/test_tasks.py tests/test_tts.py tests/test_events.py tests/test_names.py tests/test_cleanup.py tests/test_geo.py tests/test_crypto.py
       - name: Voice model on real recordings
         working-directory: server
         env:
@@ -69,6 +69,7 @@ jobs:
           sed -i 's/^API_TOKEN=.*/API_TOKEN=e2e-token/; s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=e2epass/' .env
           sed -i 's/^STT_PROVIDER=.*/STT_PROVIDER=fake/; s/^CONVERSATION_IDLE_SEC=.*/CONVERSATION_IDLE_SEC=5/; s/^SPEECH_MIN_MS=.*/SPEECH_MIN_MS=0/' .env
           echo "TTS_ENABLED=0" >> .env
+          echo "DATA_KEY=$(openssl rand -base64 32)" >> .env   # e2e — с шифрованием данных, как на сервере
           docker compose up -d --build
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && break; sleep 2; done
       - name: E2E over WebSocket

@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import requests
 
-from . import config, safeload
+from . import config, crypto, safeload
 
 log = logging.getLogger("neuro.tts")
 
@@ -213,7 +213,7 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE, lang: str = "ru", speed: f
     key = _key(text, voice, lang, speed)
     path = CACHE_DIR / f"{key}.wav"
     if path.exists():
-        return path.read_bytes()
+        return crypto.read_file(path)
     with _inflight_lock:
         fut = _inflight.get(key)
         mine = fut is None
@@ -225,9 +225,7 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE, lang: str = "ru", speed: f
     try:
         data = _generate(text, voice, lang, speed)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+        crypto.write_file(path, data)  # озвученные ответы на диске зашифрованы
         _trim_cache()
         fut.set_result(data)
         return data

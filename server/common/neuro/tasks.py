@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import config, crypto
 
 log = logging.getLogger("neuro.tasks")
 TZ = ZoneInfo(config.TZ)
@@ -181,15 +181,15 @@ def save(conn, conv_id: int | None, tasks: list[dict], source: str) -> dict:
                            status = CASE WHEN status = 'suggested' AND %s = 'open' THEN 'open' ELSE status END,
                            confidence = greatest(coalesce(confidence, 0), %s), updated_at = now()
                        WHERE id = %s""",
-                    (t["due"], t["due_at"], t["status"], t["confidence"], row["id"]))
+                    (crypto.seal(t["due"]), t["due_at"], t["status"], t["confidence"], row["id"]))
                 updated += 1
                 continue
         conn.execute(
             """INSERT INTO tasks (conversation_id, text, due, due_at, assignee, person_id, kind, confidence, evidence,
                                   target, source, status)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (conv_id, t["text"], t["due"], t["due_at"], t["assignee"], t["person_id"], t["kind"], t["confidence"],
-             t["evidence"], t["target"], source, t["status"]))
+            (conv_id, crypto.seal(t["text"]), crypto.seal(t["due"]), t["due_at"], crypto.seal(t["assignee"]),
+             t["person_id"], t["kind"], t["confidence"], crypto.seal(t["evidence"]), t["target"], source, t["status"]))
         created += 1
     return {"created": created, "updated": updated}
 

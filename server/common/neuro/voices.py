@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import threading
@@ -29,7 +30,7 @@ from urllib.parse import quote
 import numpy as np
 import requests
 
-from . import config, safeload
+from . import config, crypto, safeload
 from .audio import SAMPLE_RATE
 
 log = logging.getLogger("neuro.voices")
@@ -507,13 +508,13 @@ def save_sample(person_id: int, pcm16: np.ndarray):
     """Короткая запись голоса (до 6 с) — чтобы узнать человека на слух в «Кто это?»."""
     VOICE_DIR.mkdir(parents=True, exist_ok=True)
     clip = pcm16[: SAMPLE_RATE * 6]
-    tmp = VOICE_DIR / f"{person_id}.part"
-    with wave.open(str(tmp), "wb") as w:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
         w.writeframes(clip.astype(np.int16).tobytes())
-    tmp.replace(sample_path(person_id))
+    crypto.write_file(sample_path(person_id), buf.getvalue())  # голос — биометрия: на диске зашифрован
 
 
 def sample_path(person_id: int) -> Path:
@@ -738,7 +739,7 @@ def dedupe(conn) -> dict:
                 conn.execute(
                     """INSERT INTO person_suggestions (person_id, name, target_id, evidence)
                        VALUES (%s, %s, %s, %s)""",
-                    (b["id"], label_name, target["id"], f"голос похож на {round(sim * 100)}%"))
+                    (b["id"], crypto.seal_det(label_name), target["id"], f"голос похож на {round(sim * 100)}%"))
                 suggested += 1
     return {"merged": merged, "suggested": suggested}
 
@@ -813,9 +814,7 @@ def queue_owner_sample(pcm: bytes):
     files = sorted(OWNER_DIR.glob("*.pcm"))
     for old in files[:-20]:  # очередь не растёт, если STT долго не работал
         old.unlink(missing_ok=True)
-    tmp = OWNER_DIR / f"{time.time_ns()}.part"
-    tmp.write_bytes(pcm[: SAMPLE_RATE * 2 * 30])
-    tmp.replace(tmp.with_suffix(".pcm"))
+    crypto.write_file(OWNER_DIR / f"{time.time_ns()}.pcm", pcm[: SAMPLE_RATE * 2 * 30])
 
 
 def owner_embedding(pcm: bytes) -> tuple[np.ndarray | None, float]:
@@ -839,7 +838,7 @@ def enroll_owner(conn) -> int:
     done = 0
     for f in sorted(OWNER_DIR.glob("*.pcm"))[:10]:
         try:
-            pcm = f.read_bytes()
+            pcm = crypto.read_file(f)
             emb, sec = owner_embedding(pcm)
             if emb is not None and enabled(conn):
                 owner = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
@@ -907,7 +906,8 @@ def merge_people(conn, source: int, target: int):
                 """UPDATE people SET speech_sec = speech_sec + %s,
                        first_seen = least(first_seen, %s), last_seen = greatest(last_seen, %s),
                        name = coalesce(name, %s), is_owner = is_owner OR %s, updated_at = now() WHERE id = %s""",
-                (src["speech_sec"], src["first_seen"], src["last_seen"], src["name"], src["is_owner"], target))
+                (src["speech_sec"], src["first_seen"], src["last_seen"], crypto.seal_det(src["name"]), src["is_owner"],
+                 target))
         recompute_centroid(conn, target)
     old = sample_path(source)
     try:

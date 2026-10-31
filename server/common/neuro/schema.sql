@@ -357,3 +357,9 @@ ALTER TABLE segments ADD COLUMN IF NOT EXISTS raw_text TEXT;
 ALTER TABLE segments ADD COLUMN IF NOT EXISTS junk BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE segments ADD COLUMN IF NOT EXISTS cleaned BOOLEAN NOT NULL DEFAULT false;
 UPDATE segments SET cleaned = true WHERE NOT cleaned AND started_at < now() - interval '1 day';
+
+-- Шифрование от утечек (crypto.py): координаты — только зашифрованной строкой pos
+ALTER TABLE locations ADD COLUMN IF NOT EXISTS pos TEXT;
+ALTER TABLE locations ALTER COLUMN lat DROP NOT NULL;
+ALTER TABLE locations ALTER COLUMN lon DROP NOT NULL;
+ALTER TABLE photos ADD COLUMN IF NOT EXISTS pos TEXT;

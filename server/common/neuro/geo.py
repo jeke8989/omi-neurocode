@@ -14,7 +14,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, diary
+from . import config, crypto, diary
 
 log = logging.getLogger("neuro.geo")
 
@@ -29,11 +29,20 @@ class TileError(RuntimeError):
     pass
 
 
+def tile_path(style: str, z: int, x: int, y: int) -> Path:
+    """Имя файла плитки — хеш (с ключом), а не координаты: по кешу не видно, где вы бывали."""
+    import hashlib  # noqa: PLC0415
+
+    salt = (crypto.seal_det("tiles") or "") if crypto.enabled() else ""
+    h = hashlib.sha256(f"{salt}|{style}/{z}/{x}/{y}".encode()).hexdigest()
+    return TILE_DIR / h[:2] / f"{h}.png"
+
+
 def tile(style: str, z: int, x: int, y: int) -> bytes:
     """Плитка 512×512 (@2x) из кеша или от CARTO."""
     if style not in STYLES or not 0 <= z <= MAX_ZOOM or not (0 <= x < 2 ** z and 0 <= y < 2 ** z):
         raise ValueError("bad tile")
-    path = TILE_DIR / style / str(z) / str(x) / f"{y}.png"
+    path = tile_path(style, z, x, y)
     if path.exists():
         return path.read_bytes()
     url = f"https://{'abcd'[(x + y) % 4]}.basemaps.cartocdn.com/{STYLES[style]}/{z}/{x}/{y}@2x.png"
@@ -54,7 +63,9 @@ def tile(style: str, z: int, x: int, y: int) -> bytes:
 
 def trim_cache():
     """Кеш плиток — не больше TILE_CACHE_MB: самые давние удаляются."""
-    files = [(p.stat().st_mtime, p.stat().st_size, p) for p in TILE_DIR.glob("*/*/*/*.png")]
+    for old in TILE_DIR.glob("*/*/*/*.png"):  # прежняя раскладка (по координатам) — убрать
+        old.unlink(missing_ok=True)
+    files = [(p.stat().st_mtime, p.stat().st_size, p) for p in TILE_DIR.glob("*/*.png")]
     total = sum(f[1] for f in files)
     limit = TILE_CACHE_MB << 20
     for _, size, p in sorted(files):
@@ -66,8 +77,24 @@ def trim_cache():
 
 # ---------------------------------------------------------------- где что было
 def points(conn, start: datetime, end: datetime) -> list[dict]:
-    return conn.execute("SELECT ts, lat, lon FROM locations WHERE ts >= %s AND ts < %s ORDER BY ts",
-                        (start, end)).fetchall()
+    """Точки геолокации за время. Координаты в базе зашифрованы (pos = «lat,lon») — расшифрованы при чтении."""
+    out = []
+    for r in conn.execute("SELECT ts, lat, lon, pos FROM locations WHERE ts >= %s AND ts < %s ORDER BY ts",
+                          (start, end)).fetchall():
+        lat, lon = r["lat"], r["lon"]
+        if lat is None and r.get("pos"):
+            try:
+                lat, lon = (float(x) for x in str(r["pos"]).split(","))
+            except ValueError:
+                continue
+        if lat is not None and lon is not None:
+            out.append({"ts": r["ts"], "lat": lat, "lon": lon})
+    return out
+
+
+def pos(lat: float, lon: float) -> str | None:
+    """Координаты для записи в базу: зашифрованная строка «lat,lon»."""
+    return crypto.seal(f"{lat:.6f},{lon:.6f}")
 
 
 def where(pts: list[dict], start: datetime, end: datetime) -> tuple[float, float] | None:

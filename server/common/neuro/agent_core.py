@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import claude_agent, config, extensions, i18n, llm, people
+from . import claude_agent, config, crypto, extensions, i18n, llm, people
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -127,18 +127,21 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
         insert_memories(conn, None, [str(args.get("text") or "").strip()], "agent")
         return "Запомнил."
     if name == "search_memory":
-        q = f"%{str(args.get('query') or '').strip()}%"
+        # тексты в базе зашифрованы — ищем после расшифровки (без учёта регистра)
+        ql = str(args.get("query") or "").strip().lower()
         since = datetime.now(timezone.utc) - timedelta(days=int(args.get("days") or 30))
-        mems = conn.execute(
-            "SELECT created_at, text FROM memories WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 10", (q,)
-        ).fetchall()
-        convs = conn.execute(
-            """SELECT started_at, title, summary FROM conversations
-               WHERE started_at > %s AND (title ILIKE %s OR summary ILIKE %s)
-               ORDER BY started_at DESC LIMIT 10""", (since, q, q)).fetchall()
-        segs = conn.execute(
-            people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND s.text ILIKE %s
-                                       ORDER BY s.started_at DESC LIMIT 15""", (since, q)).fetchall()
+
+        def has(*vals):
+            return bool(ql) and any(v and ql in v.lower() for v in vals)
+        mems = [m for m in conn.execute(
+            "SELECT created_at, text FROM memories ORDER BY created_at DESC LIMIT 3000").fetchall() if has(m["text"])][:10]
+        convs = [c for c in conn.execute(
+            """SELECT started_at, title, summary FROM conversations WHERE started_at > %s
+               ORDER BY started_at DESC LIMIT 3000""", (since,)).fetchall() if has(c["title"], c["summary"])][:10]
+        segs = [s for s in conn.execute(
+            people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND NOT s.junk
+                                       ORDER BY s.started_at DESC LIMIT 20000""", (since,)).fetchall()
+                if has(s["text"])][:15]
         out = [f"[память {_d(m['created_at'])}] {m['text']}" for m in mems]
         out += [f"[разговор {_d(c['started_at'])}] {c['title']}: {c['summary'] or ''}" for c in convs]
         out += [f"[фраза {_d(s['started_at'])}] {people.speaker_label(s)}: {s['text']}" for s in segs]
@@ -199,7 +202,7 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
 def step(conn, run_id: int, kind: str, title: str, detail: str | None = None):
     conn.execute(
         "INSERT INTO agent_steps (run_id, kind, title, detail) VALUES (%s, %s, %s, %s)",
-        (run_id, kind, title[:300], (detail or "")[:4000] or None),
+        (run_id, kind, crypto.seal(title[:300]), crypto.seal((detail or "")[:4000] or None)),
     )
 
 
@@ -210,11 +213,11 @@ def start_run(conn, question: str, level: str, channel: str, device_id: str | No
     run = conn.execute(
         """INSERT INTO agent_runs (level, question, channel, device_id, model)
            VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-        (level, question, channel, device_id, model),
+        (level, crypto.seal(question), channel, device_id, model),
     ).fetchone()["id"]
     msg = conn.execute(
         "INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('user', %s, %s, %s) RETURNING id",
-        (question, channel, run),
+        (crypto.seal(question), channel, run),
     ).fetchone()["id"]
     return run, msg
 
@@ -229,9 +232,9 @@ def history(conn, before_run: int, limit: int = 8) -> list[dict]:
 def finish(conn, run_id: int, channel: str, status: str, answer: str) -> str:
     """Итог запуска: статус и ответ в agent_runs, ответ — сообщением в чат."""
     conn.execute("UPDATE agent_runs SET status = %s, answer = %s, finished_at = now() WHERE id = %s",
-                 (status, answer, run_id))
+                 (status, crypto.seal(answer), run_id))
     conn.execute("INSERT INTO chat_messages (role, text, channel, run_id) VALUES ('assistant', %s, %s, %s)",
-                 (answer, channel, run_id))
+                 (crypto.seal(answer), channel, run_id))
     return answer
 
 

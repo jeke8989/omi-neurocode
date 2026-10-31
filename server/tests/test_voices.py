@@ -186,7 +186,8 @@ def test_owner_names_merge_forget_and_privacy(clean):
         == anna_id
     # новая фраза — новым человеком по имени
     res = people.assign_segment(conn, rows[2]["id"], name="Вера")
-    vera = conn.execute("SELECT id, name, centroid IS NOT NULL AS voiced FROM people WHERE name = 'Вера'").fetchone()
+    vera = conn.execute("SELECT id, name, centroid IS NOT NULL AS voiced FROM people WHERE id = %s",
+                        (people.by_name(conn, "Вера")[0],)).fetchone()
     assert res["person_id"] == vera["id"] and vera["voiced"]
 
     # объединить: Вера — это Борис

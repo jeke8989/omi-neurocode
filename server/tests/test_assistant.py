@@ -70,7 +70,7 @@ def test_voice_question_through_agent(conn, monkeypatch):  # noqa: F811
     assert reply["answer"].startswith("Хорошо") and reply["level"] == "fast" and not reply["pending"]
     q = conn.execute("SELECT question, answer, via FROM questions WHERE client_id = 'q1'").fetchone()
     assert q["via"] == "voice" and q["question"].startswith("Создай задачу")
-    t = conn.execute("SELECT source, due FROM tasks WHERE text = 'Позвонить Ивану'").fetchone()
+    t = next(r for r in conn.execute("SELECT source, due, text FROM tasks").fetchall() if r["text"] == "Позвонить Ивану")
     assert t["source"] == "agent" and t["due"] == "завтра"
     chans = [m["channel"] for m in conn.execute("SELECT channel FROM chat_messages ORDER BY id").fetchall()]
     assert chans[-2:] == ["voice", "voice"]

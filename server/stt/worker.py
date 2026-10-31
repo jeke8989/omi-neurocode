@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from neuro import cleanup, config, db, i18n, llm, retention, voices
+from neuro import cleanup, config, crypto, db, i18n, llm, retention, voices
 from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, voice_ms
 
 log = logging.getLogger("neuro.stt")
@@ -227,7 +227,7 @@ def store_segments(conn, chunk: dict, segs: list[Seg]) -> tuple[int, list[int]]:
         else:
             conv_id = conn.execute(CREATE_CONVERSATION_SQL, params).fetchone()["id"]
         ids = [conn.execute(INSERT_SEGMENT_SQL, (chunk["id"], conv_id, chunk["device_id"], start, end, speaker,
-                                                 text)).fetchone()["id"]
+                                                 crypto.seal(text))).fetchone()["id"]
                for start, end, speaker, text in rows]
         conn.execute("UPDATE audio_chunks SET status = 'done', error = NULL WHERE id = %s", (chunk["id"],))
     return conv_id, ids

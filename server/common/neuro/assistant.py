@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from . import config, llm
+from . import config, crypto, llm
 from .audio import BYTES_PER_MS, pcm_rms
 from .people import SEGMENT_SELECT, speaker_label
 
@@ -76,13 +76,15 @@ def insert_tasks(conn, conv_id, tasks: list[dict], source: str):
         conn.execute(
             """INSERT INTO tasks (conversation_id, text, due, assignee, target, source, person_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-            (conv_id, t["text"], t["due"], t["assignee"], t["target"], source, t.get("person_id")),
+            (conv_id, crypto.seal(t["text"]), crypto.seal(t["due"]), crypto.seal(t["assignee"]), t["target"], source,
+             t.get("person_id")),
         )
 
 
 def insert_memories(conn, conv_id, memories: list[str], source: str):
     for m in memories:
-        conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s)", (conv_id, m, source))
+        conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s)",
+                     (conv_id, crypto.seal(m), source))
 
 
 # ---------------------------------------------------------------- конец вопроса по паузе
@@ -166,5 +168,5 @@ def record_question(conn, device_id: str, client_id: str | None, question: str, 
     conn.execute(
         """INSERT INTO questions (device_id, client_id, question, answer, model, latency_ms, via, error)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-        (device_id, client_id, question, answer, model, latency_ms, via, error),
+        (device_id, client_id, crypto.seal(question), crypto.seal(answer), model, latency_ms, via, error),
     )

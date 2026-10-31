@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, cleanup, diary, events, extensions, i18n, people, retention
+from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, i18n, people, retention
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
@@ -136,7 +136,7 @@ def summarize_one(conn, conv_id: int):
             """UPDATE conversations SET title = %s, summary = %s, emoji = %s, topics = %s, error = NULL,
                    updated_at = now(), status = CASE WHEN status = 'processing' THEN 'done' ELSE status END
                WHERE id = %s""",
-            (title, summary, emoji, topics, conv_id),
+            (crypto.seal(title), crypto.seal(summary), emoji, crypto.seal_list(topics), conv_id),
         )
     log.info("conversation %s: '%s', %d tasks, %d memories", conv_id, title, len(tasks), len(memories))
 
@@ -411,6 +411,10 @@ def main():
                         log.exception("events tick failed")
                     if llm.configured():
                         diary.tick(conn)
+                    try:
+                        encrypt_existing.tick(conn)  # старые записи — шифруем порциями (от утечек)
+                    except Exception:  # noqa: BLE001
+                        log.exception("encrypting existing data failed")
                     if time.monotonic() - last_cleanup > 600:
                         cleanup(conn)
                         last_cleanup = time.monotonic()

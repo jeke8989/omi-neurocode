@@ -89,7 +89,9 @@ def test_agent_tool_loop_and_steps(conn, monkeypatch):  # noqa: F811
         "SELECT title FROM agent_steps WHERE run_id = %s ORDER BY id", (res["run_id"],)).fetchall()]
     assert steps[0].startswith("Уровень: Основательно")
     assert "🔎 Ищу в интернете: Omi" in steps and "📝 Создаю задачу: Прочитать про Omi" in steps
-    assert conn.execute("SELECT source FROM tasks WHERE text = 'Прочитать про Omi'").fetchone()["source"] == "agent"
+    # тексты в базе зашифрованы — ищем после расшифровки
+    assert [t["source"] for t in conn.execute("SELECT source, text FROM tasks").fetchall()
+            if t["text"] == "Прочитать про Omi"] == ["agent"]
     msgs = conn.execute("SELECT role, text FROM chat_messages ORDER BY id").fetchall()
     assert [m["role"] for m in msgs][-2:] == ["user", "assistant"]
     run = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
@@ -247,6 +249,7 @@ def test_photos_without_ai_cost_nothing(conn, monkeypatch, tmp_path):  # noqa: F
     monkeypatch.setattr(diary, "_safe_generate", lambda *a, **k: None)
     pid = diary.save_photo(conn, b"\xff\xd8\xff" + b"9" * 50, None, None, None)["id"]
     diary.tick(conn)
-    p = conn.execute("SELECT status, caption, lat FROM photos WHERE id = %s", (pid,)).fetchone()
+    p = diary.photo_coords(conn.execute("SELECT status, caption, lat, lon, pos FROM photos WHERE id = %s",
+                                        (pid,)).fetchone())
     assert p["status"] == "analyzed" and p["caption"] is None and abs(p["lat"] - 41.03) < 1e-6
     conn.execute("DELETE FROM settings WHERE key IN ('feature.photo_ai', 'feature.photo_style')")

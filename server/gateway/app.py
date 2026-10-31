@@ -18,15 +18,14 @@ from pathlib import Path
 
 import anyio
 import psycopg
-from psycopg.rows import dict_row
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_core, assistant, claude_agent, cleanup, config, db, diary, extensions, geo, i18n, llm,
-                   mnemo_mcp, pairing, people, retention, tts, voices)
+from neuro import (agent_core, assistant, claude_agent, cleanup, config, crypto, db, diary, extensions, geo, i18n,
+                   llm, mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -51,7 +50,7 @@ writer_locks: dict[str, asyncio.Lock] = {}
 # Утилиты
 # ---------------------------------------------------------------------------
 async def aconnect() -> psycopg.AsyncConnection:
-    return await psycopg.AsyncConnection.connect(config.DATABASE_URL, autocommit=True, row_factory=dict_row)
+    return await psycopg.AsyncConnection.connect(config.DATABASE_URL, autocommit=True, row_factory=crypto.dict_row)
 
 
 def _json_default(o):
@@ -232,11 +231,12 @@ async def handle_text(conn, device: str, text: str) -> dict:
             lat, lon = obj.get("lat"), obj.get("lon")
             if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and -90 <= lat <= 90 \
                     and -180 <= lon <= 180:
+                plat, plon, ppos = diary.coords(lat, lon)  # с ключом — только зашифрованная pos
                 await conn.execute(
-                    """INSERT INTO locations (device_id, client_id, ts, lat, lon, accuracy)
-                       VALUES (%s, %s, to_timestamp(%s / 1000.0), %s, %s, %s)
+                    """INSERT INTO locations (device_id, client_id, ts, lat, lon, pos, accuracy)
+                       VALUES (%s, %s, to_timestamp(%s / 1000.0), %s, %s, %s, %s)
                        ON CONFLICT (device_id, client_id) DO NOTHING""",
-                    (device, cid, ts, float(lat), float(lon), obj.get("acc")),
+                    (device, cid, ts, plat, plon, ppos, obj.get("acc")),
                 )
             return {"type": "ack", "id": cid}
         await conn.execute(
@@ -445,16 +445,15 @@ async def api_conversations(request: Request):
                       greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
                       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id) AS tasks_count,
                       """ + people.participants_sql("c") + """ AS people,
-                      (SELECT left(string_agg(x.text, ' '), 240) FROM
-                          (SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk
-                           ORDER BY s.started_at LIMIT 6) x) AS preview
+                      ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk
+                            ORDER BY s.started_at LIMIT 6) AS preview
                FROM conversations c
                WHERE (%s::date IS NULL OR (c.started_at AT TIME ZONE %s)::date = %s::date) AND c.trashed_at IS NULL
                ORDER BY c.started_at DESC
                LIMIT %s OFFSET %s""",
             (day, config.TZ, day, limit, offset),
         )).fetchall()
-    return Json({"items": rows})
+    return Json({"items": previews(rows)})
 
 
 async def api_days(request: Request):
@@ -489,23 +488,36 @@ async def api_search(request: Request):
     q = (request.query_params.get("q") or "").strip()
     if len(q) < 2:
         return Json({"conversations": [], "segments": [], "tasks": [], "memories": []})
-    like = f"%{q}%"
-    async with await aconnect() as conn:
-        conversations = await (await conn.execute(
-            """SELECT id, started_at, title, summary, emoji FROM conversations
-               WHERE title ILIKE %s OR summary ILIKE %s ORDER BY started_at DESC LIMIT 20""",
-            (like, like))).fetchall()
-        segments = await (await conn.execute(
-            """SELECT s.conversation_id, s.started_at, s.text, c.title, c.emoji FROM segments s
-               LEFT JOIN conversations c ON c.id = s.conversation_id
-               WHERE s.text ILIKE %s AND NOT s.junk ORDER BY s.started_at DESC LIMIT 30""", (like,))).fetchall()
-        tasks = await (await conn.execute(
-            "SELECT id, text, status, due FROM tasks WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 20",
-            (like,))).fetchall()
-        memories = await (await conn.execute(
-            "SELECT id, text, created_at FROM memories WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 20",
-            (like,))).fetchall()
-    return Json({"conversations": conversations, "segments": segments, "tasks": tasks, "memories": memories})
+    return Json(await _sync(search_all, q))
+
+
+def search_all(conn, q: str) -> dict:
+    """Поиск без учёта регистра. Тексты в базе зашифрованы, поэтому сравниваем после расшифровки, а не в SQL:
+    свежие записи — первыми, просматриваем порциями, пока не наберётся достаточно совпадений."""
+    ql = q.lower()
+
+    def has(*vals):
+        return any(v and isinstance(v, str) and ql in v.lower() for v in vals)
+
+    def scan(sql: str, fields: tuple, want: int, batch: int = 2000, cap: int = 60000) -> list:
+        out, offset = [], 0
+        while len(out) < want and offset < cap:
+            rows = conn.execute(sql + " LIMIT %s OFFSET %s", (batch, offset)).fetchall()
+            out += [r for r in rows if has(*(r.get(f) for f in fields))]
+            if len(rows) < batch:
+                break
+            offset += batch
+        return out[:want]
+
+    return {
+        "conversations": scan("""SELECT id, started_at, title, summary, emoji FROM conversations
+                                 WHERE trashed_at IS NULL ORDER BY started_at DESC""", ("title", "summary"), 20),
+        "segments": scan("""SELECT s.conversation_id, s.started_at, s.text, c.title, c.emoji FROM segments s
+                            LEFT JOIN conversations c ON c.id = s.conversation_id
+                            WHERE NOT s.junk ORDER BY s.started_at DESC""", ("text",), 30),
+        "tasks": scan("SELECT id, text, status, due FROM tasks ORDER BY created_at DESC", ("text",), 20),
+        "memories": scan("SELECT id, text, created_at FROM memories ORDER BY created_at DESC", ("text",), 20),
+    }
 
 
 async def api_conversation(request: Request):
@@ -1067,7 +1079,8 @@ async def api_extension(request: Request):
         if "enabled" in body:
             await conn.execute("UPDATE extensions SET enabled = %s WHERE id = %s", (bool(body["enabled"]), ext_id))
         if isinstance(body.get("settings"), dict):
-            clean = {str(k): str(v) for k, v in body["settings"].items() if v is not None}
+            # ключи и токены расширений — зашифрованы в базе (каждое значение отдельно: слияние || работает)
+            clean = {str(k): crypto.seal(str(v)) for k, v in body["settings"].items() if v is not None}
             await conn.execute("UPDATE extensions SET settings = settings || %s::jsonb WHERE id = %s",
                                (json.dumps(clean, ensure_ascii=False), ext_id))
     return Json({"ok": True})
@@ -1234,7 +1247,9 @@ async def api_photo(request: Request):
     path = row["styled_path"] if request.query_params.get("variant") != "original" and row["styled_path"] else row["path"]
     if not Path(path).exists():
         return Json({"error": "file missing"}, status_code=404)
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+    data = await anyio.to_thread.run_sync(crypto.read_file, path)  # фото на диске зашифрованы
+    media = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
+    return Response(data, media_type=media, headers={"Cache-Control": "private, max-age=86400"})
 
 # ---------------------------------------------------------------------------
 # Люди: голоса в разговорах, «Кто это?», «Созвездие»
@@ -1328,7 +1343,8 @@ async def api_person_sample(request: Request):
     path = voices.sample_path(request.path_params["id"])
     if not path.exists():
         return Json({"error": "no voice sample"}, status_code=404)
-    return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "private, max-age=300"})
+    data = await anyio.to_thread.run_sync(crypto.read_file, path)  # образец голоса на диске зашифрован
+    return Response(data, media_type="audio/wav", headers={"Cache-Control": "private, max-age=300"})
 
 
 async def api_suggestion(request: Request):
@@ -1414,13 +1430,22 @@ async def api_tts(request: Request):
     return Response(data, media_type="audio/wav", headers={"Cache-Control": "private, max-age=86400"})
 
 
+def previews(rows: list[dict], limit: int = 240) -> list[dict]:
+    """Первые фразы разговора (уже расшифрованные) -> короткое превью строкой."""
+    for r in rows:
+        p = r.get("preview")
+        if isinstance(p, list):
+            r["preview"] = " ".join(x for x in p if x)[:limit] or None
+    return rows
+
+
 EVENT_FRAGMENTS_SQL = """
 SELECT c.id, c.event_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary, c.emoji,
        greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
        (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count,
        c.topics, """ + people.participants_sql("c") + """ AS people,
-       (SELECT left(string_agg(x.text, ' '), 240) FROM
-           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk ORDER BY s.started_at LIMIT 6) x) AS preview
+       ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk
+             ORDER BY s.started_at LIMIT 6) AS preview
 FROM conversations c
 """
 
@@ -1435,7 +1460,7 @@ def _events_day(conn, day: str) -> dict:
                                 ORDER BY c.started_at DESC""", (config.TZ, day)).fetchall()
     by_event: dict = {}
     loose = []
-    for f in frags:
+    for f in previews(frags):
         (by_event.setdefault(f["event_id"], []) if f["event_id"] else loose).append(f)
     for e in events:
         e["fragments"] = by_event.get(e["id"], [])
@@ -1496,11 +1521,12 @@ async def api_trash(request: Request):
             res = conn.execute("UPDATE conversations SET trashed_at = NULL, junk_reason = NULL WHERE id = %s",
                                (cid,))
             return {"restored": res.rowcount}
-        return {"items": conn.execute(
+        return {"items": previews(conn.execute(
             """SELECT c.id, c.started_at, c.last_activity AS ended_at, c.title, c.emoji, c.junk_reason, c.trashed_at,
-                      (SELECT left(string_agg(x.text, ' '), 200) FROM (SELECT s.text FROM segments s
-                        WHERE s.conversation_id = c.id ORDER BY s.started_at LIMIT 4) x) AS preview
-               FROM conversations c WHERE c.trashed_at IS NOT NULL ORDER BY c.started_at DESC LIMIT 200""").fetchall()}
+                      ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id
+                            ORDER BY s.started_at LIMIT 4) AS preview
+               FROM conversations c WHERE c.trashed_at IS NOT NULL ORDER BY c.started_at DESC LIMIT 200""").fetchall(),
+            200)}
 
     return Json(await _sync(work))
 

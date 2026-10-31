@@ -47,7 +47,9 @@ def test_reminder_phrase_creates_task_only_for_owner(conn, monkeypatch):  # noqa
                            "evidence": "напомни позвонить Ивану", "due_at": "2030-01-02T11:00"}]}
 
     monkeypatch.setattr(llm, "chat_json", again)
-    conn.execute("UPDATE segments SET started_at = started_at - interval '1 minute' WHERE text LIKE 'Создай%%'")
+    for r in conn.execute("SELECT id, text FROM segments").fetchall():  # тексты зашифрованы — фильтр здесь
+        if r["text"].startswith("Создай"):
+            conn.execute("UPDATE segments SET started_at = started_at - interval '1 minute' WHERE id = %s", (r["id"],))
     _seg(conn, "Напомни позвонить Ивану", owner, seconds_ago=100)
     agent.quick_tasks(conn)
     assert conn.execute("SELECT count(*) AS n FROM tasks").fetchone()["n"] == 1

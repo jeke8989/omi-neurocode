@@ -4,3 +4,4 @@ numpy>=1.26
 faster-whisper>=1.0.3
 onnxruntime>=1.17
 tzdata
+cryptography>=42
