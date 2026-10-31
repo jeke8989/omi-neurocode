@@ -192,6 +192,9 @@ diag() {
      || ' вопросов=' || (SELECT count(*) FROM questions WHERE asked_at > now() - interval '7 days')
      || ' задач=' || (SELECT count(*) FROM tasks WHERE created_at > now() - interval '7 days')
      FROM conversations WHERE started_at > now() - interval '7 days'"
+  # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
+  q="SELECT 'открытых фраз=' || count(*) FILTER (WHERE text NOT LIKE 'enc_:%%') || ' из ' || count(*) FROM segments"
+  echo "::notice title=Шифрование::$(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
