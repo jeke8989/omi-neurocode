@@ -31,13 +31,9 @@ import codes.neuro.neurosoft.net.ChatRun
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Агенты чата. Mnemo — свой агент (события, люди, расшифровки, задачи, память, расширения); GPT — тот же агент
-// и те же инструменты, но на модели OpenAI; Claude — Claude Code CLI на сервере по подписке владельца
-// (claude — ассистент с данными Mnemo, claude_code — правит код Mnemo). Настройки -> Claude Code.
+// Агенты чата: Mnemo — свой агент (события, люди, расшифровки, задачи, память, расширения), модель выбирается
+// сама по сложности вопроса; Claude и GPT — тот же агент с теми же инструментами на моделях Anthropic и OpenAI.
 private val AGENTS = listOf("mnemo", "claude", "gpt")
-private val LEVELS = listOf("auto", "fast", "tools", "deep")
-private val CLAUDE_LEVELS = listOf("claude", "claude_code")
-private fun isClaude(level: String) = level == "claude" || level == "claude_code"
 
 @Composable
 private fun agentTitle(agent: String): String = when (agent) {
@@ -46,28 +42,14 @@ private fun agentTitle(agent: String): String = when (agent) {
     else -> "Mnemo"
 }
 
-@Composable
-private fun levelTitle(level: String): String = stringResource(when (level) {
-    "fast" -> R.string.level_fast
-    "tools" -> R.string.level_tools
-    "deep" -> R.string.level_deep
-    "claude" -> R.string.level_claude
-    "claude_code" -> R.string.level_claude_code
-    else -> R.string.level_auto
-})
 
 @Composable
 fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? = null) {
     val res by Repo.chat.state.collectAsState()
-    val claude by Repo.claude.state.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
     var agent by rememberSaveable { mutableStateOf(Core.prefs.chatAgent.takeIf { it in AGENTS } ?: "mnemo") }
-    var level by rememberSaveable { mutableStateOf(Core.prefs.chatLevel.takeIf { it in LEVELS } ?: "auto") }
-    var claudeLevel by rememberSaveable { mutableStateOf(Core.prefs.chatClaudeLevel.takeIf { it in CLAUDE_LEVELS } ?: "claude") }
     // с какого экрана открыт чат: агент видит это событие/день; можно убрать крестиком
     var about by rememberSaveable { mutableStateOf(context) }
-    val claudeMode = agent == "claude"
-    val claudeMissing = claudeMode && claude.data?.configured == false
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Throwable?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -79,15 +61,11 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
     fun send(text: String) {
         val t = text.trim()
         if (t.isEmpty() || sending) return
-        if (claudeMissing) {
-            Nav.push(Route.Claude)
-            return
-        }
         sending = true
         error = null
         scope.launch {
             try {
-                Api.sendChat(t, if (claudeMode) claudeLevel else level, agent, about)
+                Api.sendChat(t, "auto", agent, about)
                 input = ""
                 Repo.chat.refresh()
             } catch (e: Exception) {
@@ -98,7 +76,6 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
         }
     }
 
-    LaunchedEffect(claudeMode) { if (claudeMode) Repo.claude.refresh() }
     LaunchedEffect(Unit) {
         if (prefill != null && !prefillSent) {
             prefillSent = true
@@ -172,24 +149,13 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
         }
         Composer(
             input = input, onInput = { input = it },
-            levels = if (claudeMode) CLAUDE_LEVELS else LEVELS,
-            level = if (claudeMode) claudeLevel else level,
-            onLevel = {
-                if (claudeMode) {
-                    claudeLevel = it
-                    Core.prefs.chatClaudeLevel = it
-                } else {
-                    level = it
-                    Core.prefs.chatLevel = it
-                }
-            },
             about = about?.let { contextTitle ?: it }, onDropAbout = { about = null },
-            sending = sending, error = error, claudeMissing = claudeMissing, onSend = { send(input) },
+            sending = sending, error = error, onSend = { send(input) },
         )
     }
 }
 
-/** Переключатель агентов: Mnemo, Claude, GPT — под ним одна строка о том, чем выбранный хорош. */
+/** Переключатель агентов: Mnemo, Claude, GPT. */
 @Composable
 private fun AgentSwitch(agent: String, onAgent: (String) -> Unit) {
     val c = Mn.c
@@ -223,8 +189,6 @@ private fun ChatEmpty(onPick: (String) -> Unit) {
         Lens(LensState.IDLE, 64.dp)
         Spacer(Modifier.height(12.dp))
         Txt(stringResource(R.string.chat_empty_title), T.title)
-        Spacer(Modifier.height(8.dp))
-        Txt(stringResource(R.string.chat_empty_text), T.body, c.graphite)
         Spacer(Modifier.height(20.dp))
         listOf(R.string.chat_hint_1, R.string.chat_hint_2, R.string.chat_hint_3).forEach { id ->
             val text = stringResource(id)
@@ -245,13 +209,13 @@ private fun Message(m: ChatMessage, run: ChatRun?) {
             Txt(m.text, T.body, c.onInk, Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp))
                 .background(c.ink).padding(horizontal = 16.dp, vertical = 10.dp))
         } else {
-            Txt(m.text, T.body, c.ink, Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.paper)
+            // ответ ассистента: абзацы, списки, жирный и ссылки на события, разговоры и дни
+            Markdown(m.text, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.paper)
                 .padding(horizontal = 16.dp, vertical = 12.dp))
         }
         val meta = listOfNotNull(
             if (m.channel == "voice") stringResource(R.string.by_voice) else null,
-            if (mine) run?.level?.let { levelTitle(it) } else null,
-            if (!mine && run != null) agentTitle(run.agent) else null,
+            if (!mine && run != null && run.agent != "mnemo") agentTitle(run.agent) else null,
             if (!mine && run?.status == "needs_input") stringResource(R.string.agent_asks) else null,
             fmt.time(m.createdAt),
         ).joinToString(", ")
@@ -272,7 +236,7 @@ private fun Steps(run: ChatRun) {
             Icon(if (run.status == "failed") Icons.Info else Icons.Check, null,
                 tint = if (run.status == "failed") c.amber else c.graphite, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
-            Txt(levelTitle(run.level) + if (tools > 0) ", " + plural(R.plurals.steps, tools) else "", T.tiny, c.graphite)
+            Txt(if (tools > 0) plural(R.plurals.steps, tools) else stringResource(R.string.answer_direct), T.tiny, c.graphite)
             Spacer(Modifier.width(4.dp))
             Icon(if (open) Icons.ChevronDown else Icons.Chevron, null, tint = c.graphite, modifier = Modifier.size(14.dp))
         }
@@ -295,10 +259,8 @@ private fun Working(run: ChatRun?) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Lens(LensState.THINKING, 34.dp)
             Spacer(Modifier.width(6.dp))
-            Txt(stringResource(R.string.working) + (run?.let {
-                ", " + if (isClaude(it.level)) levelTitle(it.level)
-                else agentTitle(it.agent) + " · " + levelTitle(it.level).lowercase()
-            } ?: ""), T.smallStrong, modifier = Modifier.weight(1f))
+            Txt(stringResource(R.string.working) + (run?.takeIf { it.agent != "mnemo" }?.let { ", " + agentTitle(it.agent) } ?: ""),
+                T.smallStrong, modifier = Modifier.weight(1f))
             if (run != null) {
                 val scope = rememberCoroutineScope()
                 var stopping by remember(run.id) { mutableStateOf(false) }
@@ -326,18 +288,13 @@ private fun Working(run: ChatRun?) {
 
 @Composable
 private fun Composer(
-    input: String, onInput: (String) -> Unit, levels: List<String>, level: String, onLevel: (String) -> Unit,
-    about: String?, onDropAbout: () -> Unit, sending: Boolean,
-    error: Throwable?, claudeMissing: Boolean, onSend: () -> Unit,
+    input: String, onInput: (String) -> Unit, about: String?, onDropAbout: () -> Unit, sending: Boolean,
+    error: Throwable?, onSend: () -> Unit,
 ) {
     val c = Mn.c
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
         if (error != null) {
             Txt(errorText(error), T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-        }
-        if (claudeMissing) {
-            Txt(stringResource(R.string.claude_connect_hint), T.smallStrong, c.lens,
-                Modifier.padding(horizontal = 20.dp, vertical = 4.dp).quietTap { Nav.push(Route.Claude) })
         }
         if (about != null) {
             // о чём разговор: событие или день, с которого открыт чат
@@ -353,17 +310,7 @@ private fun Composer(
                     background = Color.Transparent, tint = c.graphite)
             }
         }
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(levels, key = { it }) { l ->
-                Chip(when (l) {
-                    "claude" -> stringResource(R.string.claude_mode_assistant)
-                    "claude_code" -> stringResource(R.string.claude_mode_code)
-                    else -> levelTitle(l)
-                }, l == level, { onLevel(l) })
-            }
-        }
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.Bottom) {
             Box(
                 Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(26.dp)).background(c.paper)
                     .padding(horizontal = 18.dp, vertical = 14.dp),

@@ -58,8 +58,7 @@ fun MapScreen(day: String, lat: Double?, lon: Double?) {
         when {
             res.loading -> LoadingBlock()
             res.error != null -> ErrorBlock(res.error, { load() })
-            d == null || d.isEmpty -> EmptyBlock(Icons.Pin, stringResource(R.string.map_empty_title),
-                stringResource(R.string.map_empty_text))
+            d == null || d.isEmpty -> EmptyBlock(Icons.Pin, stringResource(R.string.map_empty_title), "")
             else -> {
                 MnemoMap(
                     Modifier.fillMaxWidth().weight(1f),

@@ -84,7 +84,6 @@ fun SettingsScreen() {
     val device by Core.device.collectAsState()
     val upload by Core.upload.collectAsState()
     val features by Repo.features.state.collectAsState()
-    val claude by Repo.claude.state.collectAsState()
     val lens = rememberLensState()
     val fmt = rememberFmt()
     val scope = rememberCoroutineScope()
@@ -96,8 +95,9 @@ fun SettingsScreen() {
     }
     LaunchedEffect(Unit) {
         Repo.features.refresh()
-        Repo.claude.refresh()
+        Repo.serverStatus.refresh()
     }
+    val server by Repo.serverStatus.state.collectAsState()
     val c = Mn.c
 
     if (confirmClear) {
@@ -137,26 +137,20 @@ fun SettingsScreen() {
         Group(stringResource(R.string.assistant)) {
             item { ListRow(stringResource(R.string.voice_and_button), icon = Icons.Speaker, chevron = true,
                 onClick = { Nav.push(Route.Voice) }) }
-            item { ListRow(stringResource(R.string.ai_models), icon = Icons.Chip, chevron = true,
-                subtitle = stringResource(R.string.ai_models_sub), onClick = { Nav.push(Route.Models) }) }
             item { ListRow(stringResource(R.string.integrations), icon = Icons.Puzzle, chevron = true,
-                subtitle = stringResource(R.string.integrations_sub), onClick = { Nav.push(Route.Extensions) }) }
-            item { ListRow(stringResource(R.string.claude_code), icon = Icons.Code, chevron = true,
-                subtitle = stringResource(R.string.claude_sub),
-                value = claude.data?.let { stringResource(if (it.configured) R.string.claude_on else R.string.claude_off) },
-                onClick = { Nav.push(Route.Claude) }) }
+                onClick = { Nav.push(Route.Extensions) }) }
             item {
                 var prompts by remember { mutableStateOf(Core.prefs.taskPrompts) }
                 ToggleRow(stringResource(R.string.task_prompt_setting), prompts, {
                     prompts = it
                     Core.prefs.taskPrompts = it
-                }, icon = Icons.Tasks, subtitle = stringResource(R.string.task_prompt_setting_sub))
+                }, icon = Icons.Tasks)
             }
         }
 
         Group(stringResource(R.string.tab_people)) {
             item { ListRow(stringResource(R.string.voices_title), icon = Icons.People, chevron = true,
-                subtitle = stringResource(R.string.voices_settings_sub), onClick = { Nav.push(Route.VoicesSettings) }) }
+                onClick = { Nav.push(Route.VoicesSettings) }) }
         }
 
         Group(stringResource(R.string.tab_diary)) {
@@ -168,7 +162,7 @@ fun SettingsScreen() {
                 ToggleRow(stringResource(R.string.morning_setting), morning, {
                     morning = it
                     Core.prefs.morningSummary = it
-                }, icon = Icons.Bell, subtitle = stringResource(R.string.morning_setting_sub))
+                }, icon = Icons.Bell)
             }
         }
 
@@ -183,7 +177,7 @@ fun SettingsScreen() {
             item {
                 ToggleRow(stringResource(R.string.lock_pin), active, { on ->
                     if (on) Nav.push(Route.PinSetup) else codes.neuro.neurosoft.AppLock.disable()
-                }, icon = Icons.Lock, subtitle = stringResource(R.string.lock_pin_sub))
+                }, icon = Icons.Lock)
             }
             if (active) {
                 if (bioAvailable) {
@@ -228,37 +222,18 @@ fun SettingsScreen() {
         Group(stringResource(R.string.data)) {
             item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
                 onClick = { Nav.push(Route.Memories) }) }
-            item {
-                var cleanup by remember(features.data?.transcriptCleanup) {
-                    mutableStateOf(features.data?.transcriptCleanup ?: true)
-                }
-                ToggleRow(stringResource(R.string.transcript_cleanup), cleanup, { on ->
-                    cleanup = on
-                    scope.launch {
-                        try {
-                            Api.setFeatures(mapOf("transcript_cleanup" to on))
-                            Repo.features.refresh()
-                        } catch (e: Exception) {
-                            cleanup = !on
-                        }
-                    }
-                }, icon = Icons.Sparkle, subtitle = stringResource(R.string.transcript_cleanup_sub))
-            }
             item { ListRow(stringResource(R.string.trash), icon = Icons.Trash, chevron = true,
-                subtitle = stringResource(R.string.trash_sub), onClick = { Nav.push(Route.Trash) }) }
+                onClick = { Nav.push(Route.Trash) }) }
             item { ListRow(stringResource(R.string.audio_keep), icon = Icons.Wave, chevron = true,
                 value = features.data?.let { audioKeepTitle(it.audioKeepDays) },
                 onClick = { Nav.push(Route.AudioKeep) }) }
-            item { ListRow(stringResource(R.string.clear_chat), icon = Icons.Trash, danger = true,
-                onClick = { confirmClear = true }) }
         }
 
-        Group(stringResource(R.string.background), footer = stringResource(R.string.background_footer)) {
+        Group(stringResource(R.string.background)) {
             item {
                 ListRow(
                     stringResource(if (ignoringBattery) R.string.battery_unrestricted else R.string.battery_allow),
                     icon = Icons.Power, chevron = !ignoringBattery,
-                    subtitle = if (ignoringBattery) null else stringResource(R.string.battery_allow_sub),
                     onClick = if (ignoringBattery) null else ({
                         try {
                             batteryLauncher.launch(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
@@ -274,7 +249,7 @@ fun SettingsScreen() {
                 ToggleRow(stringResource(R.string.battery_saver), saver, {
                     saver = it
                     Core.setBatterySaver(it)
-                }, icon = Icons.Battery, subtitle = stringResource(R.string.battery_saver_sub))
+                }, icon = Icons.Battery)
             }
             item { ToggleRow(stringResource(R.string.autostart), autoStart, {
                 autoStart = it
@@ -295,6 +270,10 @@ fun SettingsScreen() {
                 })) }
             if (upload.pendingFiles > 1) {
                 item { ListRow(stringResource(R.string.queue), icon = Icons.Wave, value = fmt.bytes(upload.pendingBytes)) }
+            }
+            // сколько стоят модели ИИ (выбираются сами, самые выгодные для каждой задачи)
+            server.data?.aiCostMonth?.let { cost ->
+                item { ListRow(stringResource(R.string.ai_cost_month), icon = Icons.Chip, value = "$" + String.format(java.util.Locale.US, "%.2f", cost)) }
             }
             item { ListRow(stringResource(R.string.version), icon = Icons.Info, value = BuildConfig.VERSION_NAME) }
         }
@@ -328,7 +307,7 @@ fun VoiceSettingsScreen() {
             item { ToggleRow(stringResource(R.string.button_actions), actions, {
                 actions = it
                 prefs.buttonActions = it
-            }, icon = Icons.Hand, subtitle = stringResource(R.string.button_actions_sub)) }
+            }, icon = Icons.Hand) }
         }
         Group(stringResource(R.string.voice_reply)) {
             listOf(
@@ -407,7 +386,7 @@ fun VoiceSettingsScreen() {
             item { ToggleRow(stringResource(R.string.earcons), earcons, {
                 earcons = it
                 prefs.earcons = it
-            }, icon = Icons.Wave, subtitle = stringResource(R.string.earcons_sub)) }
+            }, icon = Icons.Wave) }
             item { ToggleRow(stringResource(R.string.say_remembered), confirm, {
                 confirm = it
                 prefs.confirmRemember = it
@@ -456,7 +435,7 @@ fun DiarySettingsScreen() {
         error?.let { StaleNote(it) }
         Group {
             item { ToggleRow(stringResource(R.string.day_feed), f?.diary ?: true, { set(mapOf("diary" to it)) },
-                icon = Icons.Book, subtitle = stringResource(R.string.day_feed_sub), enabled = f != null) }
+                icon = Icons.Book, enabled = f != null) }
             item {
                 ToggleRow(stringResource(R.string.location_while_recording), location, { on ->
                     if (on && !Core.locationPermissionGranted()) locationPerm.launch(Permissions.location())
@@ -465,7 +444,7 @@ fun DiarySettingsScreen() {
                         Core.prefs.locationEnabled = on
                         Core.applyLocationSetting()
                     }
-                }, icon = Icons.Pin, subtitle = stringResource(R.string.location_sub))
+                }, icon = Icons.Pin)
             }
             item {
                 ToggleRow(stringResource(R.string.photos_from_phone), photoAuto, { on ->
@@ -475,24 +454,7 @@ fun DiarySettingsScreen() {
                         Core.prefs.photoAutoImport = on
                         if (on) Core.syncPhotosNow()
                     }
-                }, icon = Icons.Photo, subtitle = stringResource(R.string.photos_from_phone_sub))
-            }
-            item { ToggleRow(stringResource(R.string.photo_ai), f?.photoAi ?: true, { set(mapOf("photo_ai" to it)) },
-                icon = Icons.Sparkle, subtitle = stringResource(R.string.photo_ai_sub), enabled = f != null) }
-            item { ToggleRow(stringResource(R.string.photo_styling), f?.photoStyle ?: true,
-                { set(mapOf("photo_style" to it)) }, icon = Icons.Palette,
-                subtitle = stringResource(R.string.photo_styling_sub), enabled = f != null) }
-        }
-        if (f != null && f.photoStyle) {
-            SectionTitle(stringResource(R.string.photo_style))
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(f.styles, key = { it.first }) { (key, title) ->
-                    Chip(styleTitle(key, title), key == f.style, { set(mapOf("style" to key)) })
-                }
-            }
-            SectionTitle(stringResource(R.string.photos_per_day))
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items((1..6).toList()) { n -> Chip("$n", n == f.photosPerDay, { set(mapOf("photos_per_day" to n)) }) }
+                }, icon = Icons.Photo)
             }
         }
     }

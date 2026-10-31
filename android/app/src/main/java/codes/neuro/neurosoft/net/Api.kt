@@ -201,13 +201,6 @@ data class ChatMessage(val id: Long, val role: String, val text: String, val cha
                        val createdAt: String)
 data class ChatState(val messages: List<ChatMessage>, val runs: Map<Long, ChatRun>, val running: Boolean)
 
-/** Режим чата «Claude»: токен на сервере (сюда приходит только хвост), сервис claude и его репозиторий. */
-data class ClaudeInfo(
-    val configured: Boolean, val tokenHint: String?, val session: Boolean, val model: String, val models: List<String>,
-    val available: Boolean, val version: String?, val repo: String?, val head: String?, val dirty: Boolean,
-    val deployKey: String?, val busy: Boolean,
-)
-
 data class ExtSetting(val key: String, val title: String, val secret: Boolean, val required: Boolean,
                       val hint: String?, val filled: Boolean, val value: String?, val type: String = "text")
 data class ExtTool(val name: String, val title: String, val description: String)
@@ -253,6 +246,8 @@ data class ServerStatus(
     /** Очередь расшифровки на сервере, секунды звука: живой — первым, из памяти кулона — за ним. */
     val queueLiveSec: Int = 0,
     val queueOfflineSec: Int = 0,
+    /** Сколько стоили модели ИИ за 30 дней, $. */
+    val aiCostMonth: Double? = null,
 )
 
 /** REST API своего сервера (gateway). */
@@ -406,6 +401,7 @@ object Api {
             chunksPending = chunks.optInt("pending") + chunks.optInt("processing"),
             queueLiveSec = o.optJSONObject("queue")?.optInt("live_sec") ?: 0,
             queueOfflineSec = o.optJSONObject("queue")?.optInt("offline_sec") ?: 0,
+            aiCostMonth = if (o.has("ai_cost_30d") && !o.isNull("ai_cost_30d")) o.optDouble("ai_cost_30d") else null,
         )
     }
 
@@ -627,31 +623,6 @@ object Api {
         call("POST", "/api/chat/clear", JSONObject())
     }
 
-    // ---------------------------------------------------------------- Claude Code
-    suspend fun claude(): ClaudeInfo = claudeInfo(JSONObject(call("GET", "/api/claude")))
-
-    suspend fun setClaude(token: String? = null, model: String? = null, newSession: Boolean = false,
-                          cancel: Boolean = false): ClaudeInfo {
-        val body = JSONObject()
-        if (!token.isNullOrBlank()) body.put("token", token.trim())
-        if (model != null) body.put("model", model)
-        if (newSession) body.put("new_session", true)
-        if (cancel) body.put("cancel", true)
-        return claudeInfo(JSONObject(call("POST", "/api/claude", body)))
-    }
-
-    suspend fun disconnectClaude(): ClaudeInfo = claudeInfo(JSONObject(call("DELETE", "/api/claude")))
-
-    private fun claudeInfo(o: JSONObject): ClaudeInfo {
-        val s = o.optJSONObject("service") ?: JSONObject()
-        return ClaudeInfo(
-            configured = o.optBoolean("configured"), tokenHint = o.str("token_hint"), session = o.optBoolean("session"),
-            model = o.optString("model"), models = o.optJSONArray("models").strings().ifEmpty { listOf("") },
-            available = s.optBoolean("available"), version = s.str("version"), repo = s.str("repo"),
-            head = s.str("head"), dirty = s.optBoolean("dirty"), deployKey = s.str("deploy_key"),
-            busy = s.optBoolean("busy"),
-        )
-    }
 
     // ---------------------------------------------------------------- расширения
     suspend fun extensions(): Pair<List<Extension>, List<Extension>> {
@@ -739,7 +710,8 @@ object Api {
         val o = JSONObject(call("GET", "/api/diary?limit=21"))
         val photos = o.optJSONObject("photos") ?: JSONObject()
         return DiaryInfo(
-            days = o.optJSONArray("days").map { d ->
+            // пустой день (ещё ничего не было) не показываем
+            days = o.optJSONArray("days").filterObjects { !it.isNull("title") || it.optString("status") == "failed" }.map { d ->
                 val stats = d.optJSONObject("stats") ?: JSONObject()
                 DiaryDay(
                     day = d.optString("day"), title = d.str("title"), summary = d.str("summary"), mood = d.str("mood"),
@@ -981,4 +953,11 @@ private fun JSONArray?.strings(): List<String> {
 private fun <T> JSONArray?.map(transform: (JSONObject) -> T): List<T> {
     if (this == null) return emptyList()
     return (0 until length()).map { transform(getJSONObject(it)) }
+}
+
+private fun JSONArray?.filterObjects(keep: (JSONObject) -> Boolean): JSONArray {
+    val out = JSONArray()
+    if (this == null) return out
+    for (i in 0 until length()) optJSONObject(i)?.takeIf(keep)?.let { out.put(it) }
+    return out
 }

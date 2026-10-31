@@ -81,7 +81,7 @@ fun InboxScreen() {
             if (items.isNotEmpty()) IconCircle(Icons.Trash, stringResource(R.string.inbox_clear), { Inbox.clear() }, size = 40.dp)
         }
         if (items.isEmpty()) {
-            EmptyBlock(Icons.Bell, stringResource(R.string.inbox_empty_title), stringResource(R.string.inbox_empty_text))
+            EmptyBlock(Icons.Bell, stringResource(R.string.inbox_empty_title), "")
             return@Column
         }
         LazyColumn(Modifier.fillMaxSize().navigationBarsPadding(), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {

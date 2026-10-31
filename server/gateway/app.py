@@ -26,7 +26,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_context, agent_core, assistant, claude_agent, cleanup, config, crypto, db, diary, extensions,
+from neuro import (agent_context, agent_core, assistant, cleanup, config, crypto, db, diary, extensions,
                    ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
@@ -305,16 +305,14 @@ async def health(request: Request):
 
 
 async def health_full(request: Request):
-    """Разбивка по сервисам для мониторинга: api, db, claude. 200 — ok/degraded, 503 — база недоступна."""
-    services = {"api": True, "db": False, "claude": False}
+    """Разбивка по сервисам для мониторинга: api, db. 200 — ok/degraded, 503 — база недоступна."""
+    services = {"api": True, "db": False}
     try:
         async with await aconnect() as conn:
             await conn.execute("SELECT 1")
         services["db"] = True
     except Exception:  # noqa: BLE001
         pass
-    info = await anyio.to_thread.run_sync(lambda: claude_agent.service_info(timeout=1.5))
-    services["claude"] = bool(info.get("available"))
     state = "ok" if all(services.values()) else "degraded" if services["db"] else "down"
     return Json({"status": state, "services": services}, status_code=503 if state == "down" else 200)
 
@@ -419,6 +417,8 @@ async def api_status(request: Request):
         chunks = await (await conn.execute(
             "SELECT status, count(*) AS n FROM audio_chunks GROUP BY status"
         )).fetchall()
+        cost = await (await conn.execute(
+            "SELECT coalesce(sum(cost), 0) AS c FROM llm_usage WHERE created_at > now() - interval '30 days'")).fetchone()
         # очередь расшифровки: живой звук идёт первым, запись из памяти кулона — за ним
         queue = await (await conn.execute(
             """SELECT coalesce(sum(duration_ms) FILTER (WHERE NOT offline), 0) / 1000 AS live_sec,
@@ -435,6 +435,7 @@ async def api_status(request: Request):
     return Json({
         "chunks": {r["status"]: r["n"] for r in chunks},
         "queue": {"live_sec": int(queue["live_sec"]), "offline_sec": int(queue["offline_sec"])},
+        "ai_cost_30d": round(float(cost["c"] or 0), 2),
         "devices": devices,
         **counts,
         "stt_provider": config.STT_PROVIDER,
@@ -1002,21 +1003,9 @@ async def api_chat(request: Request):
             return Json({"error": "agent: mnemo | gpt | claude"}, status_code=400)
         if context and not CONTEXT_RE.match(context):
             return Json({"error": "context: event:ID | conversation:ID | day:YYYY-MM-DD"}, status_code=400)
-        if agent == "claude" and level not in claude_agent.LEVELS:
-            level = "claude"
-        if level != "auto" and level not in claude_agent.LEVELS and level not in agent_core.LEVELS:
-            return Json({"error": "level: auto | fast | tools | deep | claude | claude_code"}, status_code=400)
-        if level in claude_agent.LEVELS:
-            def check():
-                with db.connect() as conn:
-                    return claude_agent.configured(conn), claude_agent.busy(conn)
-
-            ready, running = await _run_in_thread(check)
-            if not ready:
-                return Json({"error": "claude_token"}, status_code=400)
-            if running:
-                return Json({"error": "claude_busy"}, status_code=423)
-        elif not llm.configured():
+        if level != "auto" and level not in agent_core.LEVELS:
+            level = "auto"  # уровень выбирается сам (старые приложения ещё присылают claude / claude_code)
+        if not llm.configured():
             return Json({"error": "на сервере не задан ключ модели (OPENROUTER_API_KEY)"}, status_code=400)
         level = agent_core.route(text, "chat") if level == "auto" else level
 
@@ -1077,9 +1066,6 @@ async def api_run_cancel(request: Request):
             row = conn.execute("SELECT level, status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
             if row is None:
                 return None
-            if row["level"] in claude_agent.LEVELS:
-                claude_agent.cancel(conn)
-                return row["status"] == "running"
             return agent_core.cancel(conn, run_id)
 
     stopped = await _run_in_thread(stop)
@@ -1093,8 +1079,6 @@ async def api_chat_clear(request: Request):
         return _unauthorized()
     async with await aconnect() as conn:
         await conn.execute("DELETE FROM chat_messages")
-        await conn.execute("DELETE FROM settings WHERE key = ANY(%s)",  # Claude — с чистого листа
-                           (list(claude_agent.SESSION_KEYS.values()),))
     return Json({"cleared": True})
 
 
@@ -1115,7 +1099,7 @@ async def mcp_endpoint(request: Request):
     """Инструменты Mnemo по MCP (JSON-RPC): для Claude внутри Mnemo (токен запуска) и для ваших программ —
     Claude Desktop, Cursor и других (личный ключ из «Интеграций», его можно отозвать)."""
     token = _token(request.headers, {})
-    if claude_agent.run_for_token(token) is None and not await anyio.to_thread.run_sync(_mcp_personal, token):
+    if not await anyio.to_thread.run_sync(_mcp_personal, token):
         return _unauthorized()
     if request.method != "POST":
         return Json({"error": "method not allowed"}, status_code=405)  # SSE-поток не держим
@@ -1147,38 +1131,6 @@ async def api_mcp(request: Request):
             return Json({"enabled": False, "path": "/mcp"})
         row = await (await conn.execute("SELECT updated_at FROM settings WHERE key = %s", (MCP_KEY,))).fetchone()
     return Json({"enabled": row is not None, "since": row["updated_at"] if row else None, "path": "/mcp"})
-
-
-async def api_claude(request: Request):
-    """Режим чата «Claude»: токен (claude setup-token), модель, новая сессия, остановка, сведения о сервисе."""
-    if not _authorized(request.headers, request.query_params):
-        return _unauthorized()
-    body = {}
-    if request.method == "POST":
-        body = await _body(request)
-        if body is None:
-            return Json({"error": "bad json"}, status_code=400)
-        token = str(body.get("token") or "").strip()
-        if token and not claude_agent.TOKEN_RE.match(token):
-            return Json({"error": "token looks wrong: paste the whole line from claude setup-token"}, status_code=400)
-        if "model" in body and str(body["model"] or "") not in claude_agent.MODELS:
-            return Json({"error": "model: " + " | ".join(m or '""' for m in claude_agent.MODELS)}, status_code=400)
-
-    def work(conn):
-        if request.method == "DELETE":
-            claude_agent.set_token(conn, None)
-        elif request.method == "POST":
-            if body.get("token"):
-                claude_agent.set_token(conn, str(body["token"]).strip())
-            if "model" in body:
-                claude_agent.set_model(conn, str(body["model"] or ""))
-            if body.get("new_session"):
-                claude_agent.reset_session(conn)
-            if body.get("cancel"):
-                claude_agent.cancel()
-        return claude_agent.status(conn)
-
-    return Json(await _sync(work))
 
 
 # ---------------------------------------------------------------------------
@@ -1385,8 +1337,8 @@ async def api_diary(request: Request):
         days = await (await conn.execute(
             """SELECT day, title, summary, mood, quote, highlights, places, stats, cover_photo_id, status,
                       generated_at, error
-               FROM diary_days WHERE status <> 'pending' OR title IS NOT NULL
-               ORDER BY day DESC LIMIT %s""", (limit,))).fetchall()
+               FROM diary_days WHERE title IS NOT NULL OR status = 'failed'
+               ORDER BY day DESC LIMIT %s""", (limit,))).fetchall()  # пустые дни не показываем
         ids = sorted({h["photo_id"] for d in days for h in (d["highlights"] or []) if h.get("photo_id")})
         photos = {}
         if ids:
@@ -1807,7 +1759,6 @@ app = Starlette(
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
         Route("/api/runs/{run_id:int}/cancel", api_run_cancel, methods=["POST"]),
         Route("/api/share", api_share),
-        Route("/api/claude", api_claude, methods=["GET", "POST", "DELETE"]),
         Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),
         Route("/api/mcp", api_mcp, methods=["GET", "POST", "DELETE"]),
         Route("/api/extensions", api_extensions),

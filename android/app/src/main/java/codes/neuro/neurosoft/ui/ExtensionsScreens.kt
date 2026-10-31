@@ -115,11 +115,11 @@ fun ExtensionsScreen() {
                 }
                 Group(stringResource(R.string.ext_add)) {
                     item {
-                        ListRow(stringResource(R.string.ext_build), subtitle = stringResource(R.string.ext_build_sub),
+                        ListRow(stringResource(R.string.ext_build),
                             icon = Icons.Sparkle, accent = true, chevron = true, onClick = { Nav.push(Route.ExtensionBuilder) })
                     }
                     item {
-                        ListRow(stringResource(R.string.mcp_title), subtitle = stringResource(R.string.mcp_sub),
+                        ListRow(stringResource(R.string.mcp_title),
                             icon = Icons.Link, chevron = true, onClick = { Nav.push(Route.McpAccess) })
                     }
                 }

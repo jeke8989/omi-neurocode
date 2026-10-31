@@ -1,4 +1,4 @@
-# NeuroSoft: gateway, stt, agent, claude (Claude Code CLI для чата) + Postgres и autoheal.
+# NeuroSoft: gateway, stt, agent + Postgres и autoheal.
 # Отдельный проект docker compose — не трогает Jarvis и другие контейнеры на сервере.
 name: neurosoft
 
@@ -89,27 +89,6 @@ services:
       db:
         condition: service_healthy
 
-  # Claude Code CLI для режима «Claude» в чате. Нарочно без .env: ключей сервера здесь нет,
-  # только рабочая копия репозитория и deploy-ключ для git push (~/.ssh в томе claude-home).
-  claude:
-    build:
-      context: .
-      dockerfile: claude/Dockerfile
-    restart: unless-stopped
-    logging: *default-logging
-    environment:
-      TZ: ${TZ:-Europe/Moscow}
-      CLAUDE_REPO_URL: ${CLAUDE_REPO_URL:-https://github.com/jeke8989/omi-neurocode.git}
-      CLAUDE_PUSH_URL: ${CLAUDE_PUSH_URL:-git@github.com:jeke8989/omi-neurocode.git}
-      CLAUDE_BRANCH: ${CLAUDE_BRANCH:-main}
-      CLAUDE_MAX_MIN: ${CLAUDE_MAX_MIN:-30}
-    volumes:
-      - claude-home:/home/claude
-      - claude-work:/work
-    mem_limit: 2g
-    labels:
-      - "autoheal=true"
-
   # перезапускает контейнеры с меткой autoheal=true, если их healthcheck стал unhealthy.
   # Профиль autoheal (COMPOSE_PROFILES в .env): если на сервере уже есть свой autoheal (например, у Jarvis), выключите.
   autoheal:
@@ -130,5 +109,3 @@ volumes:
   voices:
   tiles:
   whisper-models:
-  claude-home:
-  claude-work:

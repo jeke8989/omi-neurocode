@@ -58,7 +58,6 @@ main() {
       server/gateway/*) add gateway ;;
       server/stt/*) add stt ;;
       server/agent/*) add agent ;;
-      server/claude/*) add claude ;;
     esac
   done <<< "$changed"
   say "Пересобираю: ${services:- ничего (код образов не менялся)}"
@@ -68,14 +67,12 @@ main() {
     check_space "$s"
     [ "$s" = gateway ] && keep_prev "$s"  # прошлую версию держим только для gateway: без него нет связи, а места мало
     docker compose build -q "$s"
-    if [ "$s" = gateway ] || [ "$s" = claude ]; then wait_claude; fi
     docker compose up -d --no-deps "$s"
     tidy
   done
 
   say "Применяю docker-compose.yml"
-  wait_claude
-  docker compose up -d --remove-orphans
+  docker compose up -d --remove-orphans  # заодно убирает контейнер claude (Claude Code CLI больше не нужен)
   tidy
 
   docker compose ps --format 'table {{.Service}}\t{{.Status}}'
@@ -257,18 +254,6 @@ check_space() {
 tidy() {
   docker image prune -f >/dev/null 2>&1 || true
   if [ "$(df -Pm / | awk 'NR==2{print $2}')" -lt 40000 ]; then docker builder prune -af >/dev/null 2>&1 || true; fi
-}
-
-# Claude мог сам запушить это обновление и ещё дописывает ответ — не обрываем его (до 5 минут)
-wait_claude() {
-  local i n
-  for i in $(seq 1 60); do
-    n=$(docker compose exec -T db psql -U neuro -d neuro -tAc \
-        "SELECT count(*) FROM agent_runs WHERE level IN ('claude', 'claude_code') AND status = 'running'" 2>/dev/null || echo 0)
-    [ "${n:-0}" = 0 ] && return 0
-    [ "$i" = 1 ] && echo "Claude ещё отвечает в чате — жду"
-    sleep 5
-  done
 }
 
 # весь скрипт прочитан до запуска: git checkout выше подменяет этот файл на ходу

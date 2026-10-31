@@ -80,8 +80,6 @@ private fun Screen(route: Route) {
         Route.DiarySettings -> DiarySettingsScreen()
         Route.Language -> LanguageScreen()
         Route.SttLanguage -> SttLanguageScreen()
-        Route.Models -> ModelsScreen()
-        is Route.ModelPicker -> ModelPickerScreen(route.task)
         Route.Extensions -> ExtensionsScreen()
         is Route.Extension -> ExtensionScreen(route.id)
         Route.Memories -> MemoriesScreen()
@@ -92,7 +90,6 @@ private fun Screen(route: Route) {
         Route.PinSetup -> PinSetupScreen()
         Route.Sky -> SkyScreen()
         is Route.Map -> MapScreen(route.day, route.lat, route.lon)
-        Route.Claude -> ClaudeScreen()
         Route.Server -> ServerScreen()
     }
 }

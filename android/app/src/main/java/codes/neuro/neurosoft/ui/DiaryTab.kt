@@ -129,39 +129,12 @@ fun DiaryTab() {
     val fmt = rememberFmt()
     var refreshing by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
-    val sending = stringResource(R.string.photos_sending)
-    val sentTemplate = stringResource(R.string.photos_sent)
-    val rebuilding = stringResource(R.string.diary_rebuilding)
 
     LaunchedEffect(Unit) {
         Repo.features.refresh()
         while (true) {
             Repo.diary.refresh()
             delay(60_000)
-        }
-    }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        note = sending
-        scope.launch {
-            val sent = PhotoSync.upload(context, uris, Core::locationNear)
-            note = String.format(sentTemplate, sent, uris.size)
-            try {
-                Api.generateDiary(todayIso())
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    fun rebuild(day: String) {
-        scope.launch {
-            note = try {
-                Api.generateDiary(day)
-                rebuilding
-            } catch (e: Exception) {
-                null
-            }
         }
     }
 
@@ -172,16 +145,6 @@ fun DiaryTab() {
     ) {
         val info = res.data
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
-            item {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton(stringResource(R.string.add_photos), {
-                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }, small = true, icon = Icons.Photo)
-                    SecondaryButton(stringResource(R.string.diary_build_today), { rebuild(todayIso()) }, small = true,
-                        icon = Icons.Sparkle)
-                }
-            }
             note?.let { n -> item { Txt(n, T.caption, Mn.c.graphite, Modifier.padding(horizontal = 22.dp, vertical = 6.dp)) } }
             if (features.data?.diary == false) {
                 item {
@@ -203,7 +166,7 @@ fun DiaryTab() {
                 info == null && res.error != null -> item { ErrorBlock(res.error, { scope.launch { Repo.diary.refresh() } }) }
                 info == null -> item { LoadingBlock() }
                 info.days.isEmpty() -> item {
-                    EmptyBlock(Icons.Book, stringResource(R.string.diary_empty_title), stringResource(R.string.diary_empty_text))
+                    EmptyBlock(Icons.Book, stringResource(R.string.diary_empty_title), "")
                 }
                 else -> {
                     item { StaleNote(res.error) }

@@ -99,11 +99,6 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_agent", null) ?: if (chatLevel.startsWith("claude")) "claude" else "mnemo"
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
-    /** Режим Claude: claude (ассистент) | claude_code (правит код Mnemo). */
-    var chatClaudeLevel: String
-        get() = sp.getString("chat_claude_level", null) ?: if (chatLevel == "claude_code") "claude_code" else "claude"
-        set(value) = sp.edit().putString("chat_claude_level", value).apply()
-
     /** Двойное нажатие: remember — «запомни это», pause — пауза/продолжить запись, off — ничего. */
     var doubleTap: String
         get() = sp.getString("double_tap", "remember") ?: "remember"

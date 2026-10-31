@@ -10,10 +10,12 @@
     <string name="agent_gpt_about">An OpenAI model with the same tools as Mnemo. Change the model under Models</string>
     <string name="agent_mnemo_about">Knows your conversations, events, people and tasks, and answers from them</string>
     <string name="ago">%1$s ago</string>
+    <string name="ai_cost_month">AI, last 30 days</string>
     <string name="ai_models">AI models</string>
     <string name="ai_models_sub">A model per task, prices and spending</string>
     <string name="all_models">All OpenRouter models: %1$d</string>
     <string name="allow">Allow</string>
+    <string name="answer_direct">Direct answer</string>
     <string name="answer_in_chat">The full answer will arrive in the chat</string>
     <string name="app_language">App language</string>
     <string name="app_name" translatable="false">Mnemo</string>

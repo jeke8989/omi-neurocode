@@ -244,7 +244,7 @@ fun DeviceScreen() {
                 item { ListRow(stringResource(R.string.frames_received), value = "${device.frames}") }
                 item { ListRow(stringResource(R.string.packets_lost), value = "${device.lostPackets}") }
                 item { ListRow(stringResource(R.string.last_audio), value = fmt.ago(device.lastAudioAt)) }
-                item { ListRow(stringResource(R.string.avg_frame), subtitle = stringResource(R.string.avg_frame_sub),
+                item { ListRow(stringResource(R.string.avg_frame),
                     value = stringResource(R.string.size_b, device.avgFrameBytes.toLong())) }
                 item { ListRow(stringResource(R.string.mic_on_today), value = fmt.duration(device.heardTodayMs / 1000)) }
                 item { ListRow(stringResource(R.string.server), value = upload.error?.let { serverErrorText(it) }

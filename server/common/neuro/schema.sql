@@ -399,3 +399,11 @@ CREATE INDEX IF NOT EXISTS hook_events_queue_idx ON hook_events (status, id);
 -- Память без мусора: архив (модель при перепроверке сочла записью не нужной — можно вернуть) и отметка проверки
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 ALTER TABLE memories ADD COLUMN IF NOT EXISTS reviewed BOOLEAN NOT NULL DEFAULT false;
+
+-- Модели выбираются автоматически: прежние ручные выборы из приложения сбрасываются один раз,
+-- стилизация фото (дорогая генерация картинок) выключается; пустые дни дневника убираются
+DELETE FROM settings WHERE key LIKE 'model.%' AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'models.auto_v1');
+UPDATE settings SET value = '0' WHERE key = 'feature.photo_style'
+  AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'models.auto_v1');
+INSERT INTO settings (key, value) VALUES ('models.auto_v1', '1') ON CONFLICT (key) DO NOTHING;
+DELETE FROM diary_days WHERE title IS NULL AND status <> 'failed';

@@ -430,7 +430,7 @@ fun EmptyBlock(icon: ImageVector, title: String, text: String, modifier: Modifie
         Icon(icon, null, tint = Mn.c.faint, modifier = Modifier.size(40.dp))
         Spacer(Modifier.height(4.dp))
         Txt(title, T.section, align = TextAlign.Center)
-        Txt(text, T.small, Mn.c.graphite, align = TextAlign.Center)
+        if (text.isNotBlank()) Txt(text, T.small, Mn.c.graphite, align = TextAlign.Center)
         if (action != null) {
             Spacer(Modifier.height(8.dp))
             action()

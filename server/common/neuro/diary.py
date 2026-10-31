@@ -37,7 +37,8 @@ STYLES = {
 STYLE_SUFFIX = (" Keep the composition, people, places and objects recognizable. Do not add any text, letters,"
                 " watermarks or logos.")
 
-DEFAULTS = {"feature.diary": "1", "feature.photo_ai": "1", "feature.photo_style": "1", "diary.style": "watercolor",
+# стилизация фото выключена: ~$0.07 за картинку при почти нулевой пользе (дневник показывает оригиналы)
+DEFAULTS = {"feature.diary": "1", "feature.photo_ai": "1", "feature.photo_style": "0", "diary.style": "watercolor",
             "diary.photos_per_day": "3"}
 
 
@@ -450,6 +451,8 @@ def tick(conn):
 def _safe_generate(conn, day: date, force: bool = False):
     try:
         if not generate_day(conn, day, force=force):
+            # дня ещё нет (ни разговоров, ни мест, ни фото) — пустую карточку не заводим
+            conn.execute("DELETE FROM diary_days WHERE day = %s AND title IS NULL", (day,))
             conn.execute("UPDATE diary_days SET status = 'done' WHERE day = %s AND status = 'pending'", (day,))
     except Exception as exc:  # noqa: BLE001
         log.exception("diary %s failed", day)

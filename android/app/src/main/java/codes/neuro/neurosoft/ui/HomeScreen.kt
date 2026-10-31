@@ -304,8 +304,7 @@ fun HomeTab() {
                 }
                 feed == null -> item(key = "loading") { LoadingBlock() }
                 feed.isEmpty -> item(key = "empty") {
-                    EmptyBlock(Icons.Wave, stringResource(if (day == today) R.string.empty_today_title else R.string.empty_day_title),
-                        stringResource(if (day == today) R.string.empty_today_text else R.string.empty_day_text))
+                    EmptyBlock(Icons.Wave, stringResource(if (day == today) R.string.empty_today_title else R.string.empty_day_title), "")
                 }
                 else -> {
                     item(key = "stale") { StaleNote(feedRes.error) }

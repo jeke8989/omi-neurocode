@@ -253,7 +253,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.peopleSections(
     val ignored = info.people.filter { it.ref.ignored }
     if (info.people.isEmpty()) {
         item(key = "empty") {
-            EmptyBlock(Icons.People, stringResource(R.string.people_empty_title), stringResource(R.string.people_empty_text))
+            EmptyBlock(Icons.People, stringResource(R.string.people_empty_title), "")
         }
     }
     if (known.isNotEmpty()) {
@@ -602,7 +602,6 @@ fun PersonScreen(id: Long) {
                     if (!p.ref.isOwner) {
                         item {
                             ListRow(stringResource(R.string.its_me), icon = Icons.Person,
-                                subtitle = stringResource(R.string.its_me_sub),
                                 onClick = { if (!busy) act { state = Res(Api.updatePerson(id, isOwner = true)) } })
                         }
                     }
@@ -617,11 +616,10 @@ fun PersonScreen(id: Long) {
                     item {
                         ToggleRow(stringResource(R.string.ignore_voice), p.ref.ignored, { v ->
                             act { state = Res(Api.updatePerson(id, ignored = v)) }
-                        }, icon = Icons.EyeOff, subtitle = stringResource(R.string.ignore_voice_sub), enabled = !busy)
+                        }, icon = Icons.EyeOff, enabled = !busy)
                     }
                     item {
-                        ListRow(stringResource(R.string.merge_with), icon = Icons.Merge, chevron = true,
-                            subtitle = stringResource(R.string.merge_with_sub), onClick = { merge = true })
+                        ListRow(stringResource(R.string.merge_with), icon = Icons.Merge, chevron = true, onClick = { merge = true })
                     }
                     item {
                         ListRow(stringResource(R.string.forget_voice), icon = Icons.Trash, danger = true,
@@ -849,13 +847,13 @@ fun VoicesSettingsScreen() {
                 ToggleRow(stringResource(R.string.voices_enabled), enabled, {
                     enabled = it
                     save(e = it)
-                }, icon = Icons.People, subtitle = stringResource(R.string.voices_enabled_sub))
+                }, icon = Icons.People)
             }
             item {
                 ToggleRow(stringResource(R.string.voices_others), others, {
                     others = it
                     save(o = it)
-                }, icon = Icons.Person, subtitle = stringResource(R.string.voices_others_sub), enabled = enabled)
+                }, icon = Icons.Person, enabled = enabled)
             }
         }
         Group(footer = stringResource(R.string.voices_consent)) {

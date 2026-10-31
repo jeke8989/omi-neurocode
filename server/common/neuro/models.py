@@ -66,6 +66,13 @@ TASKS += [
         "default": "google/gemini-3.7-flash",
     },
     {
+        "key": "agent_claude",
+        "kind": "llm",
+        "title": "Агент Claude",
+        "description": "Агент «Claude» в чате: те же инструменты, что у Mnemo, но все шаги — на модели Anthropic.",
+        "default": "anthropic/claude-sonnet-5.5",
+    },
+    {
         "key": "agent_gpt",
         "kind": "llm",
         "title": "Агент GPT",
@@ -121,6 +128,8 @@ CATALOG = [
     {"id": "anthropic/claude-haiku-5.5", "kind": "llm", "name": "Claude Haiku 5.5", "price_in": 0.10,
      "price_out": 0.50, "badge": "Качество",
      "note": "Быстрая, аккуратно следует инструкциям, хороший русский. Запросы длиннее 100K токенов — в 5 раз дороже."},
+    {"id": "anthropic/claude-sonnet-5.5", "kind": "llm", "name": "Claude Sonnet 5.5", "price_in": 2.0,
+     "price_out": 10.0, "badge": "Умнее", "note": "Сильная модель Anthropic — для агента «Claude» в чате."},
     {"id": "openai/gpt-5-mini", "kind": "llm", "name": "GPT-5 mini", "price_in": 0.25, "price_out": 2.00,
      "badge": "Альтернатива", "note": "Надёжная модель OpenAI среднего уровня."},
     {"id": "google/gemini-3.7-flash", "kind": "llm", "name": "Gemini 3.7 Flash", "price_in": 0.75,
@@ -193,6 +202,11 @@ TASKS_I18N = {
         "tr": ("Ajan: derin", "Seviye 3: önce plan yapar, sonra çok adımlı çalışır. Güçlü bir model önerilir."),
         "es": ("Agente: profundo", "Nivel 3: primero planifica y luego trabaja en varios pasos. Conviene un modelo potente."),
     },
+    "agent_claude": {
+        "en": ("Claude agent", "The “Claude” agent in chat: the same tools as Mnemo, but every step runs on an Anthropic model."),
+        "tr": ("Claude ajanı", "Sohbetteki “Claude” ajanı: Mnemo ile aynı araçlar, ama tüm adımlar bir Anthropic modelinde çalışır."),
+        "es": ("Agente Claude", "El agente «Claude» del chat: las mismas herramientas que Mnemo, pero cada paso usa un modelo de Anthropic."),
+    },
     "agent_gpt": {
         "en": ("GPT agent", "The “GPT” agent in chat: the same tools as Mnemo, but every step runs on an OpenAI model."),
         "tr": ("GPT ajanı", "Sohbetteki “GPT” ajanı: Mnemo ile aynı araçlar, ama tüm adımlar bir OpenAI modelinde çalışır."),
@@ -240,6 +254,11 @@ CATALOG_I18N = {
         "en": ("Quality", "Fast and follows instructions carefully. Requests over 100K tokens cost 5× more."),
         "tr": ("Kalite", "Hızlı ve talimatlara özenle uyar. 100K token üzeri istekler 5 kat pahalı."),
         "es": ("Calidad", "Rápida y sigue las instrucciones con cuidado. Las peticiones de más de 100K tokens cuestan 5 veces más."),
+    },
+    "anthropic/claude-sonnet-5.5": {
+        "en": ("Smarter", "A strong Anthropic model for the “Claude” agent in chat."),
+        "tr": ("Daha akıllı", "Sohbetteki “Claude” ajanı için güçlü bir Anthropic modeli."),
+        "es": ("Más lista", "Un modelo potente de Anthropic para el agente «Claude» del chat."),
     },
     "openai/gpt-5-mini": {
         "en": ("Alternative", "A reliable mid-tier OpenAI model."),

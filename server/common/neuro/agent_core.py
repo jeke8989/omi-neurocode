@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import agent_context, claude_agent, config, crypto, extensions, i18n, llm, people
+from . import agent_context, config, crypto, extensions, i18n, llm, people
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -103,8 +103,9 @@ BUILTIN_TOOLS = [
 ]
 
 AGENTS = {
-    "mnemo": None,          # модель — по уровню (Быстро / Основательно / Глубоко)
-    "gpt": "agent_gpt",     # тот же агент Mnemo, но все шаги — на модели GPT (выбирается в «Моделях»)
+    "mnemo": None,             # модель — по уровню (быстро / основательно / глубоко), выбирается сама
+    "claude": "agent_claude",  # тот же агент Mnemo и те же инструменты, но на модели Claude
+    "gpt": "agent_gpt",        # … на модели GPT
 }
 
 
@@ -241,8 +242,11 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
     style = (
         "Ответ прочитает синтезатор речи в наушнике: 1–3 коротких предложения, без markdown, списков, эмодзи и "
         "ссылок; числа — как произносят." if channel == "voice" else
-        "Ответ показывается в чате приложения: пиши ясно и по делу, можно короткие абзацы и списки с «•», без "
-        "заголовков и таблиц. Источники из поиска перечисли в конце."
+        "Ответ показывается в чате приложения, markdown отображается красиво: короткие абзацы, списки «- », "
+        "**жирным** — только главное (не каждый пункт), без заголовков и таблиц. На события, разговоры, задачи и дни "
+        "ссылайся ссылками прямо в тексте: [обед с Кристиной](event:12), [разговор](conversation:5), "
+        "[задача](task:7), [31 октября](day:2026-10-31) — номер из данных инструментов. Сами номера (#12) и "
+        "строку «Источники» не пиши: ссылки уже ведут к источнику. Сайты из веб-поиска — обычными ссылками [сайт](https://…)."
     )
     depth = {
         "fast": "Отвечай сразу. Инструменты — только если без них ответ будет неверным.",
@@ -275,11 +279,9 @@ def step(conn, run_id: int, kind: str, title: str, detail: str | None = None):
 def start_run(conn, question: str, level: str, channel: str, device_id: str | None, agent: str = "mnemo",
               context: str | None = None) -> tuple[int, int]:
     """Создаёт сообщение пользователя и запуск. Возвращает (run_id, message_id).
-    level: fast | tools | deep — агент Mnemo, claude | claude_code — Claude Code CLI (claude_agent).
-    agent: mnemo | gpt (тот же агент на модели GPT). context: «event:12» и т. п. — о чём этот разговор."""
-    if level in claude_agent.LEVELS:
-        model, agent = claude_agent.LABEL, "claude"
-    elif AGENTS.get(agent):
+    level: fast | tools | deep. agent: mnemo | claude | gpt (тот же агент на модели Claude или GPT).
+    context: «event:12» и т. п. — о чём этот разговор."""
+    if AGENTS.get(agent):
         model = llm.resolve_model(conn, AGENTS[agent])
     else:
         model, agent = llm.resolve_model(conn, LEVELS[level]["task"]), "mnemo"
@@ -302,8 +304,24 @@ def history(conn, before_run: int, limit: int = 8) -> list[dict]:
     return [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
 
 
+EVENT_LINK = re.compile(r"\]\(event:(\d+)\)")
+
+
+def _event_days(conn, answer: str) -> str:
+    """Ссылки на события дополняем днём — приложение открывает событие сразу: (event:12) -> (event:12:2026-10-31)."""
+    ids = {int(x) for x in EVENT_LINK.findall(answer or "")}
+    if not ids:
+        return answer
+    days = {r["id"]: r["day"] for r in conn.execute("SELECT id, day FROM day_events WHERE id = ANY(%s)",
+                                                     (list(ids),)).fetchall()}
+    return EVENT_LINK.sub(lambda m: f"](event:{m.group(1)}:{days[int(m.group(1))]})" if int(m.group(1)) in days
+                          else m.group(0), answer)
+
+
 def finish(conn, run_id: int, channel: str, status: str, answer: str) -> str:
     """Итог запуска: статус и ответ в agent_runs, ответ — сообщением в чат."""
+    if channel != "voice":
+        answer = _event_days(conn, answer)
     row = conn.execute("SELECT status FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     if row and row["status"] == "cancelled" and status != "cancelled":
         status, answer = "cancelled", i18n.t(i18n.lang(conn), "agent.cancelled")  # остановили, пока думал
@@ -318,12 +336,8 @@ def execute(conn, run_id: int) -> str:
     """Выполняет запуск до конца. Безопасно вызывать в отдельном потоке со своим соединением."""
     run = conn.execute("SELECT * FROM agent_runs WHERE id = %s", (run_id,)).fetchone()
     level, channel, device_id = run["level"], run["channel"], run["device_id"]
-    if level in claude_agent.LEVELS:
-        try:
-            return claude_agent.execute(conn, run_id, step, finish)
-        except Exception:  # noqa: BLE001
-            log.exception("claude run %s failed", run_id)
-            return finish(conn, run_id, channel, "failed", i18n.t(i18n.lang(conn), "agent.failed"))
+    if level not in LEVELS:  # старые запуски режима Claude Code
+        return finish(conn, run_id, channel, "failed", i18n.t(i18n.lang(conn), "agent.failed"))
     cfg = LEVELS[level]
     model = run["model"]
     lang = i18n.lang(conn)

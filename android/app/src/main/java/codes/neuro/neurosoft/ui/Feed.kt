@@ -4,14 +4,12 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ChatState
-import codes.neuro.neurosoft.net.ClaudeInfo
 import codes.neuro.neurosoft.net.ConversationItem
 import codes.neuro.neurosoft.net.DayEvents
 import codes.neuro.neurosoft.net.DayInfo
 import codes.neuro.neurosoft.net.DiaryInfo
 import codes.neuro.neurosoft.net.Features
 import codes.neuro.neurosoft.net.Graph
-import codes.neuro.neurosoft.net.ModelTask
 import codes.neuro.neurosoft.net.PeopleInfo
 import codes.neuro.neurosoft.net.TaskItem
 import kotlinx.coroutines.CancellationException
@@ -62,7 +60,6 @@ object Repo {
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
     val chat = Cached<ChatState> { Api.chat() }
-    val claude = Cached<ClaudeInfo> { Api.claude() }
     val people = Cached<PeopleInfo> { Api.people() }
     val graph = Cached<Graph> { Api.graph(365) }
     private val byDay = HashMap<String, Cached<List<ConversationItem>>>()
@@ -102,15 +99,12 @@ sealed interface Route {
     data object DiarySettings : Route
     data object Language : Route
     data object SttLanguage : Route
-    data object Models : Route
-    data class ModelPicker(val task: ModelTask) : Route
     data object Extensions : Route
     data class Extension(val id: String) : Route
     data object Memories : Route
     data class Person(val id: Long) : Route
     data object VoicesSettings : Route
     data object AudioKeep : Route
-    data object Claude : Route
     data object Server : Route
     data object Theme : Route
     data object PinSetup : Route

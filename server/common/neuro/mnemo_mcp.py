@@ -1,9 +1,7 @@
-"""Инструменты Mnemo для Claude по протоколу MCP (Streamable HTTP, ответы JSON, без SSE).
-
-Gateway отдаёт их на POST /mcp только во время запуска «Claude» в чате: на каждый запуск выдаётся
-свой одноразовый токен (claude_agent.issue_run_token), ключа API контейнер claude не видит.
-Набор — как у агента Mnemo: память, разговоры, задачи, люди и включённые расширения. Веб-поиск
-не отдаём: у Claude свой (WebSearch).
+"""Инструменты Mnemo по протоколу MCP (Streamable HTTP, ответы JSON, без SSE) — для ваших программ:
+Claude Desktop, Cursor и других. Доступ — по личному ключу из «Интеграций» (в базе только его хеш).
+Набор — как у агента Mnemo: память, события, разговоры, задачи, люди и включённые расширения. Веб-поиск
+не отдаём: у этих программ он свой.
 """
 from __future__ import annotations
 
@@ -14,7 +12,7 @@ from . import agent_core, extensions, i18n
 log = logging.getLogger("neuro.mcp")
 
 PROTOCOL = "2025-06-18"
-SKIP = {"web_search", "ask_user"}  # у Claude свой веб-поиск; уточняющий вопрос он задаёт сам ответом
+SKIP = {"web_search", "ask_user"}  # веб-поиск у программ свой; уточняющий вопрос задают сами ответом
 
 
 def _tools(conn) -> tuple[list[dict], dict]:

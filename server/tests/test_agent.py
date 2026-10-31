@@ -290,11 +290,12 @@ def test_agent_life_tools_clarify_cancel_and_gpt(conn, monkeypatch):  # noqa: F8
             return {"content": "", "tool_calls": [{"id": "b", "type": "function", "function": {
                 "name": "event_details", "arguments": json.dumps({"id": eid})}}]}
         assert "Питер" in results[1]
-        return {"content": "Договорились поехать в Питер в декабре (обед с Кристиной)."}
+        return {"content": f"Договорились поехать в Питер в декабре ([обед с Кристиной](event:{eid}))."}
 
     monkeypatch.setattr(llm, "chat", life_chat)
     res = agent_core.ask(conn, "о чём мы договорились сегодня с Кристиной?", channel="chat")
     assert res["level"] == "tools" and "Питер" in res["answer"]
+    assert f"](event:{eid}:{day.isoformat()})" in res["answer"]  # ссылка сразу ведёт на день события
     titles = [s["title"] for s in conn.execute(
         "SELECT title FROM agent_steps WHERE run_id = %s ORDER BY id", (res["run_id"],)).fetchall()]
     assert "📅 Смотрю события: сегодня" in titles and f"🗒 Открываю событие #{eid}" in titles
@@ -332,3 +333,27 @@ def test_agent_life_tools_clarify_cancel_and_gpt(conn, monkeypatch):  # noqa: F8
     run = conn.execute("SELECT agent, model, context FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
     assert run["agent"] == "gpt" and run["model"].startswith("openai/") and run["context"] == f"event:{eid}"
     assert seen and seen[0].startswith("openai/")
+
+
+def test_chat_agents_and_validation(conn, monkeypatch):  # noqa: F811
+    """Агенты в чате: Mnemo, Claude и GPT — один и тот же агент на разных моделях; проверка запросов."""
+    from neuro import agent_core, llm
+    from tests.test_voices import Asgi
+    gw = __import__("gateway.app", fromlist=["app"])
+    client = Asgi(gw.app)
+    assert client.post("/api/chat", json={"text": "x", "agent": "bard"}).status_code == 400
+    assert client.post("/api/chat", json={"text": "x", "context": "event:1;drop"}).status_code == 400
+    assert client.post("/api/runs/999999/cancel").status_code == 404
+    seen = []
+    monkeypatch.setattr(llm, "chat", lambda conn_, task, messages, model=None, **kw: seen.append(model) or {"content": "ок"})
+    res = agent_core.ask(conn, "привет", level="fast", agent="claude")
+    run = conn.execute("SELECT agent, model FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
+    assert run["agent"] == "claude" and run["model"].startswith("anthropic/") and seen[0].startswith("anthropic/")
+    # старое приложение присылает уровень «claude» (Claude Code) — уровень выбирается сам
+    monkeypatch.setattr(llm, "configured", lambda: True)
+    async def run_now(fn, *a):
+        return fn(*a)
+
+    monkeypatch.setattr(gw, "_run_in_thread", run_now)
+    r = client.post("/api/chat", json={"text": "привет", "level": "claude", "agent": "claude"}).json()
+    assert r["agent"] == "claude" and r["level"] in agent_core.LEVELS

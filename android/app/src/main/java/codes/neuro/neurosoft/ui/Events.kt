@@ -191,8 +191,7 @@ fun TrashScreen() {
         when {
             items == null && state.error != null -> ErrorBlock(state.error, { reload() })
             items == null -> LoadingBlock()
-            items.isEmpty() -> EmptyBlock(Icons.Trash, stringResource(R.string.trash_empty_title),
-                stringResource(R.string.trash_empty_text))
+            items.isEmpty() -> EmptyBlock(Icons.Trash, stringResource(R.string.trash_empty_title), "")
             else -> Group {
                 items.forEach { t ->
                     item {

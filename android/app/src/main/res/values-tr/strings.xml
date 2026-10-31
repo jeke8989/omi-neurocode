@@ -10,10 +10,12 @@
     <string name="agent_gpt_about">Mnemo ile aynı araçlara sahip bir OpenAI modeli. Model, Modeller bölümünden değişir</string>
     <string name="agent_mnemo_about">Konuşmalarınızı, etkinliklerinizi, kişileri ve görevleri bilir; cevaplarını bunlara dayandırır</string>
     <string name="ago">%1$s önce</string>
+    <string name="ai_cost_month">Yapay zekâ, son 30 gün</string>
     <string name="ai_models">Yapay zekâ modelleri</string>
     <string name="ai_models_sub">Her görev için model, fiyatlar ve harcama</string>
     <string name="all_models">Tüm OpenRouter modelleri: %1$d</string>
     <string name="allow">İzin ver</string>
+    <string name="answer_direct">Doğrudan cevap</string>
     <string name="answer_in_chat">Ayrıntılı cevap sohbete gelecek</string>
     <string name="app_language">Uygulama dili</string>
     <string name="appearance">Görünüm</string>

@@ -101,10 +101,10 @@ fun SearchScreen() {
                 state.loading && r == null -> item { LoadingBlock() }
                 state.error != null -> item { ErrorBlock(state.error, { attempt++ }) }
                 r == null -> item {
-                    EmptyBlock(Icons.Search, stringResource(R.string.search_title), stringResource(R.string.search_text))
+                    EmptyBlock(Icons.Search, stringResource(R.string.search_title), "")
                 }
                 r.isEmpty -> item {
-                    EmptyBlock(Icons.Search, stringResource(R.string.search_nothing), stringResource(R.string.search_nothing_text))
+                    EmptyBlock(Icons.Search, stringResource(R.string.search_nothing), "")
                 }
                 else -> {
                     section(R.string.search_conversations, r.conversations) { hit -> HitRow(hit, fmt) }
