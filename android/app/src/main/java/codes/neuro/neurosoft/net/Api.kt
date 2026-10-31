@@ -34,7 +34,9 @@ data class ConversationItem(
 
 /** Человек, узнанный по голосу: имя или «Голос N»; владелец кулона — «Я». */
 data class PersonRef(val id: Long, val name: String?, val number: Int, val isOwner: Boolean = false,
-                     val ignored: Boolean = false)
+                     val ignored: Boolean = false,
+                     /** Голос прозвучал в одном разговоре — «Собеседник», в «Людях» не показывается. */
+                     val transient: Boolean = false)
 
 data class Person(
     val ref: PersonRef,
@@ -55,7 +57,9 @@ data class PersonQuote(val segmentId: Long, val text: String, val at: String, va
 data class PersonTogether(val ref: PersonRef, val conversations: Int)
 data class NameSuggestion(val id: Long, val personId: Long, val name: String, val evidence: String?,
                           val conversationId: Long? = null, val conversationTitle: String? = null,
-                          val number: Int = 0, val isOwner: Boolean = false)
+                          val number: Int = 0, val isOwner: Boolean = false,
+                          /** «Голос 7 похож на …» — объединить с этим человеком. */
+                          val targetId: Long? = null, val targetOwner: Boolean = false)
 
 data class PersonDetail(
     val person: Person,
@@ -102,6 +106,11 @@ data class TaskItem(
     val exports: List<TaskExport> = emptyList(),
     val createdAt: String = "",
     val personId: Long? = null,
+    /** mine — делаю я, waiting — жду от другого, reminder — напоминание. */
+    val kind: String = "mine",
+    /** Срок как время (ISO) — по нему приходит напоминание. */
+    val dueAt: String? = null,
+    val evidence: String? = null,
 )
 
 data class MemoryItem(
@@ -299,6 +308,28 @@ object Api {
 
     suspend fun answerPairRequest(id: String, approve: Boolean) {
         call("POST", "/api/pair/requests/$id", JSONObject().put("approve", approve))
+    }
+
+    /** Нейроголос: WAV фразы. null — сервер ещё не готов (503) или старый: говорим системным голосом. */
+    suspend fun tts(text: String, voice: String, lang: String, speed: Float): ByteArray? = withContext(Dispatchers.IO) {
+        val prefs = Core.prefs
+        if (!prefs.serverConfigured) return@withContext null
+        val body = JSONObject().put("text", text).put("voice", voice).put("lang", lang).put("speed", speed.toDouble())
+        val request = try {
+            Request.Builder().url(prefs.serverUrl + "/api/tts").header("Authorization", "Bearer ${prefs.token}")
+                .post(body.toString().toRequestBody(json)).build()
+        } catch (e: IllegalArgumentException) {
+            return@withContext null
+        }
+        try {
+            ttsClient.newCall(request).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
+    private val ttsClient by lazy {
+        client.newBuilder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).build()
     }
 
     suspend fun status(): ServerStatus {
@@ -655,7 +686,7 @@ object Api {
 
     private fun personRef(o: JSONObject) = PersonRef(
         id = o.getLong("id"), name = o.str("name"), number = o.optInt("number"),
-        isOwner = o.optBoolean("is_owner"), ignored = o.optBoolean("ignored"),
+        isOwner = o.optBoolean("is_owner"), ignored = o.optBoolean("ignored"), transient = o.optBoolean("transient"),
     )
 
     private fun person(o: JSONObject) = Person(
@@ -668,6 +699,7 @@ object Api {
         id = o.getLong("id"), personId = o.optLong("person_id"), name = o.optString("name"), evidence = o.str("evidence"),
         conversationId = o.longOrNull("conversation_id"), conversationTitle = o.str("conversation_title"),
         number = o.optInt("number"), isOwner = o.optBoolean("is_owner"),
+        targetId = o.longOrNull("target_id"), targetOwner = o.optBoolean("target_owner"),
     )
 
     private fun personDetail(o: JSONObject) = PersonDetail(
@@ -719,6 +751,9 @@ object Api {
         },
         createdAt = o.optString("created_at"),
         personId = o.longOrNull("person_id"),
+        kind = o.optString("kind", "mine").ifBlank { "mine" },
+        dueAt = o.str("due_at"),
+        evidence = o.str("evidence"),
     )
 
     private fun memory(o: JSONObject) = MemoryItem(

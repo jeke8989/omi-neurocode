@@ -241,6 +241,7 @@ fun VoiceSettingsScreen() {
     val headphones = remember { Core.voice.headphonesConnected() }
     val rates = listOf(0.9f, 1.05f, 1.2f, 1.4f)
     var rate by remember { mutableStateOf(rates.indexOfFirst { it == prefs.voiceRate }.let { if (it < 0) 1 else it }) }
+    var ttsVoice by remember { mutableStateOf(prefs.ttsVoice) }
 
     SettingsPage(stringResource(R.string.voice_and_button)) {
         Group(stringResource(R.string.pendant_button), footer = stringResource(R.string.button_footer)) {
@@ -282,6 +283,24 @@ fun VoiceSettingsScreen() {
                     }
                 }
         }
+        Group(stringResource(R.string.voice_choice), footer = stringResource(R.string.voice_choice_footer)) {
+            listOf(
+                Triple("f1", R.string.voice_f1, R.string.voice_neural_sub),
+                Triple("m1", R.string.voice_m1, R.string.voice_neural_sub),
+                Triple("system", R.string.voice_system, R.string.voice_system_sub),
+            ).forEach { (key, title, sub) ->
+                item {
+                    ListRow(stringResource(title), icon = if (key == "system") Icons.Speaker else Icons.Sparkle,
+                        subtitle = stringResource(sub), onClick = {
+                            ttsVoice = key
+                            prefs.ttsVoice = key
+                            Core.voice.testVoice()
+                        }) {
+                        if (ttsVoice == key) Icon(Icons.Check, null, tint = Mn.c.ink, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
         Group(stringResource(R.string.voice)) {
             item {
                 Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 14.dp, top = 14.dp, bottom = 14.dp)) {
@@ -303,7 +322,7 @@ fun VoiceSettingsScreen() {
                 }
             }
             item { ListRow(stringResource(R.string.test_voice), icon = Icons.Play,
-                subtitle = if (voice.ttsReady) null else stringResource(R.string.tts_missing),
+                subtitle = if (voice.ttsReady || ttsVoice != "system") null else stringResource(R.string.tts_missing),
                 onClick = { Core.voice.testVoice() }) }
             item { ToggleRow(stringResource(R.string.earcons), earcons, {
                 earcons = it

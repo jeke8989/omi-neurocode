@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import codes.neuro.neurosoft.R
@@ -59,8 +60,9 @@ fun TasksTab() {
                 all == null && res.error != null -> item { ErrorBlock(res.error, { scope.launch { Repo.tasks.refresh() } }) }
                 all == null -> item { LoadingBlock() }
                 else -> {
-                    val open = all.filter { it.status != "done" }
+                    val open = all.filter { it.status == "open" }
                     val done = all.filter { it.status == "done" }
+                    val suggested = all.filter { it.status == "suggested" }
                     item { StaleNote(res.error) }
                     item {
                         SectionTitle(if (open.isEmpty()) stringResource(R.string.tasks_all_done)
@@ -74,6 +76,29 @@ fun TasksTab() {
                     }
                     itemsIndexed(open, key = { _, t -> t.id }) { i, t ->
                         Grouped(i, open.size, inset = 50.dp) { TaskRow(t, { toggle(t) }) }
+                    }
+                    if (suggested.isNotEmpty()) {
+                        item(key = "suggested-title") { SectionTitle(stringResource(R.string.tasks_suggested)) }
+                        itemsIndexed(suggested, key = { _, t -> "s" + t.id }) { i, t ->
+                            Grouped(i, suggested.size, inset = 16.dp) {
+                                SuggestedTaskRow(t, onAnswer = { accept ->
+                                    val next = if (accept) "open" else "dismissed"
+                                    Repo.tasks.edit { l -> if (accept) l.map { if (it.id == t.id) it.copy(status = next) else it }
+                                        else l.filter { it.id != t.id } }
+                                    scope.launch {
+                                        try {
+                                            Api.setTaskStatus(t.id, next)
+                                        } catch (e: Exception) {
+                                            Repo.tasks.refresh()
+                                        }
+                                    }
+                                })
+                            }
+                        }
+                        item(key = "suggested-note") {
+                            Txt(stringResource(R.string.tasks_suggested_note), T.caption, Mn.c.graphite,
+                                Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp))
+                        }
                     }
                     if (done.isNotEmpty()) {
                         item {
@@ -113,18 +138,11 @@ fun TaskRow(t: TaskItem, onToggle: () -> Unit) {
             Txt(t.text, if (done) T.body.copy(textDecoration = TextDecoration.LineThrough) else T.body,
                 if (done) c.graphite else c.ink, maxLines = 6)
             val source = sourceLabel(t)
-            t.assignee?.let { who ->
-                val pid = t.personId
-                Row(Modifier.padding(top = 4.dp).then(if (pid != null) Modifier.quietTap { Nav.push(Route.Person(pid)) }
-                    else Modifier), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Person, null, tint = if (pid != null) c.lens else c.graphite, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Txt(who, T.caption, if (pid != null) c.lens else c.graphite, maxLines = 1)
-                }
-            }
-            if (t.due != null || source != null) {
+            TaskWho(t)
+            val due = taskDue(t)
+            if (due != null || source != null) {
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    t.due?.let { due ->
+                    due?.let { due ->
                         Icon(Icons.Clock, null, tint = c.amber, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Txt(due, T.caption, c.graphite, maxLines = 1)
@@ -157,4 +175,60 @@ private fun sourceLabel(t: TaskItem): String? = when (t.source) {
     "voice" -> stringResource(R.string.source_voice)
     "agent" -> stringResource(R.string.source_agent)
     else -> null
+}
+
+/** Служебные подписи модели («Владелец», «Спикер 1», «Голос 3») в задачах не показываем. */
+private val GENERIC_WHO = Regex("^(владелец|спикер|голос|неизвестн|owner|speaker|voice|unknown)", RegexOption.IGNORE_CASE)
+
+/** Кто делает: «Я» — мои задачи и напоминания, «Жду от: Настя» — обещали мне. */
+@Composable
+private fun TaskWho(t: TaskItem) {
+    val c = Mn.c
+    val name = t.assignee?.takeUnless { GENERIC_WHO.containsMatchIn(it) }
+    val legacyOwner = t.assignee?.startsWith("Владелец", ignoreCase = true) == true
+    val pid = t.personId
+    val text = when {
+        t.kind == "waiting" -> stringResource(R.string.task_waiting_from, name ?: stringResource(R.string.task_someone))
+        t.kind == "reminder" -> stringResource(R.string.task_reminder)
+        name != null -> name
+        pid != null || legacyOwner -> stringResource(R.string.people_me)
+        else -> return
+    }
+    Row(Modifier.padding(top = 4.dp).then(if (pid != null) Modifier.quietTap { Nav.push(Route.Person(pid)) } else Modifier),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null,
+            tint = if (pid != null) c.lens else c.graphite, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Txt(text, T.caption, if (pid != null) c.lens else c.graphite, maxLines = 1)
+    }
+}
+
+/** Срок: «Завтра, 10:00» по настоящему времени, иначе как сказали («в понедельник»). */
+@Composable
+fun taskDue(t: TaskItem): String? {
+    val fmt = rememberFmt()
+    val at = t.dueAt ?: return t.due
+    val time = fmt.time(at)
+    return fmt.dayShortTitle(fmt.dayOf(at)) + if (time.isNotBlank() && time != "00:00") ", $time" else ""
+}
+
+@Composable
+private fun SuggestedTaskRow(t: TaskItem, onAnswer: (Boolean) -> Unit) {
+    val c = Mn.c
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Txt(t.text, T.body, maxLines = 4)
+            t.evidence?.let {
+                Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
+                    Modifier.padding(top = 3.dp), maxLines = 2)
+            }
+            taskDue(t)?.let { Txt(it, T.caption, c.graphite, Modifier.padding(top = 3.dp), maxLines = 1) }
+        }
+        IconCircle(Icons.Check, stringResource(R.string.task_accept), { onAnswer(true) }, size = 38.dp,
+            background = c.raised)
+        Spacer(Modifier.width(6.dp))
+        IconCircle(Icons.Close, stringResource(R.string.task_dismiss), { onAnswer(false) }, size = 38.dp,
+            background = c.raised, tint = c.graphite)
+    }
 }

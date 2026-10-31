@@ -357,7 +357,8 @@ private fun SuggestionCard(s: NameSuggestion) {
             Avatar(ref, 44.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Txt(stringResource(R.string.suggest_is_it, personLabel(ref), s.name), T.bodyStrong)
+                Txt(if (s.targetOwner) stringResource(R.string.suggest_is_you, personLabel(ref))
+                    else stringResource(R.string.suggest_is_it, personLabel(ref), s.name), T.bodyStrong)
                 s.conversationTitle?.let { Txt(stringResource(R.string.from_conversation, it), T.caption, Mn.c.graphite, maxLines = 1) }
             }
             PlayButton("sample-${s.personId}", Api.sampleUrl(s.personId), stringResource(R.string.listen_voice))

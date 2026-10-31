@@ -48,7 +48,7 @@ class Cached<T>(private val loader: suspend () -> T) {
 
 object Repo {
     val days = Cached { Api.days() }
-    val tasks = Cached { Api.tasks("all") }
+    val tasks = Cached { Api.tasks("all").also { codes.neuro.neurosoft.Core.onTasks(it) } }
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
     val chat = Cached<ChatState> { Api.chat() }

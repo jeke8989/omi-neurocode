@@ -86,6 +86,26 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("earcons", true)
         set(value) = sp.edit().putBoolean("earcons", value).apply()
 
+    /** Голос ответов: f1 — Mnemo, женский (по умолчанию), m1 — Mnemo, мужской (оба — нейроголос сервера),
+     *  system — синтезатор речи телефона. */
+    var ttsVoice: String
+        get() = sp.getString("tts_voice", "f1") ?: "f1"
+        set(value) = sp.edit().putString("tts_voice", value).apply()
+
+    /** Задачи, по которым уже стоит напоминание: id -> время (мс). */
+    var reminders: Map<Long, Long>
+        get() = try {
+            val o = JSONObject(sp.getString("reminders", "{}") ?: "{}")
+            o.keys().asSequence().associate { it.toLong() to o.getLong(it) }
+        } catch (e: Exception) {
+            emptyMap()
+        }
+        set(value) {
+            val o = JSONObject()
+            value.forEach { (k, v) -> o.put(k.toString(), v) }
+            sp.edit().putString("reminders", o.toString()).apply()
+        }
+
     var voiceRate: Float
         get() = sp.getFloat("voice_rate", 1.05f)
         set(value) = sp.edit().putFloat("voice_rate", value).apply()

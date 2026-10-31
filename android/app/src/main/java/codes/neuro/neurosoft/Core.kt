@@ -166,6 +166,7 @@ object Core {
         createNotificationChannel()
         uploader.start()
         scope.launch { batchLoop() }
+        scope.launch { reminderLoop() }
         if (!prefs.serverConfigured) autoConnect()
     }
 
@@ -219,6 +220,38 @@ object Core {
         syncLanguage()
         updateNotification()
         _pairing.value = PairState("connected")
+    }
+
+    // ------------------------------------------------------------------ напоминания о задачах
+    /** Срок задачи: вибрация кулона (два раза по три) и телефона. */
+    fun reminderBuzz() {
+        scope.launch {
+            repeat(2) { i ->
+                ble.haptic(3)
+                if (i == 0) delay(900)
+            }
+        }
+        vibrate(2)
+    }
+
+    private suspend fun reminderLoop() {
+        while (true) {
+            if (prefs.serverConfigured) {
+                try {
+                    Reminders.schedule(app, Api.tasks("open"))
+                } catch (_: Exception) {
+                }
+            }
+            delay(10 * 60_000L)
+        }
+    }
+
+    /** Задачи обновились в приложении — сразу пересчитать напоминания. */
+    fun onTasks(tasks: List<codes.neuro.neurosoft.net.TaskItem>) {
+        try {
+            Reminders.schedule(app, tasks)
+        } catch (_: Exception) {
+        }
     }
 
     // ------------------------------------------------------------------ подключение без кода

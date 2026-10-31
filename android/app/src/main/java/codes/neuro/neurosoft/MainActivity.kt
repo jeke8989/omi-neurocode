@@ -21,9 +21,23 @@ class MainActivity : ComponentActivity() {
         if (!Core.prefs.onboarded && Nav.stack.lastOrNull() == Route.Home && Nav.stack.size == 1) {
             Nav.reset(Route.Onboarding)
         }
+        openFrom(intent)
         enableEdgeToEdge()
         setContent {
             MnemoTheme { AppRoot() }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    /** Из уведомления-напоминания — сразу на вкладку задач. */
+    private fun openFrom(intent: android.content.Intent?) {
+        if (intent?.getStringExtra("open") == "tasks") {
+            Nav.reset(Route.Home)
+            codes.neuro.neurosoft.ui.HomeState.page.value = 1
         }
     }
 

@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
@@ -15,7 +16,14 @@ import android.util.Log
 import codes.neuro.neurosoft.Lang
 import codes.neuro.neurosoft.Prefs
 import codes.neuro.neurosoft.R
+import codes.neuro.neurosoft.net.Api
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -125,6 +133,7 @@ class VoiceAssistant(
             Phase.LISTENING -> sendStop()
             Phase.SPEAKING -> {
                 tts?.stop()
+                stopPlayer()
                 spoken()
             }
             Phase.THINKING -> tone(ToneGenerator.TONE_PROP_ACK)
@@ -195,6 +204,8 @@ class VoiceAssistant(
             return
         }
         session++
+        speakSeq++ // недоговорённое подтверждение не должно прозвучать поверх нового вопроса
+        stopPlayer()
         val my = session
         tapTs = ts
         pre.clear()
@@ -227,7 +238,10 @@ class VoiceAssistant(
             synchronized(this@VoiceAssistant) {
                 if (my != session) return
                 webSocket.send(JSONObject().put("type", "start").put("id", "q_$tapTs").put("codec", codec())
-                    .put("lang", Lang.code(prefs)).put("mode", "press").toString())
+                    .put("lang", Lang.code(prefs)).put("mode", "press")
+                    // нейроголос: сервер начнёт озвучивать ответ сразу, как он будет готов
+                    .put("voice", if (prefs.ttsVoice == "system") "" else prefs.ttsVoice)
+                    .put("rate", prefs.voiceRate.toDouble()).toString())
                 pre.forEach { webSocket.send(it.toByteString()) }
                 pre.clear()
                 open = true
@@ -314,9 +328,63 @@ class VoiceAssistant(
             if (notify) onSilentAnswer()
             return
         }
+        if (keepAnswer) update { it.copy(answer = text) }
+        val voice = prefs.ttsVoice
+        val my = ++speakSeq
+        if (voice == "system" || !prefs.serverConfigured) {
+            speakSystem(text)
+            return
+        }
+        // нейроголос с сервера; нет сети или сервер ещё качает модель — системный голос, без паузы дольше 6 с
+        bg.launch {
+            val wav = withTimeoutOrNull(6_000) { Api.tts(text, voice, Lang.code(prefs), prefs.voiceRate) }
+            main.post {
+                synchronized(this@VoiceAssistant) {
+                    if (my != speakSeq) return@post
+                    if (wav == null || !playWav(wav)) speakSystem(text)
+                }
+            }
+        }
+    }
+
+    @Volatile private var speakSeq = 0
+    private val bg = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var player: MediaPlayer? = null
+
+    private fun playWav(data: ByteArray): Boolean = try {
+        val file = File(app.cacheDir, "mnemo-voice.wav")
+        file.writeBytes(data)
+        stopPlayer()
+        val mp = MediaPlayer()
+        mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+        mp.setDataSource(file.absolutePath)
+        mp.setOnCompletionListener { synchronized(this) { stopPlayer(); spoken() } }
+        mp.setOnErrorListener { _, _, _ -> synchronized(this) { stopPlayer(); spoken() }; true }
+        mp.prepare()
+        update { it.copy(phase = Phase.SPEAKING) }
+        requestFocus()
+        mp.start()
+        player = mp
+        true
+    } catch (e: Exception) {
+        Log.w("Mnemo.Voice", "neural voice playback failed", e)
+        stopPlayer()
+        false
+    }
+
+    private fun stopPlayer() {
+        try {
+            player?.release()
+        } catch (_: Exception) {
+        }
+        player = null
+    }
+
+    private fun speakSystem(text: String) {
         val engine = tts
         if (engine == null || !_state.value.ttsReady) {
-            update { it.copy(phase = Phase.IDLE, answer = if (keepAnswer) text else it.answer) }
+            update { it.copy(phase = Phase.IDLE) }
             return
         }
         update { it.copy(phase = Phase.SPEAKING) }

@@ -83,8 +83,12 @@ fun ConversationScreen(id: Long) {
     // подписи говорящих: имя, «Я», «Голос 3»; без отпечатка — «Спикер 1»
     val labels = HashMap<Long, String>()
     d?.people?.values?.forEach { labels[it.id] = personLabel(it) }
+    // голос, прозвучавший один раз, — «Собеседник» (несколько — с номером по порядку появления)
+    val once = d?.segments?.mapNotNull { s -> s.personId?.takeIf { d.people[it]?.transient == true } }?.distinct().orEmpty()
+    val companion = stringResource(R.string.voice_companion)
+    once.forEachIndexed { i, pid -> labels[pid] = if (once.size > 1) "$companion ${i + 1}" else companion }
     fun label(s: Segment): String? = s.personId?.let { pid -> labels[pid]?.let { if (s.sure) it else "$it?" } }
-        ?: s.speaker?.let { "$speakerLabel ${it + 1}" }
+        ?: s.speaker?.let { companion }
 
     who?.let { seg ->
         WhoIsThisSheet(seg, d?.people.orEmpty(), onDismiss = { who = null }, onDone = {
@@ -128,7 +132,7 @@ fun ConversationScreen(id: Long) {
                     if (d.item.durationSec > 0) MetaPill(Icons.Wave, fmt.duration(d.item.durationSec.toLong()))
                 }
                 // кто участвовал: тап — карточка человека
-                val present = d.people.values.filter { !it.ignored }.sortedByDescending { it.isOwner }
+                val present = d.people.values.filter { !it.ignored && !it.transient }.sortedByDescending { it.isOwner }
                 if (present.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                         .padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -179,7 +183,8 @@ fun ConversationScreen(id: Long) {
                 SectionTitle(stringResource(R.string.transcript))
                 if (d.segments.isEmpty()) {
                     Txt(stringResource(R.string.transcript_empty), T.small, c.graphite, Modifier.padding(horizontal = 22.dp))
-                } else if (d.people.values.any { it.name == null && !it.isOwner } || d.segments.any { it.personId != null && !it.sure }) {
+                } else if (d.people.values.any { it.name == null && !it.isOwner } || d.segments.any { it.personId != null && !it.sure }
+                    || d.segments.any { it.personId == null && it.speaker != null }) {
                     Txt(stringResource(R.string.who_hint), T.caption, c.graphite,
                         Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp))
                 }
