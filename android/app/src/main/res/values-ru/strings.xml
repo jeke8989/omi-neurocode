@@ -12,6 +12,7 @@
     <string name="allow">Разрешить</string>
     <string name="answer_in_chat">Подробный ответ придёт в чат</string>
     <string name="app_language">Язык приложения</string>
+    <string name="appearance">Оформление</string>
     <string name="ask_anything">Спросите что угодно</string>
     <string name="assistant">Ассистент</string>
     <string name="assistant_answer">Ответ на вопрос с кнопки</string>
@@ -511,6 +512,11 @@
     <string name="tasks_suggested">Предложенные</string>
     <string name="tasks_suggested_note">Похоже на договорённость, но я не уверен. ✓ — в задачи, ✕ — убрать.</string>
     <string name="test_voice">Проверить голос</string>
+    <string name="theme">Тема</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="theme_footer">«Как в системе» — тема меняется вместе с телефоном, например становится тёмной вечером.</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_system">Как в системе</string>
     <string name="today">Сегодня</string>
     <string name="transcript">Расшифровка</string>
     <string name="transcript_empty">Текста нет</string>

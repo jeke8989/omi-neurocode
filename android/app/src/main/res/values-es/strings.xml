@@ -12,6 +12,7 @@
     <string name="allow">Permitir</string>
     <string name="answer_in_chat">La respuesta completa llegará al chat</string>
     <string name="app_language">Idioma de la app</string>
+    <string name="appearance">Apariencia</string>
     <string name="ask_anything">Pregunta lo que quieras</string>
     <string name="assistant">Asistente</string>
     <string name="assistant_answer">Respuesta a tu pregunta con el botón</string>
@@ -511,6 +512,11 @@
     <string name="tasks_suggested">Sugeridas</string>
     <string name="tasks_suggested_note">Parece un acuerdo, pero no estoy seguro. ✓ la añade a tareas, ✕ la quita.</string>
     <string name="test_voice">Probar la voz</string>
+    <string name="theme">Tema</string>
+    <string name="theme_dark">Oscura</string>
+    <string name="theme_footer">«Como el sistema» sigue al teléfono, por ejemplo pasa a oscura por la noche.</string>
+    <string name="theme_light">Clara</string>
+    <string name="theme_system">Como el sistema</string>
     <string name="today">Hoy</string>
     <string name="transcript">Transcripción</string>
     <string name="transcript_empty">Sin texto</string>

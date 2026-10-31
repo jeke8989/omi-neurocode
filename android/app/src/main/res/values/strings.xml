@@ -13,6 +13,7 @@
     <string name="answer_in_chat">The full answer will arrive in the chat</string>
     <string name="app_language">App language</string>
     <string name="app_name" translatable="false">Mnemo</string>
+    <string name="appearance">Appearance</string>
     <string name="ask_anything">Ask anything</string>
     <string name="assistant">Assistant</string>
     <string name="assistant_answer">Answer to your button question</string>
@@ -512,6 +513,11 @@
     <string name="tasks_suggested">Suggested</string>
     <string name="tasks_suggested_note">Looks like an agreement, but I\'m not sure. ✓ adds it to tasks, ✕ removes it.</string>
     <string name="test_voice">Test the voice</string>
+    <string name="theme">Theme</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_footer">“Same as system” follows your phone, for example switching to dark in the evening.</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_system">Same as system</string>
     <string name="today">Today</string>
     <string name="transcript">Transcript</string>
     <string name="transcript_empty">No text</string>

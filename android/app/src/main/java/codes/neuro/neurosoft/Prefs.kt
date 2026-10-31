@@ -46,6 +46,11 @@ class Prefs(context: Context) {
         get() = sp.getString("language", "") ?: ""
         set(value) = sp.edit().putString("language", value).apply()
 
+    /** Тема: system — как в телефоне, light — светлая, dark — тёмная. */
+    var theme: String
+        get() = sp.getString("theme", "system") ?: "system"
+        set(value) = sp.edit().putString("theme", value).apply()
+
     /** Включать запись автоматически после перезагрузки телефона. */
     var autoStart: Boolean
         get() = sp.getBoolean("auto_start", true)

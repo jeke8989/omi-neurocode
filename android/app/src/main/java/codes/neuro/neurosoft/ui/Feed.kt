@@ -91,6 +91,7 @@ sealed interface Route {
     data object AudioKeep : Route
     data object Claude : Route
     data object Server : Route
+    data object Theme : Route
 }
 
 object Nav {

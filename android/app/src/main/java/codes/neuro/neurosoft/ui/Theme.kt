@@ -2,6 +2,10 @@
 
 package codes.neuro.neurosoft.ui
 
+import android.graphics.drawable.ColorDrawable
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -9,9 +13,13 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -19,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.R
 
 /**
@@ -91,10 +100,33 @@ private val MaterialType = Typography(
     bodyMedium = T.small, bodySmall = T.caption, labelLarge = T.smallStrong, labelMedium = T.tiny, labelSmall = T.tiny,
 )
 
+/** Выбранная тема (Настройки → Оформление); меняется сразу, без перезапуска экрана. */
+object ThemeMode {
+    val state by lazy { mutableStateOf(Core.prefs.theme) }
+
+    fun set(mode: String) {
+        Core.prefs.theme = mode
+        state.value = mode
+    }
+}
+
 @Composable
 fun MnemoTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    val dark = when (ThemeMode.state.value) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemInDarkTheme()
+    }
     val c = if (dark) DarkTokens else LightTokens
+    // значки в строке состояния и навигации — под выбранную тему, а не под системную
+    val activity = LocalContext.current as? ComponentActivity
+    DisposableEffect(dark, activity) {
+        val clear = android.graphics.Color.TRANSPARENT
+        val bars = if (dark) SystemBarStyle.dark(clear) else SystemBarStyle.light(clear, clear)
+        activity?.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+        activity?.window?.setBackgroundDrawable(ColorDrawable(c.fog.toArgb()))
+        onDispose {}
+    }
     val scheme = if (dark) {
         darkColorScheme(primary = c.ink, onPrimary = c.onInk, background = c.fog, surface = c.paper,
             onSurface = c.ink, onBackground = c.ink, surfaceVariant = c.raised, onSurfaceVariant = c.graphite,

@@ -8,10 +8,14 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -20,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -149,6 +154,11 @@ fun SettingsScreen() {
             item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Book, chevron = true,
                 value = features.data?.let { stringResource(if (it.diary) R.string.on else R.string.off) },
                 onClick = { Nav.push(Route.DiarySettings) }) }
+        }
+
+        Group(stringResource(R.string.appearance)) {
+            item { ListRow(stringResource(R.string.theme), icon = Icons.Moon, chevron = true,
+                value = themeTitle(ThemeMode.state.value), onClick = { Nav.push(Route.Theme) }) }
         }
 
         Group(stringResource(R.string.language)) {
@@ -429,6 +439,69 @@ private fun styleTitle(key: String, fallback: String): String = when (key) {
     "comic" -> stringResource(R.string.style_comic)
     "sketch" -> stringResource(R.string.style_sketch)
     else -> fallback
+}
+
+// ======================================================================= тема
+@Composable
+fun themeTitle(mode: String): String = stringResource(when (mode) {
+    "light" -> R.string.theme_light
+    "dark" -> R.string.theme_dark
+    else -> R.string.theme_system
+})
+
+@Composable
+fun ThemeScreen() {
+    val current = ThemeMode.state.value
+    SettingsPage(stringResource(R.string.theme)) {
+        Group(footer = stringResource(R.string.theme_footer), inset = 22.dp) {
+            listOf("system", "light", "dark").forEach { mode ->
+                item {
+                    ListRow(themeTitle(mode), onClick = { ThemeMode.set(mode) },
+                        trailing = { if (mode == current) Icon(Icons.Check, null, tint = Mn.c.ink, modifier = Modifier.size(20.dp)) },
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ThemePreview(LightTokens, current == "light", Modifier.weight(1f)) { ThemeMode.set("light") }
+            ThemePreview(DarkTokens, current == "dark", Modifier.weight(1f)) { ThemeMode.set("dark") }
+        }
+    }
+}
+
+/** Маленький экран-образец темы: фон, карточка, строки текста и свет линзы. */
+@Composable
+private fun ThemePreview(t: Tokens, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        modifier.clip(shape).background(t.fog)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Mn.c.lens else Mn.c.line, shape)
+            .tap(onClick).padding(12.dp),
+    ) {
+        Box(Modifier.size(width = 54.dp, height = 8.dp).clip(RoundedCornerShape(4.dp)).background(t.ink))
+        Spacer(Modifier.height(10.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(t.paper).padding(10.dp)) {
+            repeat(2) { i ->
+                if (i > 0) Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(18.dp).clip(RoundedCornerShape(6.dp)).background(t.raised))
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Box(Modifier.size(width = 58.dp, height = 6.dp).clip(RoundedCornerShape(3.dp)).background(t.ink))
+                        Spacer(Modifier.height(4.dp))
+                        Box(Modifier.size(width = 36.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(t.graphite))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(t.lens))
+            Spacer(Modifier.width(6.dp))
+            Txt(stringResource(if (t.dark) R.string.theme_dark else R.string.theme_light), T.tiny, t.ink, maxLines = 1)
+        }
+    }
 }
 
 // ======================================================================= язык

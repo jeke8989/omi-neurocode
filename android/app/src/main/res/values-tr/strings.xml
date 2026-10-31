@@ -12,6 +12,7 @@
     <string name="allow">İzin ver</string>
     <string name="answer_in_chat">Ayrıntılı cevap sohbete gelecek</string>
     <string name="app_language">Uygulama dili</string>
+    <string name="appearance">Görünüm</string>
     <string name="ask_anything">Bir şey sorun</string>
     <string name="assistant">Asistan</string>
     <string name="assistant_answer">Düğme sorusunun cevabı</string>
@@ -511,6 +512,11 @@
     <string name="tasks_suggested">Önerilenler</string>
     <string name="tasks_suggested_note">Bir anlaşmaya benziyor ama emin değilim. ✓ görevlere ekler, ✕ kaldırır.</string>
     <string name="test_voice">Sesi dene</string>
+    <string name="theme">Tema</string>
+    <string name="theme_dark">Koyu</string>
+    <string name="theme_footer">“Sistemle aynı” telefonunuzu izler, örneğin akşam koyu temaya geçer.</string>
+    <string name="theme_light">Açık</string>
+    <string name="theme_system">Sistemle aynı</string>
     <string name="today">Bugün</string>
     <string name="transcript">Döküm</string>
     <string name="transcript_empty">Metin yok</string>

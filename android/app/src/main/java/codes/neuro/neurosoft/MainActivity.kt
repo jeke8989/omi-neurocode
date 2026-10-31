@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
             Nav.reset(Route.Onboarding)
         }
         openFrom(intent)
-        enableEdgeToEdge()
+        enableEdgeToEdge()  // стиль полос уточняет MnemoTheme по выбранной теме
         setContent {
             MnemoTheme { AppRoot() }
         }
