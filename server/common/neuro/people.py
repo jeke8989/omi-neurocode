@@ -16,6 +16,7 @@ log = logging.getLogger("neuro.people")
 # Фраза вместе с тем, кто её сказал (для расшифровки в подсказках модели)
 SEGMENT_SELECT = """
 SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.conversation_id, s.person_id, s.voice_score,
+       s.junk, s.cleaned, s.raw_text,
        p.name AS person_name, p.is_owner AS person_owner, p.number AS person_number, p.ignored AS person_ignored
 FROM segments s LEFT JOIN people p ON p.id = s.person_id
 """

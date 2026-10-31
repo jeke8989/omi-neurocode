@@ -86,12 +86,15 @@ def visits(points: list[dict], radius_m: float = 200, min_minutes: float = 10) -
     return [v for v in out if (v["end"] - v["start"]).total_seconds() >= min_minutes * 60]
 
 
-def place_name(conn, lat: float, lon: float) -> str | None:
+def place_name(conn, lat: float, lon: float, network: bool = True) -> str | None:
+    """Название места (кеш в places; нет — спрашиваем OpenStreetMap, если network)."""
     lang = i18n.lang(conn)
     key = f"{lat:.3f},{lon:.3f}" if lang == "ru" else f"{lang}:{lat:.3f},{lon:.3f}"
     row = conn.execute("SELECT name FROM places WHERE key = %s", (key,)).fetchone()
     if row:
         return row["name"]
+    if not network:
+        return None
     name = None
     try:
         r = requests.get(

@@ -31,7 +31,7 @@ def transcript_text(segs: list[dict], limit: int | None = None) -> str:
     Голоса с пометкой «не учитывать» (телевизор, радио) пропускаются."""
     lines = []
     for s in segs:
-        if s.get("person_ignored"):
+        if s.get("person_ignored") or s.get("junk"):
             continue
         lines.append(f"[{fmt_time(s['started_at'])}] {speaker_label(s)}: {s['text']}")
     text = "\n".join(lines)

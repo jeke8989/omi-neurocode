@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from neuro import config, db, i18n, llm, retention, voices
+from neuro import cleanup, config, db, i18n, llm, retention, voices
 from neuro.audio import SAMPLE_RATE, pcm_rms, pcm_to_wav, voice_ms
 
 log = logging.getLogger("neuro.stt")
@@ -63,20 +63,18 @@ class DeepgramSTT:
         return [Seg(0.0, len(pcm) / 2 / SAMPLE_RATE, None, text)] if text.strip() else []
 
 
-# Фразы, которые Whisper «слышит» в тишине и шуме: из субтитров, на которых его учили.
-HALLUCINATIONS = (
-    "продолжение следует", "субтитры сделал", "субтитры создавал", "субтитры подогнал", "редактор субтитров",
-    "корректор а.", "спасибо за просмотр", "подписывайтесь на канал", "dimatorzok", "игорь негода",
-    "thank you for watching", "thanks for watching", "subtitles by", "amara.org", "please subscribe",
-    "izlediğiniz için teşekkürler", "altyazı", "gracias por ver", "subtítulos realizados por", "suscríbete",
-)
+# Мусор распознавания (фразы из субтитров, [музыка], зацикливания, «э-э») — в neuro.cleanup.
+is_hallucination = cleanup.is_hallucination
 
 
-def is_hallucination(text: str) -> bool:
-    t = " ".join(text.lower().split()).strip(" .,!?…-—«»\"'")
-    if not t:
-        return True
-    return any(p in t and len(t) <= len(p) + 20 for p in HALLUCINATIONS)
+def tidy_segs(segs: list[Seg]) -> list[Seg]:
+    """Сразу после распознавания: убрать мусор из фраз, пустые и «субтитры сделал…» — выбросить."""
+    out = []
+    for s in segs:
+        text = cleanup.tidy(s.text or "")
+        if text:
+            out.append(Seg(s.start, s.end, s.speaker, text))
+    return out
 
 
 class RemoteSTT:
@@ -257,9 +255,8 @@ def transcribe_turns(conn, stt, pcm: bytes, turns: list[voices.Turn]) -> list[Se
     out: list[Seg] = []
     for t in turns:
         a, b = max(0, t.start * 2 - pad), min(len(pcm), t.end * 2 + pad)
-        for s in stt.transcribe(pcm[a:b], conn):
-            if s.text and s.text.strip() and not is_hallucination(s.text):
-                out.append(Seg(_sec(t.start), _sec(t.end), t.local, s.text.strip()))
+        for s in tidy_segs(stt.transcribe(pcm[a:b], conn)):
+            out.append(Seg(_sec(t.start), _sec(t.end), t.local, s.text))
     return out
 
 
@@ -333,7 +330,7 @@ def process(conn, stt, chunk: dict):
             pass
         except Exception:  # noqa: BLE001 — голоса не должны ломать расшифровку
             log.exception("chunk %s: voice split failed", chunk["id"])
-    segs = [s for s in stt.transcribe(pcm, conn) if s.text and s.text.strip() and not is_hallucination(s.text)]
+    segs = tidy_segs(stt.transcribe(pcm, conn))
     if len(local_voices) >= 2 and 2 <= len(turns) <= MAX_TURN_CALLS and untimed(segs, pcm):
         segs = transcribe_turns(conn, stt, pcm, turns) or segs
     took = time.monotonic() - t0

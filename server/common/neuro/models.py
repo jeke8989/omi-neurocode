@@ -34,6 +34,13 @@ TASKS = [
         "default": "deepseek/deepseek-v4.1-flash",
     },
     {
+        "key": "cleanup",
+        "kind": "llm",
+        "title": "Исправление расшифровки",
+        "description": "Исправляет ошибки распознавания по смыслу разговора и убирает мусор. Возвращает только правки.",
+        "default": "deepseek/deepseek-v4.1-flash",
+    },
+    {
         "key": "remember",
         "kind": "llm",
         "title": "«Запомни это»",
@@ -158,6 +165,11 @@ TASKS_I18N = {
         "en": ("Conversation summaries", "Title, summary, tasks and facts. Long input, so input price matters."),
         "tr": ("Konuşma özetleri", "Başlık, özet, görevler ve bilgiler. Girdi uzun, bu yüzden girdi fiyatı önemli."),
         "es": ("Resúmenes de conversaciones", "Título, resumen, tareas y datos. La entrada es larga: importa su precio."),
+    },
+    "cleanup": {
+        "en": ("Transcript correction", "Fixes recognition errors using the whole conversation and removes junk. Returns only the edits."),
+        "tr": ("Transkript düzeltme", "Tanıma hatalarını konuşmanın bağlamına göre düzeltir ve gereksizleri temizler. Yalnızca düzeltmeleri döndürür."),
+        "es": ("Corrección de la transcripción", "Corrige errores de reconocimiento según la conversación y quita la basura. Devuelve solo los cambios."),
     },
     "remember": {
         "en": ("“Remember this”", "Double press: a minute of conversation becomes one note. The cheapest model is enough."),

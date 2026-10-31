@@ -45,6 +45,7 @@ services:
       - photos:/data/photos
       - voices:/data/voices
       - whisper-models:/models   # нейроголос (модель ~130 МБ скачивается сама)
+      - tiles:/data/tiles        # подложка карты (кеш плиток, до 300 МБ)
     depends_on:
       db:
         condition: service_healthy
@@ -127,6 +128,7 @@ volumes:
   audio:
   photos:
   voices:
+  tiles:
   whisper-models:
   claude-home:
   claude-work:

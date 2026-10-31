@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, diary, events, extensions, i18n, people, retention
+from neuro import agent_core, cleanup, diary, events, extensions, i18n, people, retention
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
                              record_question, transcript_text)
@@ -87,6 +87,11 @@ def summarize_conversations(conn):
 
 
 def summarize_one(conn, conv_id: int):
+    # сначала исправить расшифровку: итоги, задачи и поиск — уже по чистому тексту
+    try:
+        cleanup.conversation(conn, conv_id)
+    except Exception:  # noqa: BLE001 — без исправления итоги всё равно нужны
+        log.exception("conversation %s: cleanup failed", conv_id)
     segs = conn.execute(
         people.SEGMENT_SELECT + " WHERE s.conversation_id = %s ORDER BY s.started_at, s.id", (conv_id,)
     ).fetchall()
@@ -95,7 +100,7 @@ def summarize_one(conn, conv_id: int):
     topics: list[str] = []
     summary = None
     emoji = "💬"
-    text_len = sum(len(s["text"]) for s in segs if not s.get("person_ignored"))
+    text_len = sum(len(s["text"]) for s in segs if not s.get("person_ignored") and not s.get("junk"))
     lang = i18n.lang(conn)
     if not segs:
         title = i18n.t(lang, "conversation.empty")

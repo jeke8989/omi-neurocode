@@ -25,8 +25,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_core, assistant, claude_agent, config, db, diary, extensions, i18n, llm, mnemo_mcp, pairing,
-                   people, retention, tts, voices)
+from neuro import (agent_core, assistant, claude_agent, cleanup, config, db, diary, extensions, geo, i18n, llm,
+                   mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -446,7 +446,7 @@ async def api_conversations(request: Request):
                       (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id) AS tasks_count,
                       """ + people.participants_sql("c") + """ AS people,
                       (SELECT left(string_agg(x.text, ' '), 240) FROM
-                          (SELECT s.text FROM segments s WHERE s.conversation_id = c.id
+                          (SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk
                            ORDER BY s.started_at LIMIT 6) x) AS preview
                FROM conversations c
                WHERE (%s::date IS NULL OR (c.started_at AT TIME ZONE %s)::date = %s::date) AND c.trashed_at IS NULL
@@ -498,7 +498,7 @@ async def api_search(request: Request):
         segments = await (await conn.execute(
             """SELECT s.conversation_id, s.started_at, s.text, c.title, c.emoji FROM segments s
                LEFT JOIN conversations c ON c.id = s.conversation_id
-               WHERE s.text ILIKE %s ORDER BY s.started_at DESC LIMIT 30""", (like,))).fetchall()
+               WHERE s.text ILIKE %s AND NOT s.junk ORDER BY s.started_at DESC LIMIT 30""", (like,))).fetchall()
         tasks = await (await conn.execute(
             "SELECT id, text, status, due FROM tasks WHERE text ILIKE %s ORDER BY created_at DESC LIMIT 20",
             (like,))).fetchall()
@@ -525,10 +525,12 @@ async def api_conversation(request: Request):
             return Json({"error": "not found"}, status_code=404)
         conv["segments"] = await (await conn.execute(
             """SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.person_id, s.voice_score,
-                      (s.chunk_id IS NOT NULL AND a.path IS NOT NULL) AS has_audio
+                      (s.chunk_id IS NOT NULL AND a.path IS NOT NULL) AS has_audio,
+                      CASE WHEN s.raw_text IS DISTINCT FROM s.text THEN s.raw_text END AS raw_text
                FROM segments s LEFT JOIN audio_chunks a ON a.id = s.chunk_id
-               WHERE s.conversation_id = %s ORDER BY s.started_at, s.id""", (cid,)
+               WHERE s.conversation_id = %s AND NOT s.junk ORDER BY s.started_at, s.id""", (cid,)
         )).fetchall()
+        conv["location"] = await _sync(geo.conversation_map, conv["started_at"], conv["ended_at"])
         match = voices.thresholds().match
         for seg in conv["segments"]:
             seg["sure"] = seg["voice_score"] is not None and seg["voice_score"] >= match
@@ -1075,7 +1077,7 @@ async def api_extension(request: Request):
 # Дневник жизни: лента дня, фото, настройки функций
 # ---------------------------------------------------------------------------
 FEATURE_KEYS = {"diary": "feature.diary", "photo_ai": "feature.photo_ai", "photo_style": "feature.photo_style", "style": "diary.style",
-                "photos_per_day": "diary.photos_per_day"}
+                "photos_per_day": "diary.photos_per_day", "transcript_cleanup": cleanup.SETTING}
 
 
 async def _settings_map(conn) -> dict:
@@ -1123,7 +1125,7 @@ async def api_features(request: Request):
                 if name not in body:
                     continue
                 v = body[name]
-                if name in ("diary", "photo_ai", "photo_style"):
+                if name in ("diary", "photo_ai", "photo_style", "transcript_cleanup"):
                     v = "1" if v else "0"
                 elif name == "style":
                     if v not in diary.STYLES:
@@ -1146,6 +1148,7 @@ async def api_features(request: Request):
         "languages": [{"code": k, "name": v["name"]} for k, v in i18n.LANGS.items()],
         "audio_keep_days": retention.parse(st[retention.KEY]) if retention.KEY in st else config.KEEP_AUDIO_DAYS,
         "audio_keep_choices": list(retention.CHOICES),
+        "transcript_cleanup": st.get(cleanup.SETTING, "1") != "0",
     })
 
 
@@ -1417,7 +1420,7 @@ SELECT c.id, c.event_id, c.started_at, c.last_activity AS ended_at, c.status, c.
        (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count,
        c.topics, """ + people.participants_sql("c") + """ AS people,
        (SELECT left(string_agg(x.text, ' '), 240) FROM
-           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id ORDER BY s.started_at LIMIT 6) x) AS preview
+           (SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk ORDER BY s.started_at LIMIT 6) x) AS preview
 FROM conversations c
 """
 
@@ -1436,6 +1439,12 @@ def _events_day(conn, day: str) -> dict:
         (by_event.setdefault(f["event_id"], []) if f["event_id"] else loose).append(f)
     for e in events:
         e["fragments"] = by_event.get(e["id"], [])
+    if events or loose:
+        start, end = diary.day_bounds(date.fromisoformat(day))
+        pts = geo.points(conn, start, end)
+        if pts:
+            geo.locate(events, pts)
+            geo.locate(loose, pts)
     return {"day": day, "events": events, "loose": loose}
 
 
@@ -1449,6 +1458,31 @@ async def api_events(request: Request):
     except ValueError:
         return Json({"error": "day: YYYY-MM-DD"}, status_code=400)
     return Json(await _sync(_events_day, day))
+
+
+async def api_map(request: Request):
+    """Карта дня: маршрут, места, события и разговоры на своих местах."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    try:
+        day = date.fromisoformat(request.query_params.get("day") or date.today().isoformat())
+    except ValueError:
+        return Json({"error": "day: YYYY-MM-DD"}, status_code=400)
+    return Json(await _sync(geo.day_map, day))
+
+
+async def api_tile(request: Request):
+    """Подложка карты: плитка CARTO через свой сервер (с кешем)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    p = request.path_params
+    try:
+        data = await anyio.to_thread.run_sync(geo.tile, p["style"], int(p["z"]), int(p["x"]), int(p["y"]))
+    except ValueError:
+        return Json({"error": "bad tile"}, status_code=400)
+    except geo.TileError:
+        return Json({"error": "tile unavailable"}, status_code=502)
+    return Response(data, media_type="image/png", headers={"Cache-Control": "private, max-age=2592000"})
 
 
 async def api_trash(request: Request):
@@ -1553,6 +1587,8 @@ app = Starlette(
         Route("/api/segments/{id:int}/audio", api_segment_audio),
         Route("/api/graph", api_graph),
         Route("/api/events", api_events),
+        Route("/api/map", api_map),
+        Route("/api/tiles/{style}/{z:int}/{x:int}/{y:int}.png", api_tile),
         Route("/api/trash", api_trash),
         Route("/api/conversations/{id:int}/restore", api_trash, methods=["POST"]),
         Route("/api/tts", api_tts, methods=["POST"]),

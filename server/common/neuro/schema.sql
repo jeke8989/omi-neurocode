@@ -351,3 +351,9 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES da
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMPTZ;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS junk_reason TEXT;
 CREATE INDEX IF NOT EXISTS conversations_event_idx ON conversations (event_id);
+
+-- Чистая расшифровка: исходный текст фразы, мусор (не показывается), проверена ли моделью
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS raw_text TEXT;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS junk BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS cleaned BOOLEAN NOT NULL DEFAULT false;
+UPDATE segments SET cleaned = true WHERE NOT cleaned AND started_at < now() - interval '1 day';
