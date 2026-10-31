@@ -33,7 +33,7 @@ TABLES = [
     ("places", "key", ["name"], ["key"], [], []),
 ]
 BATCH = 300
-DONE_KEY = "crypto.encrypted_v1"
+DONE_KEY = "crypto.encrypted_v2"  # v1 мог отметиться «готово» ещё до появления ключа
 
 
 def _where(rand, det, lists, docs) -> str:
@@ -116,6 +116,8 @@ def step(conn, budget_sec: float = 20.0) -> int:
 
 def tick(conn):
     """Из цикла агента: пока есть открытые данные — шифруем порциями; потом проверяем раз в час."""
+    if not crypto.enabled():
+        return  # без ключа шифровать нечем — и «готово» не отмечаем
     row = conn.execute("SELECT value FROM settings WHERE key = %s", (DONE_KEY,)).fetchone()
     if row and time.time() - float(row["value"] or 0) < 3600:
         return

@@ -63,3 +63,15 @@ def test_database_holds_only_ciphertext_and_old_rows_get_encrypted(conn):  # noq
     assert [s["text"] for s in found["segments"]] == ["Давай купим билеты в Стамбул"]
     assert [x["text"] for x in found["tasks"]] == []
     assert crypto.enabled()
+
+
+def test_tick_without_key_does_not_mark_done(conn, monkeypatch):  # noqa: F811
+    from neuro import crypto, encrypt_existing
+    conn.execute("TRUNCATE settings, segments RESTART IDENTITY CASCADE")
+    monkeypatch.setattr(crypto, "enabled", lambda: False)
+    encrypt_existing.tick(conn)
+    assert conn.execute("SELECT 1 FROM settings WHERE key = %s", (encrypt_existing.DONE_KEY,)).fetchone() is None
+    monkeypatch.undo()
+    conn.execute("INSERT INTO segments (device_id, started_at, ended_at, text) VALUES ('d', now(), now(), 'старое')")
+    encrypt_existing.tick(conn)
+    assert conn.execute("SELECT text LIKE 'enc1:%%' AS s FROM segments").fetchone()["s"]
