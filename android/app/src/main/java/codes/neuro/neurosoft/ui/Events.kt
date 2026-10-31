@@ -126,6 +126,9 @@ fun EventScreen(id: Long, day: String) {
                             .clip(RoundedCornerShape(24.dp)))
                     }
                 }
+                if (e.lat != null && e.lon != null) {
+                    item(key = "map") { SpotMap(day, e.lat, e.lon, e.emoji, e.title) }
+                }
                 e.summary?.let { s ->
                     item(key = "summary") { Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) { Txt(s, T.body) } }
                 }

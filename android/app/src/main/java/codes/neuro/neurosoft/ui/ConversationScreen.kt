@@ -39,6 +39,7 @@ fun ConversationScreen(id: Long) {
     val reprocessed = stringResource(R.string.reprocess_started)
     val speakerLabel = stringResource(R.string.speaker)
     var who by remember { mutableStateOf<Segment?>(null) }
+    var original by remember(id) { mutableStateOf(false) }
 
     fun reload() {
         scope.launch {
@@ -141,6 +142,9 @@ fun ConversationScreen(id: Long) {
                         }
                     }
                 }
+                d.location?.let { loc ->
+                    SpotMap(fmt.dayOf(d.item.startedAt), loc.lat, loc.lon, d.item.emoji, d.item.title, loc.track, loc.name)
+                }
                 when (d.item.status) {
                     "open", "processing" -> Txt(stringResource(R.string.status_processing), T.caption, c.graphite,
                         Modifier.padding(horizontal = 22.dp, vertical = 10.dp))
@@ -180,7 +184,19 @@ fun ConversationScreen(id: Long) {
                         d.memories.forEach { m -> item { ListRow(m.text, icon = Icons.Bookmark) } }
                     }
                 }
-                SectionTitle(stringResource(R.string.transcript))
+                // ассистент исправил фразы — можно посмотреть, как было распознано
+                val fixed = d.segments.count { it.raw != null }
+                SectionTitle(stringResource(R.string.transcript)) {
+                    if (fixed > 0) {
+                        Txt(stringResource(if (original) R.string.transcript_show_fixed else R.string.transcript_show_original),
+                            T.smallStrong, c.lens, modifier = Modifier.quietTap { original = !original })
+                    }
+                }
+                if (fixed > 0) {
+                    Txt(if (original) stringResource(R.string.transcript_original_note)
+                        else plural(R.plurals.transcript_fixed, fixed), T.caption, c.graphite,
+                        Modifier.padding(start = 22.dp, end = 22.dp, bottom = 8.dp))
+                }
                 if (d.segments.isEmpty()) {
                     Txt(stringResource(R.string.transcript_empty), T.small, c.graphite, Modifier.padding(horizontal = 22.dp))
                 } else if (d.people.values.any { it.name == null && !it.isOwner } || d.segments.any { it.personId != null && !it.sure }
@@ -210,7 +226,8 @@ fun ConversationScreen(id: Long) {
                                         if (ref != null && !s.sure) c.amber else c.graphite)
                                 }
                             }
-                            Txt(s.text, T.body, if (ref?.ignored == true) c.faint else c.ink,
+                            Txt(if (original && s.raw != null) s.raw else s.text, T.body,
+                                if (ref?.ignored == true) c.faint else c.ink,
                                 Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(18.dp))
                                     .background(if (mine) c.paper else c.raised)
                                     .combinedClickable(onClick = {}, onLongClick = { if (s.id > 0) who = s })

@@ -238,12 +238,12 @@ object Core {
         while (true) {
             if (prefs.serverConfigured) {
                 try {
-                    Reminders.schedule(app, Api.tasks("open"))
+                    onTasks(Api.tasks("all"))
                 } catch (_: Exception) {
                 }
                 Morning.check(app)
             }
-            delay(10 * 60_000L)
+            delay(3 * 60_000L)
         }
     }
 
@@ -251,6 +251,10 @@ object Core {
     fun onTasks(tasks: List<codes.neuro.neurosoft.net.TaskItem>) {
         try {
             Reminders.schedule(app, tasks)
+        } catch (_: Exception) {
+        }
+        try {
+            TaskPrompts.onTasks(app, tasks)
         } catch (_: Exception) {
         }
     }

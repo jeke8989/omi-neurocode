@@ -97,6 +97,7 @@
     <string name="day_conversations">Conversaciones del día</string>
     <string name="day_feed">Historia del día</string>
     <string name="day_feed_sub">Historia, momentos destacados y estado de ánimo</string>
+    <string name="day_map">Mapa del día</string>
     <string name="day_not_ready_text">Puedes crearla ahora con las conversaciones, lugares y fotos del día.</string>
     <string name="day_not_ready_title">La historia aún no está lista</string>
     <string name="day_summaries">Resúmenes del día</string>
@@ -259,6 +260,9 @@
     <string name="location_while_recording">Ubicación al grabar</string>
     <string name="manifest_link">Enlace a manifest.json</string>
     <string name="manufacturer">Fabricante</string>
+    <string name="map_empty_text">Activa «Ubicación durante la grabación» en los ajustes del diario para ver tu ruta y dónde ocurrieron las conversaciones.</string>
+    <string name="map_empty_title">No hay ubicación de este día</string>
+    <string name="map_open">Abrir</string>
     <string name="marketplace">Marketplace</string>
     <string name="memory">Memoria</string>
     <string name="memory_empty_text">Pulsa dos veces el botón del colgante y el último minuto se convertirá en una nota.</string>
@@ -518,6 +522,15 @@
     <string name="talk_today">Conversaciones hoy</string>
     <string name="task_accept">Añadir a tareas</string>
     <string name="task_dismiss">Descartar</string>
+    <string name="task_prompt_added">Añadida a tareas</string>
+    <string name="task_prompt_channel">¿Es una tarea?</string>
+    <string name="task_prompt_channel_desc">El asistente pregunta por las tareas de las que no está seguro</string>
+    <string name="task_prompt_due">Plazo: %1$s</string>
+    <string name="task_prompt_offline">Sin conexión con el servidor: responde de nuevo</string>
+    <string name="task_prompt_removed">Descartada</string>
+    <string name="task_prompt_setting">Preguntar por tareas</string>
+    <string name="task_prompt_setting_sub">Si el asistente no está seguro, un aviso con «Añadir a tareas» y «Descartar»</string>
+    <string name="task_prompt_title">¿Es una tarea?</string>
     <string name="task_reminder">Recordatorio</string>
     <string name="task_someone">alguien</string>
     <string name="task_sync">Integración de tareas</string>
@@ -537,7 +550,12 @@
     <string name="theme_system">Como el sistema</string>
     <string name="today">Hoy</string>
     <string name="transcript">Transcripción</string>
+    <string name="transcript_cleanup">Corregir transcripciones</string>
+    <string name="transcript_cleanup_sub">El asistente corrige errores de reconocimiento según el contexto y quita la basura. Se guarda el texto original.</string>
     <string name="transcript_empty">Sin texto</string>
+    <string name="transcript_original_note">Así se reconocieron las frases antes de corregirlas.</string>
+    <string name="transcript_show_fixed">Texto corregido</string>
+    <string name="transcript_show_original">Como se reconoció</string>
     <string name="trash">Papelera</string>
     <string name="trash_empty_text">El asistente mueve aquí el ruido, la tele y los fragmentos sin sentido. Se borran a los 7 días.</string>
     <string name="trash_empty_title">La papelera está vacía</string>
@@ -646,5 +664,9 @@
     <plurals name="topics">
         <item quantity="one">%d tema</item>
         <item quantity="other">%d temas</item>
+    </plurals>
+    <plurals name="transcript_fixed">
+        <item quantity="one">El asistente corrigió %d frase</item>
+        <item quantity="other">El asistente corrigió %d frases</item>
     </plurals>
 </resources>

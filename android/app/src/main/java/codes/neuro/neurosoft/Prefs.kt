@@ -97,6 +97,16 @@ class Prefs(context: Context) {
         get() = sp.getString("tts_voice", "f1") ?: "f1"
         set(value) = sp.edit().putString("tts_voice", value).apply()
 
+    /** «Это задача?» — спрашивать в уведомлении про задачи, в которых ассистент не уверен. */
+    var taskPrompts: Boolean
+        get() = sp.getBoolean("task_prompts", true)
+        set(value) = sp.edit().putBoolean("task_prompts", value).apply()
+
+    /** Про какие предложенные задачи уже спросили в уведомлении. */
+    var askedTasks: Set<Long>
+        get() = (sp.getString("asked_tasks", "") ?: "").split(',').mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) = sp.edit().putString("asked_tasks", value.takeLast(200).joinToString(",")).apply()
+
     /** Утром — уведомление с итогами вчерашнего дня. */
     var morningSummary: Boolean
         get() = sp.getBoolean("morning_summary", true)

@@ -37,6 +37,7 @@ import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.diary.PhotoSync
 import codes.neuro.neurosoft.net.Api
+import codes.neuro.neurosoft.net.DayMapData
 import codes.neuro.neurosoft.net.DiaryDay
 import codes.neuro.neurosoft.net.Place
 import kotlinx.coroutines.delay
@@ -270,9 +271,15 @@ fun DayScreen(day: String) {
     val scope = rememberCoroutineScope()
     var note by remember { mutableStateOf<String?>(null) }
     val rebuilding = stringResource(R.string.diary_rebuilding)
+    var dayMap by remember(day) { mutableStateOf<DayMapData?>(null) }
     LaunchedEffect(day) {
         Repo.diary.refresh()
         Repo.conversations(day).refresh()
+        dayMap = try {
+            Api.dayMap(day)
+        } catch (e: Exception) {
+            null
+        }
     }
     val d = res.data?.days?.firstOrNull { it.day == day }
     val captions = res.data?.photoCaptions.orEmpty()
@@ -363,12 +370,6 @@ fun DayScreen(day: String) {
                 }
                 if (d.places.isNotEmpty()) {
                     SectionTitle(stringResource(R.string.places))
-                    val located = d.places.filter { it.lat != null && it.lon != null }
-                    if (located.size > 1 && d.coverPhotoId != null) {
-                        DayMap(located, Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(170.dp)
-                            .clip(RoundedCornerShape(20.dp)))
-                        Spacer(Modifier.height(10.dp))
-                    }
                     Group {
                         d.places.forEach { p ->
                             item {
@@ -378,6 +379,17 @@ fun DayScreen(day: String) {
                         }
                     }
                 }
+            }
+            // карта дня: маршрут, места и события
+            val dm = dayMap
+            if (dm != null && !dm.isEmpty) {
+                SectionTitle(stringResource(R.string.day_map)) {
+                    Txt(stringResource(R.string.map_open), T.smallStrong, c.lens,
+                        modifier = Modifier.quietTap { Nav.push(Route.Map(day)) })
+                }
+                MnemoMap(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(230.dp).clip(RoundedCornerShape(24.dp)),
+                    track = dm.track, places = placeMarks(dm), pins = spotPins(dm), onOpen = { Nav.push(Route.Map(day)) },
+                    description = stringResource(R.string.day_map))
             }
             val convs = convRes.data.orEmpty()
             if (convs.isNotEmpty()) {

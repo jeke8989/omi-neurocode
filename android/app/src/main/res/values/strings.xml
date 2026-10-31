@@ -98,6 +98,7 @@
     <string name="day_conversations">Conversations</string>
     <string name="day_feed">Daily story</string>
     <string name="day_feed_sub">The day\'s story, highlights and mood</string>
+    <string name="day_map">Day map</string>
     <string name="day_not_ready_text">You can build it now from the day\'s conversations, places and photos.</string>
     <string name="day_not_ready_title">The story isn\'t ready yet</string>
     <string name="day_summaries">Daily summaries</string>
@@ -260,6 +261,9 @@
     <string name="location_while_recording">Location while recording</string>
     <string name="manifest_link">Link to manifest.json</string>
     <string name="manufacturer">Manufacturer</string>
+    <string name="map_empty_text">Turn on “Location while recording” in the diary settings to see your route and where conversations happened.</string>
+    <string name="map_empty_title">No location for this day</string>
+    <string name="map_open">Open</string>
     <string name="marketplace">Marketplace</string>
     <string name="memory">Memory</string>
     <string name="memory_empty_text">Press the pendant button twice and the last minute of conversation becomes a note.</string>
@@ -519,6 +523,15 @@
     <string name="talk_today">Talk today</string>
     <string name="task_accept">Add to tasks</string>
     <string name="task_dismiss">Dismiss</string>
+    <string name="task_prompt_added">Added to tasks</string>
+    <string name="task_prompt_channel">Is this a task?</string>
+    <string name="task_prompt_channel_desc">The assistant asks about tasks it isn\'t sure of</string>
+    <string name="task_prompt_due">Due: %1$s</string>
+    <string name="task_prompt_offline">No connection to the server — answer again</string>
+    <string name="task_prompt_removed">Dismissed</string>
+    <string name="task_prompt_setting">Ask about tasks</string>
+    <string name="task_prompt_setting_sub">When the assistant isn\'t sure, a notification with “Add to tasks” and “Dismiss”</string>
+    <string name="task_prompt_title">Is this a task?</string>
     <string name="task_reminder">Reminder</string>
     <string name="task_someone">someone</string>
     <string name="task_sync">Task integration</string>
@@ -538,7 +551,12 @@
     <string name="theme_system">Same as system</string>
     <string name="today">Today</string>
     <string name="transcript">Transcript</string>
+    <string name="transcript_cleanup">Correct transcripts</string>
+    <string name="transcript_cleanup_sub">The assistant fixes recognition errors using context and removes junk. The original text is kept.</string>
     <string name="transcript_empty">No text</string>
+    <string name="transcript_original_note">This is how the phrases were recognized before correction.</string>
+    <string name="transcript_show_fixed">Corrected text</string>
+    <string name="transcript_show_original">As recognized</string>
     <string name="trash">Trash</string>
     <string name="trash_empty_text">The assistant moves noise, TV and meaningless scraps here. They are deleted after 7 days.</string>
     <string name="trash_empty_title">Trash is empty</string>
@@ -647,5 +665,9 @@
     <plurals name="topics">
         <item quantity="one">%d topic</item>
         <item quantity="other">%d topics</item>
+    </plurals>
+    <plurals name="transcript_fixed">
+        <item quantity="one">The assistant corrected %d phrase</item>
+        <item quantity="other">The assistant corrected %d phrases</item>
     </plurals>
 </resources>

@@ -97,6 +97,7 @@
     <string name="day_conversations">Günün konuşmaları</string>
     <string name="day_feed">Günün hikâyesi</string>
     <string name="day_feed_sub">Günün hikâyesi, öne çıkanlar, ruh hâli</string>
+    <string name="day_map">Günün haritası</string>
     <string name="day_not_ready_text">Günün konuşmaları, yerleri ve fotoğraflarından şimdi oluşturabilirsiniz.</string>
     <string name="day_not_ready_title">Günün hikâyesi henüz hazır değil</string>
     <string name="day_summaries">Günlük özetler</string>
@@ -259,6 +260,9 @@
     <string name="location_while_recording">Kayıt sırasında konum</string>
     <string name="manifest_link">manifest.json bağlantısı</string>
     <string name="manufacturer">Üretici</string>
+    <string name="map_empty_text">Rotanızı ve konuşmaların yerlerini görmek için günlük ayarlarında “Kayıt sırasında konum”u açın.</string>
+    <string name="map_empty_title">Bu gün için konum yok</string>
+    <string name="map_open">Aç</string>
     <string name="marketplace">Pazar</string>
     <string name="memory">Hafıza</string>
     <string name="memory_empty_text">Kolye düğmesine iki kez basın; konuşmanın son dakikası nota dönüşür.</string>
@@ -518,6 +522,15 @@
     <string name="talk_today">Bugünkü konuşmalar</string>
     <string name="task_accept">Görevlere ekle</string>
     <string name="task_dismiss">Kaldır</string>
+    <string name="task_prompt_added">Görevlere eklendi</string>
+    <string name="task_prompt_channel">Bu bir görev mi?</string>
+    <string name="task_prompt_channel_desc">Asistan emin olmadığı görevleri sorar</string>
+    <string name="task_prompt_due">Son tarih: %1$s</string>
+    <string name="task_prompt_offline">Sunucuya bağlantı yok — tekrar yanıtlayın</string>
+    <string name="task_prompt_removed">Kaldırıldı</string>
+    <string name="task_prompt_setting">Görevleri sor</string>
+    <string name="task_prompt_setting_sub">Asistan emin değilse “Görevlere ekle” ve “Kaldır” düğmeli bir bildirim</string>
+    <string name="task_prompt_title">Bu bir görev mi?</string>
     <string name="task_reminder">Hatırlatma</string>
     <string name="task_someone">birinden</string>
     <string name="task_sync">Görev entegrasyonu</string>
@@ -537,7 +550,12 @@
     <string name="theme_system">Sistemle aynı</string>
     <string name="today">Bugün</string>
     <string name="transcript">Döküm</string>
+    <string name="transcript_cleanup">Transkriptleri düzelt</string>
+    <string name="transcript_cleanup_sub">Asistan tanıma hatalarını bağlama göre düzeltir ve gereksizleri temizler. Orijinal metin saklanır.</string>
     <string name="transcript_empty">Metin yok</string>
+    <string name="transcript_original_note">İfadeler düzeltmeden önce böyle tanındı.</string>
+    <string name="transcript_show_fixed">Düzeltilmiş metin</string>
+    <string name="transcript_show_original">Tanındığı gibi</string>
     <string name="trash">Çöp kutusu</string>
     <string name="trash_empty_text">Asistan gürültüyü, televizyonu ve anlamsız kırıntıları buraya taşır. 7 gün sonra silinirler.</string>
     <string name="trash_empty_title">Çöp kutusu boş</string>
@@ -646,5 +664,9 @@
     <plurals name="topics">
         <item quantity="one">%d konu</item>
         <item quantity="other">%d konu</item>
+    </plurals>
+    <plurals name="transcript_fixed">
+        <item quantity="one">Asistan %d ifadeyi düzeltti</item>
+        <item quantity="other">Asistan %d ifadeyi düzeltti</item>
     </plurals>
 </resources>

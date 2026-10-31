@@ -143,6 +143,13 @@ fun SettingsScreen() {
                 subtitle = stringResource(R.string.claude_sub),
                 value = claude.data?.let { stringResource(if (it.configured) R.string.claude_on else R.string.claude_off) },
                 onClick = { Nav.push(Route.Claude) }) }
+            item {
+                var prompts by remember { mutableStateOf(Core.prefs.taskPrompts) }
+                ToggleRow(stringResource(R.string.task_prompt_setting), prompts, {
+                    prompts = it
+                    Core.prefs.taskPrompts = it
+                }, icon = Icons.Tasks, subtitle = stringResource(R.string.task_prompt_setting_sub))
+            }
         }
 
         Group(stringResource(R.string.tab_people)) {
@@ -181,6 +188,22 @@ fun SettingsScreen() {
         Group(stringResource(R.string.data)) {
             item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
                 onClick = { Nav.push(Route.Memories) }) }
+            item {
+                var cleanup by remember(features.data?.transcriptCleanup) {
+                    mutableStateOf(features.data?.transcriptCleanup ?: true)
+                }
+                ToggleRow(stringResource(R.string.transcript_cleanup), cleanup, { on ->
+                    cleanup = on
+                    scope.launch {
+                        try {
+                            Api.setFeatures(mapOf("transcript_cleanup" to on))
+                            Repo.features.refresh()
+                        } catch (e: Exception) {
+                            cleanup = !on
+                        }
+                    }
+                }, icon = Icons.Sparkle, subtitle = stringResource(R.string.transcript_cleanup_sub))
+            }
             item { ListRow(stringResource(R.string.trash), icon = Icons.Trash, chevron = true,
                 subtitle = stringResource(R.string.trash_sub), onClick = { Nav.push(Route.Trash) }) }
             item { ListRow(stringResource(R.string.audio_keep), icon = Icons.Wave, chevron = true,

@@ -90,6 +90,7 @@ data class EventItem(
     val id: Long, val day: String, val startedAt: String, val endedAt: String, val title: String?, val emoji: String?,
     val kind: String, val summary: String?, val topics: List<String>, val photoId: Long?, val people: List<PersonRef>,
     val fragments: List<ConversationItem>, val final: Boolean = false,
+    val lat: Double? = null, val lon: Double? = null,
 ) {
     val durationSec: Int get() = fragments.sumOf { it.durationSec }
     val tasksCount: Int get() = fragments.sumOf { it.tasksCount }
@@ -117,7 +118,9 @@ data class SearchResults(val conversations: List<SearchHit>, val segments: List<
 }
 
 data class Segment(val startedAt: String, val speaker: Int?, val text: String, val id: Long = 0,
-                   val personId: Long? = null, val sure: Boolean = true, val hasAudio: Boolean = false)
+                   val personId: Long? = null, val sure: Boolean = true, val hasAudio: Boolean = false,
+                   /** Исходный текст распознавания, если ассистент исправил фразу. */
+                   val raw: String? = null)
 
 data class TaskItem(
     val id: Long,
@@ -153,7 +156,19 @@ data class ConversationDetail(
     val tasks: List<TaskItem>,
     val memories: List<MemoryItem>,
     val people: Map<Long, PersonRef> = emptyMap(),
+    /** Где был разговор (если в это время писалась геолокация). */
+    val location: ConvLocation? = null,
 )
+
+data class LatLon(val lat: Double, val lon: Double)
+data class ConvLocation(val lat: Double, val lon: Double, val name: String?, val track: List<LatLon>)
+data class MapPlace(val name: String?, val lat: Double, val lon: Double, val from: String, val to: String)
+/** Событие или отдельный разговор на карте дня. */
+data class MapSpot(val id: Long, val event: Boolean, val title: String?, val emoji: String?, val startedAt: String,
+                   val lat: Double, val lon: Double, val fragments: Int, val firstConversation: Long?)
+data class DayMapData(val day: String, val track: List<LatLon>, val places: List<MapPlace>, val spots: List<MapSpot>) {
+    val isEmpty get() = track.isEmpty() && places.isEmpty() && spots.isEmpty()
+}
 
 data class TaskExport(val ext: String, val name: String?, val icon: String?, val ok: Boolean, val ref: String?)
 
@@ -198,7 +213,8 @@ data class Extension(
 data class Features(val diary: Boolean, val photoStyle: Boolean, val photoAi: Boolean = true, val style: String, val photosPerDay: Int,
                     val styles: List<Pair<String, String>>, val language: String = "ru",
                     val sttLanguage: String = "app", val audioKeepDays: Int = 3,
-                    val audioKeepChoices: List<Int> = listOf(0, 1, 3, 7, 30))
+                    val audioKeepChoices: List<Int> = listOf(0, 1, 3, 7, 30),
+                    val transcriptCleanup: Boolean = true)
 
 data class Highlight(val time: String, val emoji: String, val title: String, val text: String, val kind: String,
                      val photoId: Long?)
@@ -389,6 +405,7 @@ object Api {
                     photoId = e.longOrNull("photo_id"), people = e.optJSONArray("people").map { personRef(it) },
                     fragments = e.optJSONArray("fragments").map { conversation(it) },
                     final = e.optString("status") == "final",
+                    lat = e.dbl("lat"), lon = e.dbl("lon"),
                 )
             }.filter { it.fragments.isNotEmpty() },
             loose = o.optJSONArray("loose").map { conversation(it) },
@@ -440,12 +457,44 @@ object Api {
             item = conversation(o),
             segments = o.optJSONArray("segments").map {
                 Segment(it.optString("started_at"), it.intOrNull("speaker"), it.optString("text"), it.optLong("id"),
-                    it.longOrNull("person_id"), it.optBoolean("sure", true), it.optBoolean("has_audio"))
+                    it.longOrNull("person_id"), it.optBoolean("sure", true), it.optBoolean("has_audio"),
+                    it.str("raw_text"))
             },
             tasks = o.optJSONArray("tasks").map { task(it) },
             memories = o.optJSONArray("memories").map { memory(it) },
             people = o.optJSONArray("people").map { personRef(it) }.associateBy { it.id },
+            location = o.optJSONObject("location")?.let { l ->
+                ConvLocation(l.optDouble("lat"), l.optDouble("lon"), l.str("name"), latLons(l.optJSONArray("track")))
+            },
         )
+    }
+
+    /** Карта дня. Старый сервер без карты — null. */
+    suspend fun dayMap(day: String): DayMapData? = try {
+        val o = JSONObject(call("GET", "/api/map?day=$day"))
+        fun spot(it: JSONObject, event: Boolean) = MapSpot(
+            it.getLong("id"), event, it.str("title"), it.str("emoji"), it.optString("started_at"),
+            it.optDouble("lat"), it.optDouble("lon"), if (event) it.optInt("fragments", 1) else 1,
+            if (event) it.longOrNull("first_conversation") else it.getLong("id"))
+        DayMapData(
+            day = day,
+            track = latLons(o.optJSONArray("track")),
+            places = o.optJSONArray("places").map {
+                MapPlace(it.str("name"), it.optDouble("lat"), it.optDouble("lon"), it.optString("from"), it.optString("to"))
+            },
+            spots = (o.optJSONArray("events").map { spot(it, true) } + o.optJSONArray("conversations").map { spot(it, false) })
+                .sortedBy { it.startedAt },
+        )
+    } catch (e: ApiException) {
+        if (e.kind == ApiException.Kind.NOT_FOUND) null else throw e
+    }
+
+    /** Плитка подложки карты (через свой сервер). style: light | dark. */
+    fun tileUrl(style: String, z: Int, x: Int, y: Int): String = Core.prefs.serverUrl + "/api/tiles/$style/$z/$x/$y.png"
+
+    private fun latLons(a: JSONArray?): List<LatLon> {
+        if (a == null) return emptyList()
+        return (0 until a.length()).mapNotNull { i -> a.optJSONArray(i)?.let { LatLon(it.optDouble(0), it.optDouble(1)) } }
     }
 
     suspend fun deleteConversation(id: Long) {
@@ -606,6 +655,7 @@ object Api {
         audioKeepDays = o.optInt("audio_keep_days", 3),
         audioKeepChoices = o.optJSONArray("audio_keep_choices")?.let { a -> (0 until a.length()).map { a.getInt(it) } }
             ?: listOf(0, 1, 3, 7, 30),
+        transcriptCleanup = o.optBoolean("transcript_cleanup", true),
     )
 
     suspend fun diary(): DiaryInfo {

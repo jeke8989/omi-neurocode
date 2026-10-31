@@ -100,6 +100,7 @@ sealed interface Route {
     data object Claude : Route
     data object Server : Route
     data object Theme : Route
+    data class Map(val day: String, val lat: Double? = null, val lon: Double? = null) : Route
 }
 
 object Nav {

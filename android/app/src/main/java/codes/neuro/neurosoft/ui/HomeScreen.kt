@@ -283,8 +283,16 @@ fun HomeTab() {
             val feed = feedRes.data
             item(key = "day-title") {
                 val total = feed?.totalSec ?: 0L
+                val located = feed?.events?.any { it.lat != null } == true
                 SectionTitle(fmt.dayShortTitle(day)) {
-                    if (total > 0) Txt(fmt.duration(total), T.small, Mn.c.graphite)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (total > 0) Txt(fmt.duration(total), T.small, Mn.c.graphite)
+                        if (located) {
+                            Spacer(Modifier.width(10.dp))
+                            IconCircle(Icons.Pin, stringResource(R.string.day_map), { Nav.push(Route.Map(day)) },
+                                size = 34.dp)
+                        }
+                    }
                 }
             }
             when {

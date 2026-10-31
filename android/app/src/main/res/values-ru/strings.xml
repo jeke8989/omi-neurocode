@@ -97,6 +97,7 @@
     <string name="day_conversations">Разговоры дня</string>
     <string name="day_feed">Лента дня</string>
     <string name="day_feed_sub">История дня, хайлайты, настроение</string>
+    <string name="day_map">Карта дня</string>
     <string name="day_not_ready_text">Её можно собрать сейчас по разговорам, местам и фото этого дня.</string>
     <string name="day_not_ready_title">История дня ещё не собрана</string>
     <string name="day_summaries">Сводки дня</string>
@@ -259,6 +260,9 @@
     <string name="location_while_recording">Геолокация во время записи</string>
     <string name="manifest_link">Ссылка на manifest.json</string>
     <string name="manufacturer">Производитель</string>
+    <string name="map_empty_text">Включите «Геолокацию во время записи» в настройках дневника — тогда здесь появятся маршрут и места разговоров.</string>
+    <string name="map_empty_title">За этот день нет геолокации</string>
+    <string name="map_open">Открыть</string>
     <string name="marketplace">Маркетплейс</string>
     <string name="memory">Память</string>
     <string name="memory_empty_text">Дважды нажмите кнопку на кулоне, и последняя минута разговора станет заметкой.</string>
@@ -518,6 +522,15 @@
     <string name="talk_today">Разговоры сегодня</string>
     <string name="task_accept">Принять в задачи</string>
     <string name="task_dismiss">Убрать</string>
+    <string name="task_prompt_added">Добавлено в задачи</string>
+    <string name="task_prompt_channel">Это задача?</string>
+    <string name="task_prompt_channel_desc">Ассистент спрашивает про задачи, в которых не уверен</string>
+    <string name="task_prompt_due">Срок: %1$s</string>
+    <string name="task_prompt_offline">Нет связи с сервером — ответьте ещё раз</string>
+    <string name="task_prompt_removed">Убрано</string>
+    <string name="task_prompt_setting">Спрашивать про задачи</string>
+    <string name="task_prompt_setting_sub">Если ассистент не уверен — уведомление с кнопками «В задачи» и «Убрать»</string>
+    <string name="task_prompt_title">Это задача?</string>
     <string name="task_reminder">Напоминание</string>
     <string name="task_someone">собеседника</string>
     <string name="task_sync">Интеграция задач</string>
@@ -537,7 +550,12 @@
     <string name="theme_system">Как в системе</string>
     <string name="today">Сегодня</string>
     <string name="transcript">Расшифровка</string>
+    <string name="transcript_cleanup">Исправлять расшифровку</string>
+    <string name="transcript_cleanup_sub">Ассистент исправляет ошибки распознавания по смыслу и убирает мусор. Исходный текст сохраняется.</string>
     <string name="transcript_empty">Текста нет</string>
+    <string name="transcript_original_note">Так фразы распознались до исправления.</string>
+    <string name="transcript_show_fixed">Исправленный текст</string>
+    <string name="transcript_show_original">Как распознано</string>
     <string name="trash">Корзина</string>
     <string name="trash_empty_text">Сюда ассистент убирает шум, телевизор и обрывки без смысла. Через 7 дней они удаляются.</string>
     <string name="trash_empty_title">Корзина пуста</string>
@@ -668,5 +686,11 @@
         <item quantity="few">%d темы</item>
         <item quantity="many">%d тем</item>
         <item quantity="other">%d темы</item>
+    </plurals>
+    <plurals name="transcript_fixed">
+        <item quantity="one">Ассистент исправил %d фразу</item>
+        <item quantity="few">Ассистент исправил %d фразы</item>
+        <item quantity="many">Ассистент исправил %d фраз</item>
+        <item quantity="other">Ассистент исправил %d фразы</item>
     </plurals>
 </resources>
