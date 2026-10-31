@@ -66,7 +66,7 @@ main() {
   for s in $services; do
     check_space "$s"
     [ "$s" = gateway ] && keep_prev "$s"  # прошлую версию держим только для gateway: без него нет связи, а места мало
-    docker compose build -q "$s"
+    build "$s"
     docker compose up -d --no-deps "$s"
     tidy
   done
@@ -175,6 +175,13 @@ diag() {
   echo "::notice title=Контейнеры::$cs"
   echo "::notice title=Ресурсы::диск свободно $(free_mb) МБ из $(df -Pm / | awk 'NR==2{print $2}') МБ, память доступно ${mem} МБ"
   echo "::notice title=Ошибки в логах::$ex"
+  # где именно падает (файл, строка, тип ошибки) — без содержимого
+  local tb
+  tb=$(for sv in gateway stt agent; do
+         docker compose logs "$sv" --tail 400 2>&1 | grep -E '^\S+\s+\|\s+(  File "/app/[^"]+", line [0-9]+, in \w+|(Attribute|Type|Key|Name|Index|Value)Error: )' \
+           | sed -E 's/^\S+\s+\|\s+//; s/(Error: .{0,90}).*/\1/' | tail -4 | sed "s/^/$sv: /"
+       done | tr '\n' ' ' | cut -c1-900)
+  [ -n "$tb" ] && echo "::notice title=Последняя ошибка::$tb"
   echo "::notice title=Health::$(curl -sS -m 5 "http://127.0.0.1:${PORT:-8090}/health/full" 2>&1 | head -c 400 || true)"
   # расход ИИ — только цифры по задачам и моделям, без содержимого
   local q
@@ -233,6 +240,19 @@ diag() {
 }
 
 say() { printf '\n==> %s\n' "$*"; }
+
+# сборка образа с повторами: у сервера бывают обрывы связи с PyPI (SSL EOF) — две повторные попытки,
+# а если не вышло — хвост вывода сборки в CI (это только pip/docker, без данных)
+build() {
+  local s="$1" i out
+  for i in 1 2 3; do
+    if out=$(docker compose build -q "$s" 2>&1); then return 0; fi
+    echo "::warning title=Сборка $s::попытка $i не удалась: $(printf '%s' "$out" | grep -iE 'error|failed|timed out|ssl' | tail -3 | tr '\n' ' ' | cut -c1-400)"
+    sleep 20
+  done
+  echo "::error title=Сборка $s::$(printf '%s' "$out" | tail -5 | tr '\n' ' ' | cut -c1-600)"
+  return 1
+}
 add() { case " $services " in *" $1 "*) ;; *) services="${services:+$services }$1" ;; esac; }
 free_mb() { df -Pm / | awk 'NR==2{print $4}'; }
 
