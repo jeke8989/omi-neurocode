@@ -63,7 +63,7 @@ fun TasksTab() {
         }
     }
 
-    var expanded by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editing by remember { mutableStateOf<TaskItem?>(null) }
     var dueFor by remember { mutableStateOf<TaskItem?>(null) }
     // «Напомнить ему»: черновик сообщения (null — готовится)
     var nudgeFor by remember { mutableStateOf<TaskItem?>(null) }
@@ -75,7 +75,7 @@ fun TasksTab() {
     LaunchedEffect(askDue, res.data) {
         val id = askDue ?: return@LaunchedEffect
         res.data?.firstOrNull { it.id == id }?.let {
-            dueFor = it
+            editing = it  // «Другой срок» из уведомления — карточка обещания, где срок и всё остальное
             HomeState.dueTask.value = null
         }
     }
@@ -152,8 +152,8 @@ fun TasksTab() {
             try {
                 Api.setTaskDue(t.id, ms)
             } catch (e: Exception) {
-                Repo.tasks.refresh()
             }
+            Repo.tasks.refresh()
         }
     }
 
@@ -175,9 +175,22 @@ fun TasksTab() {
         DraftDialog(stringResource(R.string.promise_nudge_title, t.mate ?: stringResource(R.string.promise_someone)), null,
             nudgeText, nudgeError, onDismiss = { nudgeFor = null })
     }
-    val actions = PromiseRowActions(
-        onDue = { dueFor = it }, onCalendar = { PromiseActions.toCalendar(context, it) }, onNudge = { nudge(it) },
-    )
+    editing?.let { t ->
+        PromiseSheet(t, onDismiss = { editing = null }, onSave = { edit ->
+            editing = null
+            scope.launch {
+                try {
+                    Api.updatePromise(t.id, edit)
+                } catch (_: Exception) {
+                }
+                Repo.tasks.refresh()  // новый срок — сразу в напоминания
+                if (edit.nameVoice != null) Repo.people.refresh()
+            }
+        }, onCalendar = { PromiseActions.toCalendar(context, it) }, onNudge = { nudge(it) }, onDone = {
+            editing = null
+            toggle(t)
+        })
+    }
 
     PullToRefreshBox(
         isRefreshing = refreshing,
@@ -213,8 +226,7 @@ fun TasksTab() {
                         itemsIndexed(list, key = { _, t -> t.id }) { i, t ->
                             Grouped(i, list.size, inset = 50.dp) {
                                 SwipeToDelete({ confirm = t }) {
-                                    PromiseRow(t, expanded == t.id, { expanded = if (expanded == t.id) null else t.id },
-                                        { toggle(t) }, actions)
+                                    PromiseRow(t, { editing = t }, { toggle(t) })
                                 }
                             }
                         }
@@ -251,8 +263,7 @@ fun TasksTab() {
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
                                 Grouped(i, shown.size, inset = 50.dp) {
                                     SwipeToDelete({ confirm = t }) {
-                                        PromiseRow(t, expanded == t.id, { expanded = if (expanded == t.id) null else t.id },
-                                            { toggle(t) }, actions)
+                                        PromiseRow(t, { editing = t }, { toggle(t) })
                                     }
                                 }
                             }
@@ -491,7 +502,6 @@ private fun RemovedTaskRow(t: TaskItem, onRestore: () -> Unit) {
 }
 
 // ======================================================================= обещания
-class PromiseRowActions(val onDue: (TaskItem) -> Unit, val onCalendar: (TaskItem) -> Unit, val onNudge: (TaskItem) -> Unit)
 
 /** Кто и кому: «Ивану», «Иван обещал вам», «Напоминание себе». */
 @Composable
@@ -502,23 +512,20 @@ fun promiseWho(t: TaskItem): String? = when {
     else -> null
 }
 
-/**
- * Обещание: что, кому (или кто вам), к какому сроку. Нажатие раскрывает цитату из разговора и действия:
- * другой срок, в календарь, напомнить тому, кто обещал, открыть разговор.
- */
+/** Обещание: что, кому (или кто вам), к какому сроку. Нажатие — карточка, где всё правится. */
 @Composable
-fun PromiseRow(t: TaskItem, expanded: Boolean, onExpand: () -> Unit, onToggle: () -> Unit, actions: PromiseRowActions) {
+fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
     val c = Mn.c
     val done = t.status == "done"
     val overdue = !done && (t.dueMillis() ?: Long.MAX_VALUE) < System.currentTimeMillis()
     Row(
-        Modifier.fillMaxWidth().animateContentSize().quietTap(onExpand).padding(start = 6.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().quietTap(onOpen).padding(start = 6.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
         verticalAlignment = Alignment.Top,
     ) {
         RoundCheck(done, onToggle, stringResource(if (done) R.string.cd_task_done else R.string.cd_task_open))
         Column(Modifier.weight(1f).padding(top = 10.dp)) {
             Txt(t.text, if (done) T.body.copy(textDecoration = TextDecoration.LineThrough) else T.body,
-                if (done) c.graphite else c.ink, maxLines = if (expanded) 8 else 3)
+                if (done) c.graphite else c.ink, maxLines = 3)
             val who = promiseWho(t)
             val due = taskDue(t)
             if (who != null || due != null) {
@@ -537,34 +544,8 @@ fun PromiseRow(t: TaskItem, expanded: Boolean, onExpand: () -> Unit, onToggle: (
                     }
                 }
             }
-            if (expanded) {
-                t.evidence?.takeIf { it.isNotBlank() }?.let {
-                    Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
-                        Modifier.padding(top = 6.dp), maxLines = 4)
-                }
-                Wrap(spacing = 6.dp, modifier = Modifier.padding(top = 10.dp)) {
-                    if (!done) {
-                        Chip(stringResource(R.string.promise_due), false, { actions.onDue(t) }, leading = {
-                            Icon(Icons.Clock, null, tint = c.ink, modifier = Modifier.size(16.dp))
-                        })
-                        Chip(stringResource(R.string.promise_calendar), false, { actions.onCalendar(t) }, leading = {
-                            Icon(Icons.Calendar, null, tint = c.ink, modifier = Modifier.size(16.dp))
-                        })
-                        if (t.theirs) {
-                            Chip(stringResource(R.string.promise_nudge), false, { actions.onNudge(t) }, leading = {
-                                Icon(Icons.Share, null, tint = c.ink, modifier = Modifier.size(16.dp))
-                            })
-                        }
-                    }
-                    val convId = t.conversationId
-                    if (convId != null) {
-                        Chip(stringResource(R.string.promise_conversation), false, { Nav.push(Route.Conversation(convId)) }, leading = {
-                            Icon(Icons.Wave, null, tint = c.ink, modifier = Modifier.size(16.dp))
-                        })
-                    }
-                }
-            }
         }
+        Icon(Icons.Chevron, null, tint = c.faint, modifier = Modifier.padding(top = 12.dp).size(16.dp))
     }
 }
 

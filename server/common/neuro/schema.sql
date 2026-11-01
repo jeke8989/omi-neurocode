@@ -496,3 +496,5 @@ CREATE INDEX IF NOT EXISTS calendar_commands_pending_idx ON calendar_commands (i
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS counterpart TEXT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ;
+-- с кем договорённость — человек из «Людей» (по голосу): переименовали человека — имя в обещании тоже новое
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS counterpart_id BIGINT REFERENCES people(id) ON DELETE SET NULL;

@@ -445,6 +445,10 @@ def main():
                     export_tasks(conn)
                     sync_task_integrations(conn)
                     try:
+                        people.capitalize_names_once(conn)  # имена — с большой буквы (один раз для старых)
+                    except Exception:  # noqa: BLE001
+                        log.exception("names capitalization failed")
+                    try:
                         profile.voice_tick(conn)  # знакомство: прочитанные фразы -> голос пользователя
                     except Exception:  # noqa: BLE001
                         log.exception("profile voice failed")

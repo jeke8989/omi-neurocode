@@ -59,7 +59,7 @@ def get(conn) -> dict:
 
 def save(conn, name: str | None = None, about: str | None = None, goals: list[str] | None = None) -> dict:
     if name is not None:
-        name = " ".join(name.split())[:60]
+        name = " ".join(w[:1].upper() + w[1:] for w in name.split())[:60]
         _set(conn, KEYS["name"], name)
         me = owner(conn)
         if me and name:  # свой голос уже узнан — подписываем его этим именем

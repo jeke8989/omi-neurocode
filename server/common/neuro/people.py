@@ -26,6 +26,32 @@ OWNER_LABEL = "Я"  # пользователь без имени; с имене�
 VOICE_LABEL = "Голос"
 
 
+def proper(name: str | None) -> str | None:
+    """Имена — всегда с большой буквы: «папа» -> «Папа», «иван петров» -> «Иван Петров»."""
+    if not name:
+        return name
+    return " ".join(w[:1].upper() + w[1:] for w in str(name).split(" "))
+
+
+def capitalize_names_once(conn) -> int:
+    """Один раз: уже записанные имена людей и собеседников в обещаниях — с большой буквы."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = 'people.names_proper_v1'").fetchone():
+        return 0
+    n = 0
+    for r in conn.execute("SELECT id, name FROM people WHERE name IS NOT NULL").fetchall():
+        if r["name"] and proper(r["name"]) != r["name"]:
+            conn.execute("UPDATE people SET name = %s WHERE id = %s", (crypto.seal_det(proper(r["name"])), r["id"]))
+            n += 1
+    for r in conn.execute("SELECT id, assignee, counterpart FROM tasks WHERE assignee IS NOT NULL OR counterpart IS NOT NULL").fetchall():
+        a, cp = proper(r["assignee"]), proper(r["counterpart"])
+        if a != r["assignee"] or cp != r["counterpart"]:
+            conn.execute("UPDATE tasks SET assignee = %s, counterpart = %s WHERE id = %s",
+                         (crypto.seal(a), crypto.seal(cp), r["id"]))
+            n += 1
+    conn.execute("INSERT INTO settings (key, value) VALUES ('people.names_proper_v1', '1') ON CONFLICT DO NOTHING")
+    return n
+
+
 def sure(score) -> bool:
     return score is not None and float(score) >= voices.thresholds().match
 
@@ -134,7 +160,7 @@ def apply_summary(conn, conv_id: int, segs: list[dict], result: dict, tasks: lis
     for sp in result.get("speakers") or []:
         if not isinstance(sp, dict):
             continue
-        name = " ".join(str(sp.get("name") or "").split()).strip(" .,«»\"'")[:60]
+        name = proper(" ".join(str(sp.get("name") or "").split()).strip(" .,«»\"'")[:60])
         pid = resolve(conn, str(sp.get("voice") or ""), labels)
         if not pid:
             continue
@@ -277,7 +303,7 @@ def update_person(conn, pid: int, body: dict) -> dict | None:
     same_name = None
     with conn.transaction():
         if "name" in body:
-            name = " ".join(str(body.get("name") or "").split())[:60] or None
+            name = proper(" ".join(str(body.get("name") or "").split())[:60]) or None
             conn.execute("UPDATE people SET name = %s, updated_at = now() WHERE id = %s",
                          (crypto.seal_det(name), pid))
             if name:
@@ -319,7 +345,7 @@ def create_named(conn, name: str) -> dict:
     number = conn.execute("SELECT coalesce(max(number), 0) + 1 AS n FROM people").fetchone()["n"]
     return conn.execute(
         """INSERT INTO people (name, number, first_seen, last_seen) VALUES (%s, %s, now(), now())
-           RETURNING id, name, number, is_owner""", (crypto.seal_det(name.strip()[:60]), number)).fetchone()
+           RETURNING id, name, number, is_owner""", (crypto.seal_det(proper(name.strip()[:60])), number)).fetchone()
 
 
 def assign_segment(conn, segment_id: int, person_id: int | None = None, name: str | None = None) -> dict | None:

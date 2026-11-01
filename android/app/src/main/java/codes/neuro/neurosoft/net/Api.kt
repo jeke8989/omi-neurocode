@@ -151,6 +151,9 @@ data class TaskItem(
     val evidence: String? = null,
     /** С кем договорённость: кому я обещал или кто обещал мне. */
     val counterpart: String? = null,
+    /** Человек из «Людей», с кем договорённость (имя берётся оттуда). */
+    val counterpartId: Long? = null,
+    val counterpartNumber: Int? = null,
     /** Подтверждено «Да» в карточке. */
     val confirmedAt: String? = null,
     /** Когда выполнено — для счётчика «выполнено N из M». */
@@ -160,8 +163,10 @@ data class TaskItem(
     val theirs: Boolean get() = kind == "waiting"
 
     /** С кем: имя собеседника (служебные подписи модели не показываем). */
-    val mate: String? get() = (counterpart ?: if (theirs) assignee else null)
+    val mate: String? get() = ((counterpart ?: if (theirs) assignee else null)
         ?.takeUnless { Regex("^(владелец|пользователь|спикер|голос|неизвестн|owner|user|speaker|voice|unknown)", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+        ?.split(" ")?.joinToString(" ") { w -> w.replaceFirstChar { it.titlecase() } })
+        ?: counterpartNumber?.let { codes.neuro.neurosoft.Core.res().getString(codes.neuro.neurosoft.R.string.voice_n, it) }
 
     fun dueMillis(): Long? = try {
         dueAt?.let { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }
@@ -602,6 +607,25 @@ object Api {
     suspend fun setTaskDue(id: Long, dueAtMs: Long?) {
         val iso = dueAtMs?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString() }
         call("POST", "/api/tasks/$id", JSONObject().put("due_at", iso ?: JSONObject.NULL))
+    }
+
+    /** Исправить обещание: что, кто кому, с кем (человек из «Людей» или имя), срок — одним запросом. */
+    suspend fun updatePromise(id: Long, edit: codes.neuro.neurosoft.ui.PromiseEdit) {
+        val body = JSONObject()
+        edit.text?.let { body.put("text", it) }
+        edit.kind?.let { body.put("kind", it) }
+        if (edit.dueAt != null || edit.clearDue) {
+            body.put("due_at", edit.dueAt?.let {
+                java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString()
+            } ?: JSONObject.NULL)
+        }
+        when {
+            edit.personId != null -> body.put("counterpart_id", edit.personId)
+            edit.personName != null -> body.put("counterpart", edit.personName).put("counterpart_id", JSONObject.NULL)
+            edit.clearPerson -> body.put("counterpart", JSONObject.NULL).put("counterpart_id", JSONObject.NULL)
+        }
+        edit.nameVoice?.let { (pid, name) -> updatePerson(pid, name = name) }
+        if (body.length() > 0) call("POST", "/api/tasks/$id", body)
     }
 
     /** Черновик напоминания тому, кто обещал. */
@@ -1132,6 +1156,8 @@ object Api {
         dueAt = o.str("due_at"),
         evidence = o.str("evidence"),
         counterpart = o.str("counterpart"),
+        counterpartId = o.longOrNull("counterpart_id"),
+        counterpartNumber = if (o.isNull("counterpart_number")) null else o.optInt("counterpart_number"),
         confirmedAt = o.str("confirmed_at"),
         doneAt = o.str("done_at"),
     )

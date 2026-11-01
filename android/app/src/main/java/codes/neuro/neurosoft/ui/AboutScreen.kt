@@ -42,7 +42,7 @@ fun Wrap(spacing: Dp = 8.dp, modifier: Modifier = Modifier, content: @Composable
         var y = 0
         var rowH = 0
         val positions = placeables.map { p ->
-            if (x > 0 && x + p.width > constraints.maxWidth) {
+            if (x > 0 && constraints.hasBoundedWidth && x + p.width > constraints.maxWidth) {
                 x = 0
                 y += rowH + gap
                 rowH = 0
@@ -52,7 +52,10 @@ fun Wrap(spacing: Dp = 8.dp, modifier: Modifier = Modifier, content: @Composable
             rowH = maxOf(rowH, p.height)
             pos
         }
-        layout(constraints.maxWidth, y + rowH) { placeables.forEachIndexed { i, p -> p.place(positions[i]) } }
+        // без ограничения ширины (диалог меряет «естественный» размер) — по самой широкой строке, иначе падение
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth
+        else positions.indices.maxOfOrNull { positions[it].x + placeables[it].width } ?: 0
+        layout(width, y + rowH) { placeables.forEachIndexed { i, p -> p.place(positions[i]) } }
     }
 }
 

@@ -41,6 +41,9 @@ RULES = """Задачи — только договорённости о дей�
 • пользователь сказал, что сделает («сделаю», «отправлю завтра»), или согласился на просьбу — kind=mine;
 • другой человек пообещал сделать что-то для пользователя («пришлю договор до понедельника») — kind=waiting;
 • пользователь попросил напомнить («напомни мне вечером…», «не дай забыть…») — kind=reminder.
+who — кто ДЕЛАЕТ, with — второй участник договорённости. Просьба к пользователю («постирай, пожалуйста») —
+это его обещание: kind=mine, who=Я, with=тот, кто просил. kind=waiting — только если делать будет другой.
+Имя в with — только из расшифровки (обратились по имени или подпись говорящего); не угадывай.
 НЕ задачи: обсуждение вариантов, идеи, «надо бы», «может быть», «посмотрим», рассказы о чужих делах,
 вопросы без ответа, то, что уже сделано. Разговоры, где пользователь не участвует (телевизор, чужая беседа), — без задач.
 Одно действие — одна задача: «посмотреть билеты» и «купить билеты» на одно событие — это одна задача
@@ -131,12 +134,15 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
                 kind = "waiting"  # делает другой — для пользователя это «жду от…»
         if kind == "waiting" and not (assignee or person_id):
             conf = min(conf, 0.6)  # от кого ждём — непонятно
-        # с кем договорённость: «вы обещали Ивану», «Иван обещал вам»
+        # с кем договорённость: «вы обещали Ивану», «Иван обещал вам» — по возможности человек из «Людей»
         counterpart = assignee if kind == "waiting" else None
+        counterpart_id = person_id if kind == "waiting" and person_id and not (owner and person_id == owner["id"]) else None
         mate = " ".join(str(t.get("with") or "").split()).strip(" ?")
-        if not counterpart and mate and mate.lower() not in OWNER_WORDS and mate.lower() not in ("null", "none"):
+        if not (counterpart or counterpart_id) and mate and mate.lower() not in OWNER_WORDS \
+                and mate.lower() not in ("null", "none"):
             pid = resolve(conn, mate, labels)
             if pid and not (owner and pid == owner["id"]):
+                counterpart_id = pid
                 row = conn.execute("SELECT name FROM people WHERE id = %s", (pid,)).fetchone()
                 counterpart = row["name"] if row and row["name"] else None
             elif not pid and not GENERIC.match(mate):
@@ -150,8 +156,11 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
             same = int(same) if same not in (None, "", "null") else None
         except (TypeError, ValueError):
             same = None
+        from .people import proper  # noqa: PLC0415 — имена с большой буквы
+        assignee, counterpart = proper(assignee), proper(counterpart)
         out.append({
             "text": text, "kind": kind, "person_id": person_id, "assignee": assignee, "counterpart": counterpart,
+            "counterpart_id": counterpart_id,
             "due": (str(t.get("due")).strip()[:120] if t.get("due") not in (None, "", "null") else None),
             "due_at": parse_due(t.get("due_at")), "confidence": round(conf, 2), "evidence": evidence,
             "status": "open" if conf >= ACCEPT else "suggested", "same_as": same,
@@ -197,11 +206,11 @@ def save(conn, conv_id: int | None, tasks: list[dict], source: str) -> dict:
                 continue
         conn.execute(
             """INSERT INTO tasks (conversation_id, text, due, due_at, assignee, person_id, kind, confidence, evidence,
-                                  target, source, status, counterpart)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  target, source, status, counterpart, counterpart_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (conv_id, crypto.seal(t["text"]), crypto.seal(t["due"]), t["due_at"], crypto.seal(t["assignee"]),
              t["person_id"], t["kind"], t["confidence"], crypto.seal(t["evidence"]), t["target"], source, t["status"],
-             crypto.seal(t.get("counterpart"))))
+             crypto.seal(t.get("counterpart")), t.get("counterpart_id")))
         created += 1
     return {"created": created, "updated": updated}
 

@@ -595,6 +595,8 @@
     <string name="promise_due_today">Vence hoy</string>
     <string name="promise_due_tomorrow">Vence mañana</string>
     <string name="promise_from">De: %1$s</string>
+    <string name="promise_kind">Quién a quién</string>
+    <string name="promise_mark_done">Hecho</string>
     <string name="promise_no">No</string>
     <string name="promise_no_calendar">No se encontró una app de calendario</string>
     <string name="promise_nudge">Recordarle</string>
@@ -602,6 +604,12 @@
     <string name="promise_other_due">Otra fecha</string>
     <string name="promise_someone">alguien</string>
     <string name="promise_to">Para: %1$s</string>
+    <string name="promise_voice_name">Nombre de esta voz</string>
+    <string name="promise_was_there">Estuvo en la conversación</string>
+    <string name="promise_who_mine">A quién prometiste</string>
+    <string name="promise_who_none">Sin indicar — elegir</string>
+    <string name="promise_who_other">Otro nombre</string>
+    <string name="promise_who_theirs">Quién prometió</string>
     <string name="promise_with">Con: %1$s</string>
     <string name="promise_yes">Sí</string>
     <string name="promises_check">¿Es una promesa?</string>

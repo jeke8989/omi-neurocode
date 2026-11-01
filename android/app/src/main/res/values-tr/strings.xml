@@ -595,6 +595,8 @@
     <string name="promise_due_today">Bugün son gün</string>
     <string name="promise_due_tomorrow">Yarın son gün</string>
     <string name="promise_from">Kimden: %1$s</string>
+    <string name="promise_kind">Kim kime</string>
+    <string name="promise_mark_done">Tamamlandı</string>
     <string name="promise_no">Hayır</string>
     <string name="promise_no_calendar">Takvim uygulaması bulunamadı</string>
     <string name="promise_nudge">Hatırlat</string>
@@ -602,6 +604,12 @@
     <string name="promise_other_due">Başka tarih</string>
     <string name="promise_someone">biri</string>
     <string name="promise_to">Kime: %1$s</string>
+    <string name="promise_voice_name">Bu sesin adı</string>
+    <string name="promise_was_there">Konuşmadaydı</string>
+    <string name="promise_who_mine">Kime söz verdiniz</string>
+    <string name="promise_who_none">Belirtilmedi — seç</string>
+    <string name="promise_who_other">Başka bir ad</string>
+    <string name="promise_who_theirs">Kim söz verdi</string>
     <string name="promise_with">Kiminle: %1$s</string>
     <string name="promise_yes">Evet</string>
     <string name="promises_check">Bu bir söz mü?</string>

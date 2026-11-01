@@ -136,8 +136,8 @@ fun PlayButton(key: String, url: String, description: String, size: Dp = 40.dp, 
 @Composable
 fun personLabel(ref: PersonRef?): String = when {
     ref == null -> stringResource(R.string.voice_unknown)
-    ref.isOwner -> ref.name ?: stringResource(R.string.people_me)
-    else -> ref.name ?: stringResource(R.string.voice_n, ref.number)
+    ref.isOwner -> ref.name?.properName() ?: stringResource(R.string.people_me)
+    else -> ref.name?.properName() ?: stringResource(R.string.voice_n, ref.number)
 }
 
 /** Круг с первой буквой имени; безымянный голос — волна; у владельца — кольцо цвета линзы. */

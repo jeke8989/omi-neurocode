@@ -603,3 +603,35 @@ def test_promises_loop(conn, monkeypatch):  # noqa: F811
     mail = client.post(f"/api/conversations/{cid}/followup").json()
     assert mail["subject"] == "Итоги встречи" and "Отправить КП" in seen["user"] and "Прислать договор" in seen["user"]
     assert client.post("/api/conversations/999999/followup").status_code == 404
+
+
+def test_promise_person_fix(conn):  # noqa: F811
+    """Неверное имя в обещании: привязать к человеку из «Людей» (имя оттуда) или вписать руками; поменять направление."""
+    from neuro import crypto
+    from neuro import tasks as tasklib
+    conn.execute("DELETE FROM tasks")
+    client = Asgi(_gw().app)
+    voice = conn.execute("INSERT INTO people (number) VALUES (7) RETURNING id").fetchone()["id"]
+    out = tasklib.classify(conn, [{"text": "Постирать жилетку", "kind": "waiting", "who": "Ксеничка", "confidence": 0.9,
+                                   "evidence": "постирай, пожалуйста"}], {}, None)
+    tasklib.save(conn, None, out, "conversation")
+    t = client.get("/api/tasks?status=all").json()["items"][0]
+    assert t["kind"] == "waiting" and t["counterpart"] == "Ксеничка"
+    # это моё обещание, а просила его жена — голос 7 без имени
+    assert client.post(f"/api/tasks/{t['id']}", json={"kind": "mine", "counterpart_id": voice}).status_code == 200
+    t = client.get("/api/tasks?status=all").json()["items"][0]
+    assert t["kind"] == "mine" and t["counterpart_id"] == voice and t["counterpart"] is None and t["counterpart_number"] == 7
+    # дали голосу имя — обещание показывает его само
+    conn.execute("UPDATE people SET name = %s WHERE id = %s", (crypto.seal_det("Ксения"), voice))
+    assert client.get("/api/tasks?status=all").json()["items"][0]["counterpart"] == "Ксения"
+    # просто имя руками — с большой буквы
+    client.post(f"/api/tasks/{t['id']}", json={"counterpart": "мама"})
+    t = client.get("/api/tasks?status=all").json()["items"][0]
+    assert t["counterpart"] == "Мама" and t["counterpart_id"] is None
+    # старые имена с маленькой буквы — исправляются один раз
+    from neuro import people as peoplelib
+    conn.execute("DELETE FROM settings WHERE key = 'people.names_proper_v1'")
+    conn.execute("UPDATE people SET name = %s WHERE id = %s", (crypto.seal_det("папа"), voice))
+    assert peoplelib.capitalize_names_once(conn) >= 1 and peoplelib.capitalize_names_once(conn) == 0
+    assert conn.execute("SELECT name FROM people WHERE id = %s", (voice,)).fetchone()["name"] == "Папа"
+    assert client.post(f"/api/tasks/{t['id']}", json={"counterpart_id": "x"}).status_code == 400
