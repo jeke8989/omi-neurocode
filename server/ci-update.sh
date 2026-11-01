@@ -179,9 +179,9 @@ diag() {
   local tb
   tb=$(for sv in gateway stt agent; do
          docker compose logs "$sv" --tail 400 2>&1 | grep -E '^\S+\s+\|\s+(  File "/app/[^"]+", line [0-9]+, in \w+|(Attribute|Type|Key|Name|Index|Value)Error: )' \
-           | sed -E 's/^\S+\s+\|\s+//; s/(Error: .{0,90}).*/\1/' | tail -4 | sed "s/^/$sv: /"
-       done | tr '\n' ' ' | cut -c1-900)
-  [ -n "$tb" ] && echo "::notice title=Последняя ошибка::$tb"
+           | sed -E 's/^\S+\s+\|\s+//; s/(Error: .{0,90}).*/\1/' | tail -4 | sed "s/^/$sv: /" || true
+       done | tr '\n' ' ' | cut -c1-900 || true)
+  if [ -n "$tb" ]; then echo "::notice title=Последняя ошибка::$tb"; fi
   # расход ИИ — только цифры по задачам и моделям, без содержимого
   local q
   q="SELECT task || ' ' || model || ' вызовов=' || count(*) || ' вход=' || coalesce(sum(prompt_tokens),0)
