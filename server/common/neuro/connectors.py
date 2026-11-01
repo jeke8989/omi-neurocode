@@ -332,7 +332,7 @@ def _parse(r: requests.Response) -> dict:
 def refresh_tools(conn, cid: str) -> list[dict]:
     result = _rpc(conn, cid, "tools/list")
     tools = [{"name": t["name"], "title": (t.get("annotations") or {}).get("title") or t.get("title") or t["name"],
-              "description": (t.get("description") or "")[:1000], "access": tool_access(t),
+              "description": (t.get("description") or "")[:700], "access": tool_access(t),
               "schema": t.get("inputSchema") or {"type": "object", "properties": {}}}
              for t in result.get("tools") or [] if t.get("name")]
     _save(conn, cid, tools=tools)
@@ -369,10 +369,47 @@ def mentioned(text: str | None) -> set[str]:
     return {cid for cid, c in CATALOG.items() if any(k in q for k in c["keywords"])}
 
 
-def tool_specs(conn, question: str | None = None, only: str | None = None) -> tuple[list[dict], dict]:
+TOOL_LIMIT = 8  # у Notion ~70 инструментов: все сразу — ~30 тыс. токенов на каждый шаг ассистента
+PICK_SYSTEM = ("Выбери инструменты сервиса, которые нужны для задачи пользователя. Верни строго JSON "
+               '{"tools": ["имя", ...]} — до 8 имён точно как в списке, самые нужные первыми. Нужно создать или '
+               "изменить — бери и инструменты поиска/чтения, чтобы найти место; только найти или прочитать — только их.")
+BASE_RANK = ("search", "fetch", "create", "update", "comment", "get", "list")
+
+
+def _rank(t: dict) -> int:
+    name = t["name"].lower()
+    return next((i for i, k in enumerate(BASE_RANK) if k in name), len(BASE_RANK))
+
+
+def _brief(t: dict) -> str:
+    lines = (t.get("description") or "").strip().splitlines()
+    return f"{t['name']}: {lines[0][:140] if lines else ''}"
+
+
+def pick_tools(conn, tools: list[dict], need: str) -> list[dict]:
+    """Нужные для задачи инструменты (до TOOL_LIMIT): выбирает самая дешёвая модель по коротким описаниям."""
+    if len(tools) <= TOOL_LIMIT:
+        return tools
+    from . import llm  # noqa: PLC0415
+
+    names: list[str] = []
+    try:
+        res = llm.chat_json(conn, "remember", PICK_SYSTEM, f"Задача: {(need or '')[:1500]}\n\nИнструменты:\n"
+                            + "\n".join(_brief(t) for t in tools), timeout=40, fast=True, usage="tool_pick")
+        names = [str(n) for n in res.get("tools") or [] if n]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("tool pick failed: %s", exc)
+    by_name = {t["name"]: t for t in tools}
+    chosen = [by_name[n] for n in dict.fromkeys(names) if n in by_name][:TOOL_LIMIT]
+    return chosen or sorted(tools, key=_rank)[:TOOL_LIMIT]
+
+
+def tool_specs(conn, question: str | None = None, only: str | None = None,
+               need: str | None = None) -> tuple[list[dict], dict]:
     """Инструменты подключённых сервисов. question — показываем только сервисы, о которых спрашивают
     (иначе каждый вопрос тянул бы десятки чужих описаний и стоил дороже). Действия, которые пользователь
-    выключил («просматривать», «создавать и изменять»), ассистенту не показываем вовсе."""
+    выключил («просматривать», «создавать и изменять»), ассистенту не показываем вовсе. Инструментов
+    много — только нужные для задачи (need или вопрос)."""
     wanted = mentioned(question)
     specs, index = [], {}
     for r in conn.execute("SELECT id, tools, settings FROM connections WHERE status = 'connected'").fetchall():
@@ -387,9 +424,8 @@ def tool_specs(conn, question: str | None = None, only: str | None = None) -> tu
                 tools = refresh_tools(conn, r["id"])
             except Exception as exc:  # noqa: BLE001
                 log.warning("%s: tools unavailable: %s", r["id"], exc)
+        tools = pick_tools(conn, [t for t in tools if allowed(r["settings"], tool_access(t))], need or question or "")
         for t in tools:
-            if not allowed(r["settings"], tool_access(t)):
-                continue
             schema = t.get("schema") if isinstance(t.get("schema"), dict) else {}
             if schema.get("type") != "object":
                 schema = {"type": "object", "properties": {}}
@@ -405,7 +441,8 @@ def send_task(conn, cid: str, task: dict) -> tuple[bool, str]:
     """Новая задача -> сервис: короткий запуск модели только с инструментами этого сервиса."""
     from . import llm  # noqa: PLC0415
 
-    specs, index = tool_specs(conn, only=cid)
+    specs, index = tool_specs(conn, only=cid, need="найти базу или страницу задач и добавить туда новую задачу: "
+                              + str(task.get("text") or ""))
     if not specs:
         return False, "нет инструментов сервиса"
     row = _row(conn, cid) or {}

@@ -365,14 +365,14 @@ def execute(conn, run_id: int) -> str:
         recent = " ".join(str(m.get("content") or "") for m in hist[-4:])
         conn_specs, conn_index = connectors.tool_specs(conn, f"{run['question']} {recent}")
         services = connectors.services(conn)
-        loaded = {v[0] for v in conn_index.values()}
-        later = [sv for sv in services if sv["id"] not in loaded and (sv["read"] or sv["write"])]
+        usable = [sv for sv in services if sv["read"] or sv["write"]]
         tools = BUILTIN_TOOLS + ext_specs + conn_specs
-        if later:
-            tools.append(_fn("use_service", "Подключить инструменты сервиса пользователя (" + ", ".join(
-                sv["name"] for sv in later) + "): найти, прочитать, создать или изменить там что-то. После вызова "
-                "инструменты сервиса появятся в списке.", {"service": {"type": "string", "enum": [sv["id"] for sv in later]}},
-                ["service"]))
+        if usable:  # подключить (или добавить) инструменты сервиса под конкретное дело
+            tools.append(_fn("use_service", "Получить инструменты сервиса пользователя (" + ", ".join(
+                sv["name"] for sv in usable) + ") под задачу: найти, прочитать, создать или изменить там что-то. "
+                "need — что именно нужно сделать (подробно). Не хватает инструмента — вызови снова с другим need.",
+                {"service": {"type": "string", "enum": [sv["id"] for sv in usable]},
+                 "need": {"type": "string", "description": "что нужно сделать в сервисе"}}, ["service", "need"]))
 
         context = build_context(conn, device_id) if device_id else ""
         messages = [{"role": "system", "content": system_prompt(level, channel, lang) + "\n" + profile.prompt(conn)}]
@@ -434,13 +434,18 @@ def execute(conn, run_id: int) -> str:
                 if name == "use_service":
                     cid = str(args.get("service") or "")
                     sv = next((x for x in services if x["id"] == cid), None)
-                    specs, idx = connectors.tool_specs(conn, only=cid) if sv else ([], {})
+                    need = str(args.get("need") or run["question"])
+                    specs, idx = connectors.tool_specs(conn, only=cid, need=need) if sv else ([], {})
                     fresh = [x for x in specs if x["function"]["name"] not in conn_index]
                     tools.extend(fresh)
                     conn_index.update(idx)
                     step(conn, run_id, "tool", f"{sv['icon']} {sv['name']}" if sv else name)
-                    result = (f"Инструменты {sv['name']} подключены: " + ", ".join(v[2].split(": ", 1)[-1] for v in idx.values())
-                              if fresh else "Нет доступных инструментов: сервис не подключён или действия выключены.")
+                    if fresh:
+                        result = f"Инструменты {sv['name']} добавлены: " + ", ".join(x["function"]["name"] for x in fresh)
+                    elif specs:
+                        result = "Эти инструменты уже есть в списке — пользуйся ими."
+                    else:
+                        result = "Нет доступных инструментов: сервис не подключён или действия выключены пользователем."
                 elif name in conn_index:
                     cid, tool, title = conn_index[name]
                     step(conn, run_id, "tool", title, json.dumps(args, ensure_ascii=False))

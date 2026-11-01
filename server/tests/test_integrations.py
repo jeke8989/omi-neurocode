@@ -334,3 +334,26 @@ def test_profile_voice_and_important(conn):  # noqa: F811
     assert [i["id"] for i in client.get("/api/important").json()["items"]] == [cid]
     client.post(f"/api/conversations/{cid}/important", json={"on": False})
     assert client.get("/api/important").json()["items"] == []
+
+
+def test_service_tools_are_picked_for_the_task(conn, monkeypatch):  # noqa: F811
+    """У Notion десятки инструментов: модели уходят только нужные для задачи (иначе ~30 тыс. токенов на шаг)."""
+    from neuro import connectors, llm
+    tools = [{"name": f"notion-tool-{i}", "description": f"Tool {i}\nlong text", "access": "read"} for i in range(30)]
+    tools += [{"name": "notion-search", "description": "Search", "access": "read"},
+              {"name": "notion-create-pages", "description": "Create pages", "access": "write"}]
+    asked = []
+
+    def fake_json(conn_, task, system, user, **kw):
+        asked.append((task, user, kw.get("usage")))
+        return {"tools": ["notion-create-pages", "notion-search", "нет такого"]}
+
+    monkeypatch.setattr(llm, "chat_json", fake_json)
+    chosen = connectors.pick_tools(conn, tools, "создай страницу с планом")
+    assert [t["name"] for t in chosen] == ["notion-create-pages", "notion-search"]
+    task, user, usage = asked[0]
+    assert task == "remember" and usage == "tool_pick" and "создай страницу" in user and "long text" not in user
+    # модель недоступна — берём базовые: поиск, чтение, создание…
+    monkeypatch.setattr(llm, "chat_json", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    fallback = [t["name"] for t in connectors.pick_tools(conn, tools, "что-то")]
+    assert fallback[:2] == ["notion-search", "notion-create-pages"] and len(fallback) == connectors.TOOL_LIMIT
