@@ -55,7 +55,7 @@ object EveningDigest {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         nm.createNotificationChannel(NotificationChannel(CHANNEL, r.getString(R.string.evening_channel),
             NotificationManager.IMPORTANCE_DEFAULT))
-        val open = PendingIntent.getActivity(context, 4, Intent(context, MainActivity::class.java).putExtra("open", "tasks"),
+        val tap = PendingIntent.getActivity(context, 4, Intent(context, MainActivity::class.java).putExtra("open", "tasks"),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_neuro)
@@ -63,7 +63,7 @@ object EveningDigest {
             .setContentText(text.lineSequence().firstOrNull { it.startsWith("•") }?.removePrefix("• ") ?: text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
-            .setContentIntent(open)
+            .setContentIntent(tap)
             .build()
         try {
             nm.notify(901, n)
