@@ -37,30 +37,60 @@ object PromiseActions {
         context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    /** В календарь в одно касание: календарь подключён — сразу, иначе — экран новой встречи в календаре. */
-    fun toCalendar(context: Context, t: TaskItem) {
-        val begin = t.dueMillis() ?: (System.currentTimeMillis() + 3600_000L)
-        val end = begin + 30 * 60_000L
-        val title = t.text
-        val notes = listOfNotNull(t.mate?.let { context.getString(R.string.promise_with, it) }, t.evidence?.let { "«$it»" })
-            .joinToString("\n")
-        if (Core.prefs.calendarOn && PhoneCalendar.granted(context)) {
-            try {
-                PhoneCalendar.addEvent(context, title, begin, end, notes)
-                Toast.makeText(context, R.string.promise_calendar_added, Toast.LENGTH_SHORT).show()
-                return
-            } catch (_: Exception) {
-            }
-        }
+    /** Без доступа к календарю: экран новой встречи в приложении календаря (метки «в календаре» не будет). */
+    fun toCalendarApp(context: Context, t: TaskItem, minutes: Int) {
+        val begin = t.dueMillis() ?: nextHour()
         try {
             context.startActivity(Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
-                .putExtra(CalendarContract.Events.TITLE, title).putExtra(CalendarContract.Events.DESCRIPTION, notes)
-                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
+                .putExtra(CalendarContract.Events.TITLE, t.text).putExtra(CalendarContract.Events.DESCRIPTION, notes(context, t))
+                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, begin + minutes * 60_000L)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
             Toast.makeText(context, R.string.promise_no_calendar, Toast.LENGTH_SHORT).show()
         }
     }
+
+    private fun nextHour(): Long {
+        val h = 3600_000L
+        return (System.currentTimeMillis() / h + 1) * h
+    }
+
+    private fun notes(context: Context, t: TaskItem) =
+        listOfNotNull(t.mate?.let { context.getString(R.string.promise_with, it) }, t.evidence?.let { "«$it»" })
+            .joinToString("\n")
+
+    /**
+     * Обещание и календарь — заодно: нужно в календаре и ещё нет — встреча создаётся (с напоминанием);
+     * уже есть — переезжает вместе со сроком и названием; больше не нужно — удаляется. t — уже с новым
+     * текстом и сроком. Встреча — того размера, что выбран (по умолчанию 30 минут).
+     */
+    suspend fun syncCalendar(context: Context, t: TaskItem, want: Boolean, minutes: Int) =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (!PhoneCalendar.granted(context) || t.id == 0L) return@withContext
+            val begin = t.dueMillis() ?: nextHour()
+            val end = begin + minutes * 60_000L
+            val existing = t.calendarEventId?.takeIf { t.inCalendar }
+            try {
+                when {
+                    want && existing == null -> {
+                        val id = PhoneCalendar.addEvent(context, t.text, begin, end, notes(context, t))
+                        codes.neuro.neurosoft.net.Api.setTaskCalendar(t.id, id, minutes)
+                    }
+                    want && existing != null -> {
+                        PhoneCalendar.moveEvent(context, existing, begin, end, t.text)
+                        codes.neuro.neurosoft.net.Api.setTaskCalendar(t.id, existing, minutes)
+                    }
+                    !want && t.calendarEventId != null -> {
+                        PhoneCalendar.removeEvent(context, t.calendarEventId)
+                        codes.neuro.neurosoft.net.Api.setTaskCalendar(t.id, null)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("Mnemo", "promise calendar sync failed", e)
+            }
+            PhoneCalendar.sync(context, force = true)
+        }
 
     private fun at(date: LocalDate, time: LocalTime): Long =
         LocalDateTime.of(date, time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()

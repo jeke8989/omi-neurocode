@@ -498,3 +498,6 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ;
 -- с кем договорённость — человек из «Людей» (по голосу): переименовали человека — имя в обещании тоже новое
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS counterpart_id BIGINT REFERENCES people(id) ON DELETE SET NULL;
+-- обещание в календаре телефона: id встречи и её длительность (минуты)
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS calendar_event_id BIGINT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS calendar_minutes INTEGER;

@@ -646,3 +646,22 @@ def test_promise_created_by_hand(conn):  # noqa: F811
     t = client.get("/api/tasks?status=all").json()["items"][0]
     assert t["id"] == r["id"] and t["counterpart"] == "Олег" and t["source"] == "manual" and t["confirmed_at"]
     assert t["due_at"].startswith("2026-11-05T")
+
+
+def test_promise_in_calendar_mark(conn):  # noqa: F811
+    conn.execute("DELETE FROM tasks")
+    conn.execute("DELETE FROM calendar_events")
+    conn.execute("DELETE FROM settings WHERE key LIKE 'calendar.%%'")
+    client = Asgi(_gw().app)
+    tid = client.post("/api/tasks", json={"text": "Созвон с Настей", "due_at": "2026-11-02T10:00"}).json()["id"]
+    assert client.get("/api/tasks?status=all").json()["items"][0]["in_calendar"] is False
+    client.post(f"/api/tasks/{tid}", json={"calendar_event_id": 501, "calendar_minutes": 30})
+    t = client.get("/api/tasks?status=all").json()["items"][0]
+    assert t["in_calendar"] is True and t["calendar_event_id"] == 501 and t["calendar_minutes"] == 30
+    # календарь подключён, встречу удалили в календаре (её нет после синхронизации) — метка пропадает
+    conn.execute("INSERT INTO settings (key, value) VALUES ('calendar.on', '1')")
+    conn.execute("UPDATE tasks SET updated_at = now() - interval '1 hour'")
+    assert client.get("/api/tasks?status=all").json()["items"][0]["in_calendar"] is False
+    client.post(f"/api/tasks/{tid}", json={"calendar_event_id": None})
+    assert client.get("/api/tasks?status=all").json()["items"][0]["calendar_event_id"] is None
+    conn.execute("DELETE FROM settings WHERE key = 'calendar.on'")

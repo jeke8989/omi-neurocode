@@ -99,6 +99,27 @@ fun CalendarScreen() {
                         }, icon = Icons.Edit, subtitle = stringResource(R.string.calendar_write_sub))
                     }
                 }
+                // встречи, которые создаёт Mnemo: длительность по умолчанию и напоминание (оно ставится всегда)
+                var length by remember { mutableStateOf(Core.prefs.calendarDefaultMin) }
+                var alarm by remember { mutableStateOf(Core.prefs.calendarReminderMin) }
+                Group(stringResource(R.string.calendar_new_events), inset = 56.dp) {
+                    item { ListRow(stringResource(R.string.calendar_length), icon = Icons.Clock) }
+                }
+                Wrap(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+                    listOf(15, 30, 60, 120).forEach { m ->
+                        Chip(if (m < 60) stringResource(R.string.minutes_n, m) else stringResource(R.string.hours_n, m / 60),
+                            length == m, { length = m; Core.prefs.calendarDefaultMin = m })
+                    }
+                }
+                Group(inset = 56.dp) {
+                    item { ListRow(stringResource(R.string.calendar_alarm), icon = Icons.Bell) }
+                }
+                Wrap(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
+                    listOf(5, 10, 15, 30, 60).forEach { m ->
+                        Chip(stringResource(R.string.calendar_alarm_before, if (m < 60) stringResource(R.string.minutes_n, m)
+                            else stringResource(R.string.hours_n, m / 60)), alarm == m, { alarm = m; Core.prefs.calendarReminderMin = m })
+                    }
+                }
                 if (s.calendars.size > 1) {
                     Group(stringResource(R.string.calendar_target), inset = 56.dp) {
                         val chosen = s.target ?: s.calendars.firstOrNull { it.primary }?.id

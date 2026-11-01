@@ -46,8 +46,12 @@
     <string name="button_actions_sub">Одно нажатие — вопрос ассистенту</string>
     <string name="button_footer">Нажмите один раз и задайте вопрос: ответ прозвучит в наушнике. Нажмите ещё раз, когда договорили; нажатие во время ответа его остановит.</string>
     <string name="by_voice">голосом</string>
+    <string name="calendar_alarm">Напоминание — всегда</string>
+    <string name="calendar_alarm_before">за %1$s</string>
     <string name="calendar_denied">Без доступа к календарю подключить не получится</string>
     <string name="calendar_hint">Точкой отмечены дни с записями</string>
+    <string name="calendar_length">Длительность по умолчанию</string>
+    <string name="calendar_new_events">Встречи от Mnemo</string>
     <string name="calendar_off_q">Отключить календарь?</string>
     <string name="calendar_read_sub">Видеть встречи и расписание</string>
     <string name="calendar_sub">Встречи из календаря телефона: Google, Samsung, Outlook</string>
@@ -265,6 +269,7 @@
     <string name="headphones_on">Сейчас наушники подключены</string>
     <string name="hide">Скрыть</string>
     <string name="highlights">Основные моменты</string>
+    <string name="hours_n">%1$d ч</string>
     <string name="how_to_use">Как пользоваться</string>
     <string name="howto_light">Огонёк в приложении</string>
     <string name="howto_light_amber">Янтарный: нет связи с кулоном или сервером, записи ждут в очереди</string>
@@ -432,6 +437,7 @@
     <string name="mic_gain">Усиление микрофона</string>
     <string name="mic_gain_sub">Громче — лучше слышно тихую речь, но больше шума</string>
     <string name="mic_on_today">Микрофон работал сегодня</string>
+    <string name="minutes_n">%1$d мин</string>
     <string name="model_number">Модель</string>
     <string name="model_search_hint">Поиск: claude, gemini, deepseek…</string>
     <string name="models_agent">Ассистент</string>
@@ -584,6 +590,9 @@
     <string name="promise_add">Добавить</string>
     <string name="promise_calendar">В календарь</string>
     <string name="promise_calendar_added">Добавлено в календарь</string>
+    <string name="promise_calendar_alarm">Напоминание за %1$d мин</string>
+    <string name="promise_calendar_no_due">Срока нет — встреча через час</string>
+    <string name="promise_calendar_open">Открыть в календаре</string>
     <string name="promise_card_mine">Вы обещали</string>
     <string name="promise_card_mine_to">Вы обещали — %1$s</string>
     <string name="promise_card_reminder">Напомнить вам</string>
@@ -596,6 +605,7 @@
     <string name="promise_due_today">Сегодня срок</string>
     <string name="promise_due_tomorrow">Завтра срок</string>
     <string name="promise_from">От: %1$s</string>
+    <string name="promise_in_calendar">В календаре</string>
     <string name="promise_kind">Кто кому</string>
     <string name="promise_mark_done">Выполнено</string>
     <string name="promise_new">Новое обещание</string>
@@ -607,6 +617,7 @@
     <string name="promise_other_due">Другой срок</string>
     <string name="promise_someone">собеседник</string>
     <string name="promise_to">Кому: %1$s</string>
+    <string name="promise_to_calendar">Добавить в календарь</string>
     <string name="promise_voice_name">Как зовут этот голос</string>
     <string name="promise_was_there">Был в разговоре</string>
     <string name="promise_who_mine">Кому вы обещали</string>

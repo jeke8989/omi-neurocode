@@ -134,7 +134,7 @@ CALENDAR_WRITE = [
     _fn("calendar_add", "Добавить встречу в календарь пользователя (появится на телефоне в течение минуты).",
         {"title": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
          "end": {"type": "string", "description": "YYYY-MM-DD HH:MM; нет — по duration_min"},
-         "duration_min": {"type": "integer", "description": "по умолчанию 60"},
+         "duration_min": {"type": "integer", "description": "по умолчанию 30"},
          "all_day": {"type": "boolean"}, "location": {"type": "string"},
          "notes": {"type": "string", "description": "описание: о чём встреча, ссылки"}}, ["title", "start"]),
     _fn("calendar_change", "Перенести или переименовать встречу ([встреча N] из calendar).",
@@ -285,7 +285,7 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
         start = calendarlib.parse_when(args.get("start"))
         if start is None:
             return "Не понял время начала: нужно YYYY-MM-DD HH:MM."
-        end = calendarlib.parse_when(args.get("end")) or start + timedelta(minutes=int(args.get("duration_min") or 60))
+        end = calendarlib.parse_when(args.get("end")) or start + timedelta(minutes=int(args.get("duration_min") or 30))
         st = calendarlib.status(conn)
         payload = {"title": str(args.get("title") or "")[:300], "begin": int(start.timestamp() * 1000),
                    "end": int(max(end, start).timestamp() * 1000), "all_day": bool(args.get("all_day")),

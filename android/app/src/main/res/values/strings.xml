@@ -47,8 +47,12 @@
     <string name="button_actions_sub">One press asks the assistant</string>
     <string name="button_footer">Press once and ask: the answer plays in your headphones. Press again when you\'re done; pressing during the answer stops it.</string>
     <string name="by_voice">by voice</string>
+    <string name="calendar_alarm">Reminder — always</string>
+    <string name="calendar_alarm_before">%1$s before</string>
     <string name="calendar_denied">Calendar access is needed to connect</string>
     <string name="calendar_hint">Dots mark days with recordings</string>
+    <string name="calendar_length">Default length</string>
+    <string name="calendar_new_events">Meetings from Mnemo</string>
     <string name="calendar_off_q">Disconnect the calendar?</string>
     <string name="calendar_read_sub">See meetings and the schedule</string>
     <string name="calendar_sub">Meetings from your phone\'s calendar: Google, Samsung, Outlook</string>
@@ -266,6 +270,7 @@
     <string name="headphones_on">Headphones are connected now</string>
     <string name="hide">Hide</string>
     <string name="highlights">Highlights</string>
+    <string name="hours_n">%1$d h</string>
     <string name="how_to_use">How to use</string>
     <string name="howto_light">The light in the app</string>
     <string name="howto_light_amber">Amber: no connection to the pendant or server; recordings wait in the queue</string>
@@ -433,6 +438,7 @@
     <string name="mic_gain">Microphone gain</string>
     <string name="mic_gain_sub">Higher picks up quiet speech better, with more noise</string>
     <string name="mic_on_today">Microphone on today</string>
+    <string name="minutes_n">%1$d min</string>
     <string name="model_number">Model</string>
     <string name="model_search_hint">Search: claude, gemini, deepseek…</string>
     <string name="models_agent">Assistant</string>
@@ -585,6 +591,9 @@
     <string name="promise_add">Add</string>
     <string name="promise_calendar">To calendar</string>
     <string name="promise_calendar_added">Added to the calendar</string>
+    <string name="promise_calendar_alarm">Reminder %1$d min before</string>
+    <string name="promise_calendar_no_due">No due date — in an hour</string>
+    <string name="promise_calendar_open">Open in the calendar</string>
     <string name="promise_card_mine">You promised</string>
     <string name="promise_card_mine_to">You promised %1$s</string>
     <string name="promise_card_reminder">Remind you</string>
@@ -597,6 +606,7 @@
     <string name="promise_due_today">Due today</string>
     <string name="promise_due_tomorrow">Due tomorrow</string>
     <string name="promise_from">From: %1$s</string>
+    <string name="promise_in_calendar">In the calendar</string>
     <string name="promise_kind">Who to whom</string>
     <string name="promise_mark_done">Done</string>
     <string name="promise_new">New promise</string>
@@ -608,6 +618,7 @@
     <string name="promise_other_due">Other date</string>
     <string name="promise_someone">someone</string>
     <string name="promise_to">To: %1$s</string>
+    <string name="promise_to_calendar">Add to the calendar</string>
     <string name="promise_voice_name">Name of this voice</string>
     <string name="promise_was_there">Was in the conversation</string>
     <string name="promise_who_mine">Who you promised</string>

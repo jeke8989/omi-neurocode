@@ -151,6 +151,10 @@ data class TaskItem(
     val evidence: String? = null,
     /** С кем договорённость: кому я обещал или кто обещал мне. */
     val counterpart: String? = null,
+    /** Встреча в календаре телефона: id, длительность; inCalendar — она ещё есть в календаре. */
+    val calendarEventId: Long? = null,
+    val calendarMinutes: Int? = null,
+    val inCalendar: Boolean = false,
     /** Человек из «Людей», с кем договорённость (имя берётся оттуда). */
     val counterpartId: Long? = null,
     val counterpartNumber: Int? = null,
@@ -626,6 +630,13 @@ object Api {
         }
         edit.nameVoice?.let { (pid, name) -> updatePerson(pid, name = name) }
         if (body.length() > 0) call("POST", "/api/tasks/$id", body)
+    }
+
+    /** Встреча в календаре для обещания (null — убрали из календаря). */
+    suspend fun setTaskCalendar(id: Long, eventId: Long?, minutes: Int? = null) {
+        val body = JSONObject().put("calendar_event_id", eventId ?: JSONObject.NULL)
+        minutes?.let { body.put("calendar_minutes", it) }
+        call("POST", "/api/tasks/$id", body)
     }
 
     /** Новое обещание вручную. Возвращает его id. */
@@ -1169,6 +1180,9 @@ object Api {
         evidence = o.str("evidence"),
         counterpart = o.str("counterpart"),
         counterpartId = o.longOrNull("counterpart_id"),
+        calendarEventId = o.longOrNull("calendar_event_id"),
+        calendarMinutes = if (o.isNull("calendar_minutes")) null else o.optInt("calendar_minutes"),
+        inCalendar = o.optBoolean("in_calendar"),
         counterpartNumber = if (o.isNull("counterpart_number")) null else o.optInt("counterpart_number"),
         confirmedAt = o.str("confirmed_at"),
         doneAt = o.str("done_at"),

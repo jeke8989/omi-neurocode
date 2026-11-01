@@ -104,6 +104,16 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_agent", null) ?: if (chatLevel.startsWith("claude")) "claude" else "mnemo"
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
+    /** Напоминание у встреч, которые создаёт Mnemo: за сколько минут. */
+    var calendarReminderMin: Int
+        get() = sp.getInt("calendar_reminder_min", 15)
+        set(value) = sp.edit().putInt("calendar_reminder_min", value).apply()
+
+    /** Длительность встречи из обещания по умолчанию (минуты). */
+    var calendarDefaultMin: Int
+        get() = sp.getInt("calendar_default_min", 30)
+        set(value) = sp.edit().putInt("calendar_default_min", value).apply()
+
     /** Вечером в 21:00 — «что вы пообещали сегодня». */
     var eveningDigest: Boolean
         get() = sp.getBoolean("evening_digest", true)

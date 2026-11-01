@@ -46,8 +46,12 @@
     <string name="button_actions_sub">Tek basış asistana soru sorar</string>
     <string name="button_footer">Bir kez basıp sorun: cevap kulaklıkta çalar. Bitirince tekrar basın; cevap sırasında basarsanız durur.</string>
     <string name="by_voice">sesle</string>
+    <string name="calendar_alarm">Hatırlatma — her zaman</string>
+    <string name="calendar_alarm_before">%1$s önce</string>
     <string name="calendar_denied">Bağlanmak için takvim erişimi gerekli</string>
     <string name="calendar_hint">Noktalar kayıt olan günleri gösterir</string>
+    <string name="calendar_length">Varsayılan süre</string>
+    <string name="calendar_new_events">Mnemo\'dan toplantılar</string>
     <string name="calendar_off_q">Takvim bağlantısı kesilsin mi?</string>
     <string name="calendar_read_sub">Toplantıları ve programı görme</string>
     <string name="calendar_sub">Telefon takviminden toplantılar: Google, Samsung, Outlook</string>
@@ -265,6 +269,7 @@
     <string name="headphones_on">Şu an kulaklık bağlı</string>
     <string name="hide">Gizle</string>
     <string name="highlights">Öne çıkanlar</string>
+    <string name="hours_n">%1$d sa</string>
     <string name="how_to_use">Nasıl kullanılır</string>
     <string name="howto_light">Uygulamadaki ışık</string>
     <string name="howto_light_amber">Kehribar: kolye ya da sunucuyla bağlantı yok; kayıtlar sırada bekler</string>
@@ -432,6 +437,7 @@
     <string name="mic_gain">Mikrofon kazancı</string>
     <string name="mic_gain_sub">Yüksek ayar sessiz konuşmayı daha iyi alır ama gürültü artar</string>
     <string name="mic_on_today">Mikrofon bugün açıktı</string>
+    <string name="minutes_n">%1$d dk</string>
     <string name="model_number">Model</string>
     <string name="model_search_hint">Ara: claude, gemini, deepseek…</string>
     <string name="models_agent">Asistan</string>
@@ -584,6 +590,9 @@
     <string name="promise_add">Ekle</string>
     <string name="promise_calendar">Takvime</string>
     <string name="promise_calendar_added">Takvime eklendi</string>
+    <string name="promise_calendar_alarm">%1$d dk önce hatırlatma</string>
+    <string name="promise_calendar_no_due">Son tarih yok — bir saat sonra</string>
+    <string name="promise_calendar_open">Takvimde aç</string>
     <string name="promise_card_mine">Söz verdiniz</string>
     <string name="promise_card_mine_to">Söz verdiniz: %1$s</string>
     <string name="promise_card_reminder">Size hatırlat</string>
@@ -596,6 +605,7 @@
     <string name="promise_due_today">Bugün son gün</string>
     <string name="promise_due_tomorrow">Yarın son gün</string>
     <string name="promise_from">Kimden: %1$s</string>
+    <string name="promise_in_calendar">Takvimde</string>
     <string name="promise_kind">Kim kime</string>
     <string name="promise_mark_done">Tamamlandı</string>
     <string name="promise_new">Yeni söz</string>
@@ -607,6 +617,7 @@
     <string name="promise_other_due">Başka tarih</string>
     <string name="promise_someone">biri</string>
     <string name="promise_to">Kime: %1$s</string>
+    <string name="promise_to_calendar">Takvime ekle</string>
     <string name="promise_voice_name">Bu sesin adı</string>
     <string name="promise_was_there">Konuşmadaydı</string>
     <string name="promise_who_mine">Kime söz verdiniz</string>

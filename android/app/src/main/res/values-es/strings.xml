@@ -46,8 +46,12 @@
     <string name="button_actions_sub">Una pulsación pregunta al asistente</string>
     <string name="button_footer">Pulsa una vez y pregunta: la respuesta suena en tus auriculares. Pulsa otra vez al terminar; si pulsas durante la respuesta, se detiene.</string>
     <string name="by_voice">por voz</string>
+    <string name="calendar_alarm">Aviso, siempre</string>
+    <string name="calendar_alarm_before">%1$s antes</string>
     <string name="calendar_denied">Se necesita acceso al calendario para conectar</string>
     <string name="calendar_hint">Los puntos marcan los días con grabaciones</string>
+    <string name="calendar_length">Duración por defecto</string>
+    <string name="calendar_new_events">Reuniones de Mnemo</string>
     <string name="calendar_off_q">¿Desconectar el calendario?</string>
     <string name="calendar_read_sub">Ver reuniones y la agenda</string>
     <string name="calendar_sub">Reuniones del calendario del teléfono: Google, Samsung, Outlook</string>
@@ -265,6 +269,7 @@
     <string name="headphones_on">Ahora hay auriculares conectados</string>
     <string name="hide">Ocultar</string>
     <string name="highlights">Momentos destacados</string>
+    <string name="hours_n">%1$d h</string>
     <string name="how_to_use">Cómo usarlo</string>
     <string name="howto_light">La luz en la app</string>
     <string name="howto_light_amber">Ámbar: sin conexión con el colgante o el servidor; las grabaciones esperan en cola</string>
@@ -432,6 +437,7 @@
     <string name="mic_gain">Ganancia del micrófono</string>
     <string name="mic_gain_sub">Más alto capta mejor la voz baja, pero con más ruido</string>
     <string name="mic_on_today">Micrófono activo hoy</string>
+    <string name="minutes_n">%1$d min</string>
     <string name="model_number">Modelo</string>
     <string name="model_search_hint">Buscar: claude, gemini, deepseek…</string>
     <string name="models_agent">Asistente</string>
@@ -584,6 +590,9 @@
     <string name="promise_add">Añadir</string>
     <string name="promise_calendar">Al calendario</string>
     <string name="promise_calendar_added">Añadido al calendario</string>
+    <string name="promise_calendar_alarm">Aviso %1$d min antes</string>
+    <string name="promise_calendar_no_due">Sin plazo: dentro de una hora</string>
+    <string name="promise_calendar_open">Abrir en el calendario</string>
     <string name="promise_card_mine">Prometiste</string>
     <string name="promise_card_mine_to">Prometiste a %1$s</string>
     <string name="promise_card_reminder">Recordarte</string>
@@ -596,6 +605,7 @@
     <string name="promise_due_today">Vence hoy</string>
     <string name="promise_due_tomorrow">Vence mañana</string>
     <string name="promise_from">De: %1$s</string>
+    <string name="promise_in_calendar">En el calendario</string>
     <string name="promise_kind">Quién a quién</string>
     <string name="promise_mark_done">Hecho</string>
     <string name="promise_new">Nueva promesa</string>
@@ -607,6 +617,7 @@
     <string name="promise_other_due">Otra fecha</string>
     <string name="promise_someone">alguien</string>
     <string name="promise_to">Para: %1$s</string>
+    <string name="promise_to_calendar">Añadir al calendario</string>
     <string name="promise_voice_name">Nombre de esta voz</string>
     <string name="promise_was_there">Estuvo en la conversación</string>
     <string name="promise_who_mine">A quién prometiste</string>

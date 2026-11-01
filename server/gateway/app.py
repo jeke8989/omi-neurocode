@@ -757,6 +757,12 @@ async def api_tasks(request: Request):
             """SELECT t.id, t.conversation_id, t.text, t.due, t.due_at, t.assignee, t.person_id, t.kind, t.confidence,
                       t.evidence, t.target, t.status, t.source, coalesce(cp.name, t.counterpart) AS counterpart,
                       t.counterpart_id, cp.number AS counterpart_number, t.confirmed_at, t.done_at,
+                      t.calendar_event_id, t.calendar_minutes,
+                      -- встреча ещё есть в календаре (удалили там — метка пропадает после синхронизации)
+                      (t.calendar_event_id IS NOT NULL AND (
+                          NOT EXISTS (SELECT 1 FROM settings WHERE key = 'calendar.on')
+                          OR EXISTS (SELECT 1 FROM calendar_events e WHERE e.event_id = t.calendar_event_id)
+                          OR t.updated_at > now() - interval '15 minutes')) AS in_calendar,
                       t.exported_at, t.export_ref, t.created_at, c.title AS conversation_title,
                       coalesce((SELECT json_agg(json_build_object(
                                     'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref,
@@ -822,6 +828,16 @@ async def api_task_update(request: Request):
     if str(body.get("text") or "").strip():
         sets.append("text = %s")
         args.append(crypto.seal(" ".join(str(body["text"]).split())[:1000]))
+    # встреча в календаре телефона (её создал телефон): id и длительность; null — убрали из календаря
+    if "calendar_event_id" in body:
+        cal = body["calendar_event_id"]
+        if cal is not None and not str(cal).lstrip("-").isdigit():
+            return Json({"error": "calendar_event_id"}, status_code=400)
+        sets.append("calendar_event_id = %s")
+        args.append(int(cal) if cal is not None else None)
+    if str(body.get("calendar_minutes") or "").isdigit():
+        sets.append("calendar_minutes = %s")
+        args.append(max(5, min(int(body["calendar_minutes"]), 24 * 60)))
     # исправление вручную: кто кому обещал и с кем договорённость (человек из «Людей» или просто имя)
     if body.get("kind") in ("mine", "waiting", "reminder"):
         sets.append("kind = %s")

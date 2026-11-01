@@ -180,13 +180,23 @@ fun TasksTab() {
             editing = null
             scope.launch {
                 try {
-                    if (t.id == 0L) Api.createPromise(edit.copy(text = edit.text ?: t.text)) else Api.updatePromise(t.id, edit)
+                    val id = if (t.id == 0L) Api.createPromise(edit.copy(text = edit.text ?: t.text))
+                    else t.id.also { Api.updatePromise(it, edit) }
+                    // календарь — заодно: добавить, перенести вместе со сроком или убрать
+                    val dueMs = if (edit.clearDue) null else edit.dueAt ?: t.dueMillis()
+                    val final = t.copy(id = id, text = edit.text ?: t.text, dueAt = dueMs?.let {
+                        java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString() })
+                    val changed = edit.calendar != t.inCalendar || edit.calendarMinutes != (t.calendarMinutes ?: edit.calendarMinutes) ||
+                        edit.dueAt != null || edit.clearDue || edit.text != null
+                    if (id > 0 && changed && (edit.calendar || t.calendarEventId != null)) {
+                        PromiseActions.syncCalendar(context, final, edit.calendar, edit.calendarMinutes)
+                    }
                 } catch (_: Exception) {
                 }
                 Repo.tasks.refresh()  // новый срок — сразу в напоминания
                 if (edit.nameVoice != null) Repo.people.refresh()
             }
-        }, onCalendar = { PromiseActions.toCalendar(context, it) }, onNudge = { nudge(it) }, onDone = {
+        }, onNudge = { nudge(it) }, onDone = {
             editing = null
             toggle(t)
         })
@@ -533,7 +543,7 @@ fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
                 if (done) c.graphite else c.ink, maxLines = 3)
             val who = promiseWho(t)
             val due = taskDue(t)
-            if (who != null || due != null) {
+            if (who != null || due != null || t.inCalendar) {
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (who != null) {
                         Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null, tint = c.graphite,
@@ -546,6 +556,10 @@ fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
                         Icon(Icons.Clock, null, tint = if (overdue) c.red else c.amber, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Txt(it, T.caption, if (overdue) c.red else c.graphite, maxLines = 1)
+                    }
+                    if (t.inCalendar) {  // встреча есть в календаре телефона
+                        Spacer(Modifier.width(10.dp))
+                        Icon(Icons.Calendar, stringResource(R.string.promise_in_calendar), tint = c.lens, modifier = Modifier.size(14.dp))
                     }
                 }
             }

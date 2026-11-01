@@ -145,10 +145,34 @@ object PhoneCalendar {
         sync(context, force = true)
     }
 
-    /** Обещание -> встреча в календаре прямо с телефона (календарь подключён). Возвращает id встречи. */
-    fun addEvent(context: Context, title: String, begin: Long, end: Long, notes: String?): String =
+    /** Обещание -> встреча в календаре прямо с телефона. Возвращает id встречи. */
+    fun addEvent(context: Context, title: String, begin: Long, end: Long, notes: String?): Long =
         execute(context, "create", JSONObject().put("title", title).put("begin", begin).put("end", end)
-            .put("notes", notes ?: ""))
+            .put("notes", notes ?: "")).toLong()
+
+    /** Срок обещания поменялся — встреча переезжает вместе с ним. */
+    fun moveEvent(context: Context, id: Long, begin: Long, end: Long, title: String? = null) {
+        val p = JSONObject().put("event_id", id).put("begin", begin).put("end", end)
+        title?.let { p.put("title", it) }
+        execute(context, "update", p)
+    }
+
+    fun removeEvent(context: Context, id: Long) {
+        try {
+            execute(context, "delete", JSONObject().put("event_id", id))
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Открыть встречу в приложении календаря. */
+    fun open(context: Context, id: Long) {
+        try {
+            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
 
     private fun execute(context: Context, op: String, p: JSONObject): String {
         val cr = context.contentResolver
@@ -166,16 +190,17 @@ object PhoneCalendar {
                     put(CalendarContract.Events.EVENT_TIMEZONE, if (allDay) "UTC" else TimeZone.getDefault().id)
                     p.optString("location").takeIf { it.isNotBlank() && it != "null" }?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
                     p.optString("notes").takeIf { it.isNotBlank() && it != "null" }?.let { put(CalendarContract.Events.DESCRIPTION, it) }
+                    put(CalendarContract.Events.HAS_ALARM, 1)
                 }
                 val uri = cr.insert(CalendarContract.Events.CONTENT_URI, values) ?: error("календарь не принял встречу")
                 val id = ContentUris.parseId(uri)
-                if (!allDay) {  // напоминание за 15 минут, как у обычной встречи
-                    cr.insert(CalendarContract.Reminders.CONTENT_URI, ContentValues().apply {
-                        put(CalendarContract.Reminders.EVENT_ID, id)
-                        put(CalendarContract.Reminders.MINUTES, 15)
-                        put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
-                    })
-                }
+                // напоминание — всегда (по умолчанию за 15 минут, меняется в настройках календаря в Mnemo);
+                // у события на весь день — накануне вечером
+                cr.insert(CalendarContract.Reminders.CONTENT_URI, ContentValues().apply {
+                    put(CalendarContract.Reminders.EVENT_ID, id)
+                    put(CalendarContract.Reminders.MINUTES, if (allDay) 5 * 60 else Core.prefs.calendarReminderMin)
+                    put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+                })
                 "$id"
             }
             "update" -> {

@@ -44,6 +44,9 @@ data class PromiseEdit(
     val personId: Long? = null, val personName: String? = null, val clearPerson: Boolean = false,
     /** Безымянному голосу дали имя — сохранить и в «Людях». */
     val nameVoice: Pair<Long, String>? = null,
+    /** В календаре: true — должна быть встреча, false — убрать; длительность встречи в минутах. */
+    val calendar: Boolean = false,
+    val calendarMinutes: Int = 30,
 )
 
 /**
@@ -51,8 +54,8 @@ data class PromiseEdit(
  * всё правится в одном месте и сохраняется одной кнопкой. Тут же — в календарь, напомнить, открыть разговор.
  */
 @Composable
-fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Unit, onCalendar: (TaskItem) -> Unit,
-                 onNudge: (TaskItem) -> Unit, onDone: () -> Unit) {
+fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Unit, onNudge: (TaskItem) -> Unit,
+                 onDone: () -> Unit) {
     val c = Mn.c
     val fmt = rememberFmt()
     val context = LocalContext.current
@@ -68,6 +71,19 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
     var personTouched by remember(t.id) { mutableStateOf(false) }
     var voiceName by remember(t.id) { mutableStateOf("") }
     var choosing by remember(t.id) { mutableStateOf(false) }
+    // календарь: встреча на срок обещания (по умолчанию 30 минут) с напоминанием
+    var inCalendar by remember(t.id) { mutableStateOf(t.inCalendar) }
+    var minutes by remember(t.id) { mutableStateOf(t.calendarMinutes ?: codes.neuro.neurosoft.Core.prefs.calendarDefaultMin) }
+    val askCalendar = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {
+        if (codes.neuro.neurosoft.PhoneCalendar.granted(context)) {
+            codes.neuro.neurosoft.Core.prefs.calendarOn = true
+            inCalendar = true
+        } else {
+            // без доступа — откроем календарь с готовой встречей, но отмечать её не сможем
+            PromiseActions.toCalendarApp(context, t.copy(text = text.trim().ifBlank { t.text }), minutes)
+        }
+    }
     // кто был в разговоре — первыми; потом все, кого знаем по имени
     var inConversation by remember(t.id) { mutableStateOf<List<PersonRef>>(emptyList()) }
     val people by Repo.people.state.collectAsState()
@@ -95,6 +111,7 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
         personName = if (personTouched && person == null) personName.trim().properName().ifBlank { null } else null,
         clearPerson = personTouched && person == null && personName.isBlank(),
         nameVoice = person?.takeIf { it.name == null && voiceName.isNotBlank() }?.let { it.id to voiceName.trim().properName() },
+        calendar = inCalendar, calendarMinutes = minutes,
     )
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = c.fog) {
@@ -181,13 +198,41 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                 if (due != null) Chip(stringResource(R.string.due_none), false, { due = null; dueTouched = true })
             }
 
-            // действия (у нового обещания — только календарь)
+            // календарь: метка «в календаре», длительность, напоминание
+            SheetLabel(stringResource(R.string.calendar_title))
+            Group(inset = 56.dp) {
+                item {
+                    ToggleRow(stringResource(if (inCalendar) R.string.promise_in_calendar else R.string.promise_to_calendar), inCalendar, { on ->
+                        if (on && !codes.neuro.neurosoft.PhoneCalendar.granted(context)) askCalendar.launch(codes.neuro.neurosoft.PhoneCalendar.PERMISSIONS)
+                        else inCalendar = on
+                    }, icon = Icons.Calendar, subtitle = if (inCalendar) listOfNotNull(
+                        due?.let { ms ->
+                            val a = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString()
+                            val b = Instant.ofEpochMilli(ms + minutes * 60_000L).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString()
+                            fmt.dayShortTitle(fmt.dayOf(a)) + ", " + fmt.time(a) + "–" + fmt.time(b)
+                        } ?: stringResource(R.string.promise_calendar_no_due),
+                        stringResource(R.string.promise_calendar_alarm, codes.neuro.neurosoft.Core.prefs.calendarReminderMin),
+                    ).joinToString("\n") else null)
+                }
+                if (inCalendar && t.inCalendar && t.calendarEventId != null) {
+                    item {
+                        ListRow(stringResource(R.string.promise_calendar_open), icon = Icons.Link, chevron = true,
+                            onClick = { codes.neuro.neurosoft.PhoneCalendar.open(context, t.calendarEventId) })
+                    }
+                }
+            }
+            if (inCalendar) {
+                Wrap(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)) {
+                    listOf(15, 30, 60, 120).forEach { m ->
+                        Chip(if (m < 60) stringResource(R.string.minutes_n, m) else stringResource(R.string.hours_n, m / 60),
+                            minutes == m, { minutes = m })
+                    }
+                }
+            }
+
+            // действия
             Spacer(Modifier.height(18.dp))
             Wrap(modifier = Modifier.padding(horizontal = 16.dp)) {
-                Chip(stringResource(R.string.promise_calendar), false, {
-                    onCalendar(t.copy(text = text.trim().ifBlank { t.text }, dueAt = due?.let {
-                        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString() }))
-                }, leading = { Icon(Icons.Calendar, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
                 if (kind == "waiting" && !isNew) {
                     Chip(stringResource(R.string.promise_nudge), false, { onNudge(t) },
                         leading = { Icon(Icons.Share, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
