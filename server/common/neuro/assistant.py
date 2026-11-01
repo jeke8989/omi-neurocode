@@ -149,6 +149,14 @@ def build_context(conn, device_id: str, question: str | None = None) -> str:
     ).fetchall()
     if segs:
         parts.append("Недавний разговор (расшифровка с кулона):\n" + transcript_text(segs, limit=8000))
+    # календарь на сегодня — коротко (что дальше по расписанию)
+    from . import calendar  # noqa: PLC0415
+
+    st = calendar.status(conn)
+    if st["connected"] and st["read"]:
+        cal = calendar.events(conn, now, datetime.combine(local.date(), datetime.max.time(), tzinfo=TZ), 12)
+        if cal:
+            parts.append("Дальше сегодня в календаре:\n" + "\n".join("- " + calendar.line(e) for e in cal))
     tasks = conn.execute(
         "SELECT text, due FROM tasks WHERE status = 'open' ORDER BY created_at DESC LIMIT 15"
     ).fetchall()

@@ -95,6 +95,8 @@ sealed interface Route {
     data object Important : Route
     /** Правила и расписание агента: что он делает сам и когда. */
     data object Routines : Route
+    /** Календарь телефона: права ассистента и куда добавлять встречи. */
+    data object Calendar : Route
     /** Знакомство: имя, занятие, цели и голос (из настроек; в онбординге — шаг). */
     data object About : Route
     data class Day(val day: String) : Route

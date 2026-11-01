@@ -231,6 +231,11 @@ data class ExtDraft(val manifest: JSONObject?, val preview: Extension?, val note
 
 data class McpInfo(val enabled: Boolean, val since: String?, val token: String? = null, val url: String)
 
+/** Календарь телефона на сервере: подключён ли, сколько встреч, что можно ассистенту, куда добавлять. */
+data class CalendarInfo(val id: Long, val name: String, val account: String, val primary: Boolean)
+data class CalendarStatus(val connected: Boolean, val syncedAt: String?, val events: Int, val read: Boolean,
+                          val write: Boolean, val target: Long?, val calendars: List<CalendarInfo>)
+
 /** Постоянное правило агента («итоги встреч — в Notion»). */
 data class AgentRule(val id: Long, val text: String, val createdAt: String)
 
@@ -727,6 +732,39 @@ object Api {
     suspend fun installManifest(manifest: JSONObject) {
         call("POST", "/api/extensions/install", JSONObject().put("manifest", manifest))
     }
+
+    // ---------------------------------------------------------------- календарь телефона
+    suspend fun calendarStatus(): CalendarStatus = calendarStatus(JSONObject(call("GET", "/api/calendar")))
+
+    /** read / write — что можно ассистенту; target — календарь для новых встреч. */
+    suspend fun calendarSettings(read: Boolean? = null, write: Boolean? = null, target: Long? = null): CalendarStatus {
+        val body = JSONObject()
+        read?.let { body.put("read", it) }
+        write?.let { body.put("write", it) }
+        target?.let { body.put("target", it) }
+        return calendarStatus(JSONObject(call("POST", "/api/calendar", body)))
+    }
+
+    suspend fun calendarDisconnect() {
+        call("DELETE", "/api/calendar")
+    }
+
+    suspend fun calendarSync(body: JSONObject) {
+        call("POST", "/api/calendar/sync", body)
+    }
+
+    suspend fun calendarCommands(): List<JSONObject> =
+        JSONObject(call("GET", "/api/calendar/commands")).optJSONArray("items").map { it }
+
+    suspend fun calendarCommandDone(id: Long, ok: Boolean, result: String) {
+        call("POST", "/api/calendar/commands/$id", JSONObject().put("ok", ok).put("result", result))
+    }
+
+    private fun calendarStatus(o: JSONObject) = CalendarStatus(
+        o.optBoolean("connected"), o.str("synced_at"), o.optInt("events"), o.optBoolean("read", true),
+        o.optBoolean("write", true), o.longOrNull("target"),
+        o.optJSONArray("calendars").map { CalendarInfo(it.getLong("id"), it.optString("name"), it.optString("account"), it.optBoolean("primary")) },
+    )
 
     // ---------------------------------------------------------------- правила и расписание агента
     suspend fun routines(): Routines {

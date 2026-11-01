@@ -46,7 +46,16 @@
     <string name="button_actions_sub">Одно нажатие — вопрос ассистенту</string>
     <string name="button_footer">Нажмите один раз и задайте вопрос: ответ прозвучит в наушнике. Нажмите ещё раз, когда договорили; нажатие во время ответа его остановит.</string>
     <string name="by_voice">голосом</string>
+    <string name="calendar_denied">Без доступа к календарю подключить не получится</string>
     <string name="calendar_hint">Точкой отмечены дни с записями</string>
+    <string name="calendar_off_q">Отключить календарь?</string>
+    <string name="calendar_read_sub">Видеть встречи и расписание</string>
+    <string name="calendar_sub">Встречи из календаря телефона: Google, Samsung, Outlook</string>
+    <string name="calendar_target">Куда добавлять встречи</string>
+    <string name="calendar_title">Календарь</string>
+    <string name="calendar_waiting">Ждём встречи с телефона</string>
+    <string name="calendar_write">Добавлять и изменять</string>
+    <string name="calendar_write_sub">Новые встречи, перенос и удаление — по вашей просьбе</string>
     <string name="can_do">Что умеет</string>
     <string name="cancel">Отмена</string>
     <string name="cd_backspace">Стереть</string>
@@ -810,6 +819,12 @@
     <string name="yes">Да</string>
     <string name="yes_its_me">Да, это я</string>
     <string name="yesterday">Вчера</string>
+    <plurals name="calendar_events">
+        <item quantity="one">%d встреча</item>
+        <item quantity="few">%d встречи</item>
+        <item quantity="many">%d встреч</item>
+        <item quantity="other">%d встречи</item>
+    </plurals>
     <plurals name="conversations">
         <item quantity="one">%d разговор</item>
         <item quantity="few">%d разговора</item>

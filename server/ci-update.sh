@@ -238,6 +238,10 @@ diag() {
      || '/' || (SELECT count(*) FROM memories WHERE archived_at IS NULL)
      || ', итоги ' || (SELECT count(*) FROM conversations WHERE emb IS NOT NULL)
      || '/' || (SELECT count(*) FROM conversations WHERE summary IS NOT NULL AND status = 'done')
+     || '; календарь: ' || CASE WHEN EXISTS (SELECT 1 FROM settings WHERE key = 'calendar.on') THEN 'подключён' ELSE 'нет' END
+     || ', встреч ' || (SELECT count(*) FROM calendar_events)
+     || ', изменений: ' || coalesce((SELECT string_agg(status || '=' || n, ',') FROM (SELECT status, count(*) AS n
+                                     FROM calendar_commands GROUP BY status) x), 'нет')
      || '; правил ' || (SELECT count(*) FROM agent_rules) || ', заданий ' || (SELECT count(*) FROM agent_schedules WHERE enabled)
      || ' (последнее: ' || coalesce((SELECT split_part(last_status, ':', 1) FROM agent_schedules WHERE last_run_at IS NOT NULL
                                      ORDER BY last_run_at DESC LIMIT 1), 'нет') || ')'

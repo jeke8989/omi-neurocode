@@ -76,6 +76,7 @@ private fun Screen(route: Route) {
         Route.Search -> SearchScreen()
         Route.Important -> ImportantScreen()
         Route.Routines -> RoutinesScreen()
+        Route.Calendar -> CalendarScreen()
         Route.About -> AboutScreen()
         is Route.Day -> DayScreen(route.day)
         Route.Settings -> SettingsScreen()

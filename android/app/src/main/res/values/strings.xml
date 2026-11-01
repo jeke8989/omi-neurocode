@@ -47,7 +47,16 @@
     <string name="button_actions_sub">One press asks the assistant</string>
     <string name="button_footer">Press once and ask: the answer plays in your headphones. Press again when you\'re done; pressing during the answer stops it.</string>
     <string name="by_voice">by voice</string>
+    <string name="calendar_denied">Calendar access is needed to connect</string>
     <string name="calendar_hint">Dots mark days with recordings</string>
+    <string name="calendar_off_q">Disconnect the calendar?</string>
+    <string name="calendar_read_sub">See meetings and the schedule</string>
+    <string name="calendar_sub">Meetings from your phone\'s calendar: Google, Samsung, Outlook</string>
+    <string name="calendar_target">Add meetings to</string>
+    <string name="calendar_title">Calendar</string>
+    <string name="calendar_waiting">Waiting for meetings from the phone</string>
+    <string name="calendar_write">Add and change</string>
+    <string name="calendar_write_sub">New meetings, moving and deleting — when you ask</string>
     <string name="can_do">What it can do</string>
     <string name="cancel">Cancel</string>
     <string name="cd_backspace">Delete</string>
@@ -811,6 +820,10 @@
     <string name="yes">Yes</string>
     <string name="yes_its_me">Yes, it\'s me</string>
     <string name="yesterday">Yesterday</string>
+    <plurals name="calendar_events">
+        <item quantity="one">%d meeting</item>
+        <item quantity="other">%d meetings</item>
+    </plurals>
     <plurals name="conversations">
         <item quantity="one">%d conversation</item>
         <item quantity="other">%d conversations</item>

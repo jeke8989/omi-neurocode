@@ -46,7 +46,16 @@
     <string name="button_actions_sub">Una pulsación pregunta al asistente</string>
     <string name="button_footer">Pulsa una vez y pregunta: la respuesta suena en tus auriculares. Pulsa otra vez al terminar; si pulsas durante la respuesta, se detiene.</string>
     <string name="by_voice">por voz</string>
+    <string name="calendar_denied">Se necesita acceso al calendario para conectar</string>
     <string name="calendar_hint">Los puntos marcan los días con grabaciones</string>
+    <string name="calendar_off_q">¿Desconectar el calendario?</string>
+    <string name="calendar_read_sub">Ver reuniones y la agenda</string>
+    <string name="calendar_sub">Reuniones del calendario del teléfono: Google, Samsung, Outlook</string>
+    <string name="calendar_target">Añadir reuniones a</string>
+    <string name="calendar_title">Calendario</string>
+    <string name="calendar_waiting">Esperando reuniones del teléfono</string>
+    <string name="calendar_write">Añadir y cambiar</string>
+    <string name="calendar_write_sub">Reuniones nuevas, mover y borrar, cuando lo pidas</string>
     <string name="can_do">Qué puede hacer</string>
     <string name="cancel">Cancelar</string>
     <string name="cd_backspace">Borrar</string>
@@ -810,6 +819,10 @@
     <string name="yes">Sí</string>
     <string name="yes_its_me">Sí, soy yo</string>
     <string name="yesterday">Ayer</string>
+    <plurals name="calendar_events">
+        <item quantity="one">%d reunión</item>
+        <item quantity="other">%d reuniones</item>
+    </plurals>
     <plurals name="conversations">
         <item quantity="one">%d conversación</item>
         <item quantity="other">%d conversaciones</item>

@@ -489,3 +489,73 @@ def test_routines_http(conn):  # noqa: F811
     assert client.delete(f"/api/agent/schedules/{sid}").json()["ok"]
     assert client.get("/api/agent/routines").json() == {"rules": [], "schedules": []}
     assert client.get("/api/agent/results?after=0").status_code == 200
+
+
+def test_phone_calendar(conn, monkeypatch):  # noqa: F811
+    """Календарь телефона: события приходят с телефона, ассистент их видит и меняет через очередь команд."""
+    from datetime import datetime, timedelta, timezone
+
+    from neuro import agent_core, calendar, llm
+    from neuro.assistant import TZ
+    conn.execute("DELETE FROM calendar_events")
+    conn.execute("DELETE FROM calendar_commands")
+    conn.execute("DELETE FROM settings WHERE key LIKE 'calendar.%%'")
+    client = Asgi(_gw().app)
+    assert client.get("/api/calendar").json()["connected"] is False
+    day = datetime.now(TZ).replace(hour=15, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    ms = lambda d: int(d.timestamp() * 1000)  # noqa: E731
+    events = [{"event_id": 41, "calendar_id": 3, "calendar": "Работа", "title": "Созвон с Иваном", "begin": ms(day),
+               "end": ms(day + timedelta(hours=1)), "location": "Zoom", "attendees": ["Иван Петров"]},
+              {"event_id": 42, "calendar_id": 3, "title": "День рождения мамы", "begin": ms(day.replace(hour=0)),
+               "end": ms(day.replace(hour=0) + timedelta(days=1)), "all_day": True}]
+    window = {"from": ms(day - timedelta(days=14)), "to": ms(day + timedelta(days=60))}
+    r = client.post("/api/calendar/sync", json={**window, "events": events,
+                                                 "calendars": [{"id": 3, "name": "Работа", "account": "me@x", "primary": True}]})
+    assert r.json()["events"] == 2
+    st = client.post("/api/calendar", json={"target": 3}).json()
+    assert st["connected"] and st["target"] == 3 and st["calendars"][0]["name"] == "Работа"
+    row = conn.execute("SELECT title::text AS t FROM calendar_events WHERE event_id = 41").fetchone()
+    assert row["t"] == "Созвон с Иваном" or row["t"].startswith("enc")
+
+    # встреча в то же время, что и разговор, — подсказка итогам
+    hit = calendar.around(conn, day + timedelta(minutes=5), day + timedelta(minutes=40))
+    assert hit["title"] == "Созвон с Иваном" and "Иван Петров" in hit["attendees"]
+
+    seen = []
+
+    def fake_chat(conn_, task, messages, tools=None, **kw):
+        names = [t["function"]["name"] for t in tools or []]
+        seen.append(names)
+        if len(seen) == 1:
+            assert {"calendar", "calendar_add", "calendar_change", "calendar_delete"} <= set(names)
+            return {"tool_calls": [
+                {"id": "1", "function": {"name": "calendar", "arguments": json.dumps({"from": day.date().isoformat()})}},
+                {"id": "2", "function": {"name": "calendar_change", "arguments": json.dumps(
+                    {"id": 41, "start": (day + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")})}},
+                {"id": "3", "function": {"name": "calendar_add", "arguments": json.dumps(
+                    {"title": "Отправить КП Ивану", "start": (day + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M"),
+                     "duration_min": 30})}}]}
+        tool_out = [m["content"] for m in messages if m["role"] == "tool"]
+        assert "Созвон с Иваном" in tool_out[0] and "весь день День рождения мамы" in tool_out[0]
+        return {"content": "Перенёс созвон и поставил напоминание про КП."}
+
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    agent_core.ask(conn, "перенеси завтрашний созвон на 17 и поставь в 19 отправить КП", level="tools", channel="chat")
+    items = client.get("/api/calendar/commands").json()["items"]
+    assert [i["op"] for i in items] == ["update", "create"]
+    assert items[0]["payload"]["event_id"] == 41 and items[0]["payload"]["begin"] == ms(day + timedelta(hours=2))
+    assert items[1]["payload"]["calendar_id"] == 3 and items[1]["payload"]["end"] - items[1]["payload"]["begin"] == 30 * 60000
+    assert client.post(f"/api/calendar/commands/{items[0]['id']}", json={"ok": True, "result": "41"}).json()["ok"]
+    assert [i["op"] for i in client.get("/api/calendar/commands").json()["items"]] == ["create"]
+
+    # «только просматривать» — инструментов изменения нет
+    client.post("/api/calendar", json={"write": False})
+    seen.clear()
+    monkeypatch.setattr(llm, "chat", lambda conn_, task, messages, tools=None, **kw: seen.append(
+        [t["function"]["name"] for t in tools or []]) or {"content": "ок"})
+    agent_core.ask(conn, "что завтра?", level="tools", channel="chat")
+    assert "calendar" in seen[0] and "calendar_add" not in seen[0]
+    # отключить — события с сервера удаляются
+    assert client.delete("/api/calendar").json()["ok"]
+    assert client.get("/api/calendar").json()["connected"] is False
+    assert conn.execute("SELECT count(*) AS n FROM calendar_events").fetchone()["n"] == 0

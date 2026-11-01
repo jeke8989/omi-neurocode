@@ -182,6 +182,7 @@ object Core {
         uploader.start()
         scope.launch { batchLoop() }
         scope.launch { reminderLoop() }
+        scope.launch { calendarLoop() }
         if (!prefs.serverConfigured) autoConnect()
     }
 
@@ -247,6 +248,17 @@ object Core {
             }
         }
         vibrate(2)
+    }
+
+    /** Календарь: просьбы ассистента (добавить, перенести встречу) — каждые полминуты, события — раз в 10 минут. */
+    private suspend fun calendarLoop() {
+        while (true) {
+            if (PhoneCalendar.active(app)) {
+                PhoneCalendar.runCommands(app)
+                PhoneCalendar.sync(app)
+            }
+            delay(30_000L)
+        }
     }
 
     private suspend fun reminderLoop() {

@@ -11,6 +11,7 @@ import requests
 
 from neuro import config, db, llm
 from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention, routines
+from neuro import calendar as calendarlib
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
@@ -33,6 +34,23 @@ SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают рас
 {people.SUMMARY_PEOPLE_RULES}
 {memorylib.RULES}"""
 
+
+
+def calendar_hint(conn, segs: list[dict]) -> str:
+    """Встреча из календаря в то же время — подсказка для названия и имён участников."""
+    try:
+        st = calendarlib.status(conn)
+        if not (st["connected"] and st["read"]) or not segs:
+            return ""
+        e = calendarlib.around(conn, segs[0]["started_at"], segs[-1]["ended_at"])
+    except Exception:  # noqa: BLE001
+        return ""
+    if not e:
+        return ""
+    return ("\n\nВ календаре в это время: «" + (e["title"] or "") + "»"
+            + (f", участники: {e['attendees']}" if e.get("attendees") else "")
+            + (f", место: {e['location']}" if e.get("location") else "")
+            + ". Если разговор об этом — используй для названия и имён; если нет — не упоминай.")
 
 
 def first_words(segs: list[dict], n: int = 7, lang: str = i18n.DEFAULT) -> str:
@@ -107,7 +125,8 @@ def summarize_one(conn, conv_id: int):
         title = i18n.t(lang, "conversation.empty")
     elif llm.configured() and text_len >= 40:
         result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + profile.prompt(conn) + "\n" + i18n.write_in(lang),
-                               tasklib.context(conn, segs[0]["started_at"]) + "\n\n" + transcript_text(segs))
+                               tasklib.context(conn, segs[0]["started_at"]) + calendar_hint(conn, segs)
+                               + "\n\n" + transcript_text(segs))
         title = str(result.get("title") or "").strip()
         if not title or title == "-":
             title = i18n.t(lang, "conversation.empty") if not result.get("summary") else first_words(segs, lang=lang)

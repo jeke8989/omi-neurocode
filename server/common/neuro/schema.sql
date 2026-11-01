@@ -462,3 +462,32 @@ CREATE TABLE IF NOT EXISTS agent_schedules (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS agent_schedules_due_idx ON agent_schedules (next_run_at) WHERE enabled;
+
+-- Календарь телефона (Google, Samsung, Outlook — что синхронизировано в телефон): события окна вокруг сегодня.
+-- Телефон присылает их сам, изменения от ассистента выполняет по очереди команд.
+CREATE TABLE IF NOT EXISTS calendar_events (
+    uid          TEXT PRIMARY KEY,
+    event_id     BIGINT NOT NULL,
+    calendar_id  BIGINT,
+    calendar     TEXT,
+    title        TEXT,
+    starts_at    TIMESTAMPTZ NOT NULL,
+    ends_at      TIMESTAMPTZ NOT NULL,
+    all_day      BOOLEAN NOT NULL DEFAULT false,
+    location     TEXT,
+    notes        TEXT,
+    attendees    TEXT,
+    synced_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS calendar_events_time_idx ON calendar_events (starts_at);
+
+CREATE TABLE IF NOT EXISTS calendar_commands (
+    id          BIGSERIAL PRIMARY KEY,
+    op          TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    result      TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    done_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS calendar_commands_pending_idx ON calendar_commands (id) WHERE status = 'pending';

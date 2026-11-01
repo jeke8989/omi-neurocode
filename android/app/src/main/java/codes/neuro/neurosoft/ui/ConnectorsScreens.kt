@@ -14,6 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import codes.neuro.neurosoft.Core
+import codes.neuro.neurosoft.PhoneCalendar
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.Connector
@@ -89,8 +93,7 @@ fun ConnectorsGroup(onError: (String?) -> Unit) {
         }
         busy = null
     }
-    val list = items ?: return
-    if (list.isEmpty()) return
+    val list = items.orEmpty()
     val connected = stringResource(R.string.connected)
     fun connect(id: String) {
         if (busy != null) return
@@ -100,7 +103,31 @@ fun ConnectorsGroup(onError: (String?) -> Unit) {
             busy = null
         }
     }
+    // календарь телефона — первым: одно разрешение, без входа в аккаунты
+    val calendarOn = Core.prefs.calendarOn && PhoneCalendar.granted(context)
+    val askCalendar = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (PhoneCalendar.granted(context)) {
+            Core.prefs.calendarOn = true
+            scope.launch {
+                PhoneCalendar.sync(context, force = true)
+                Connectors.version.intValue++
+                Nav.push(Route.Calendar)
+            }
+        } else {
+            onError(context.getString(R.string.calendar_denied))
+        }
+    }
     Group(stringResource(R.string.svc_title), inset = 22.dp) {
+        item {
+            ListRow("📅 " + stringResource(R.string.calendar_title),
+                subtitle = stringResource(if (calendarOn) R.string.connected else R.string.calendar_sub),
+                chevron = calendarOn,
+                onClick = { if (calendarOn) Nav.push(Route.Calendar) else askCalendar.launch(PhoneCalendar.PERMISSIONS) },
+                trailing = if (calendarOn) null else ({
+                    SecondaryButton(stringResource(R.string.connect), { askCalendar.launch(PhoneCalendar.PERMISSIONS) }, small = true)
+                }),
+            )
+        }
         list.forEach { s ->
             item {
                 ListRow(

@@ -46,7 +46,16 @@
     <string name="button_actions_sub">Tek basış asistana soru sorar</string>
     <string name="button_footer">Bir kez basıp sorun: cevap kulaklıkta çalar. Bitirince tekrar basın; cevap sırasında basarsanız durur.</string>
     <string name="by_voice">sesle</string>
+    <string name="calendar_denied">Bağlanmak için takvim erişimi gerekli</string>
     <string name="calendar_hint">Noktalar kayıt olan günleri gösterir</string>
+    <string name="calendar_off_q">Takvim bağlantısı kesilsin mi?</string>
+    <string name="calendar_read_sub">Toplantıları ve programı görme</string>
+    <string name="calendar_sub">Telefon takviminden toplantılar: Google, Samsung, Outlook</string>
+    <string name="calendar_target">Toplantıları ekle</string>
+    <string name="calendar_title">Takvim</string>
+    <string name="calendar_waiting">Telefondan toplantılar bekleniyor</string>
+    <string name="calendar_write">Ekleme ve değiştirme</string>
+    <string name="calendar_write_sub">Yeni toplantılar, taşıma ve silme — siz isteyince</string>
     <string name="can_do">Neler yapabilir</string>
     <string name="cancel">İptal</string>
     <string name="cd_backspace">Sil</string>
@@ -810,6 +819,10 @@
     <string name="yes">Evet</string>
     <string name="yes_its_me">Evet, benim</string>
     <string name="yesterday">Dün</string>
+    <plurals name="calendar_events">
+        <item quantity="one">%d toplantı</item>
+        <item quantity="other">%d toplantı</item>
+    </plurals>
     <plurals name="conversations">
         <item quantity="one">%d konuşma</item>
         <item quantity="other">%d konuşma</item>

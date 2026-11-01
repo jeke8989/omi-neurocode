@@ -12,9 +12,10 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile, routines
+from . import calendar as calendarlib
 from . import memory as memorylib
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
@@ -121,6 +122,26 @@ BUILTIN_TOOLS = [
     _fn("ask_user", "Задать пользователю один короткий уточняющий вопрос, когда без ответа нельзя ответить точно "
         "(подходит несколько событий или людей, неясен период). Не спрашивай то, что можно найти инструментами.",
         {"question": {"type": "string", "description": "вопрос, при возможности с 2–4 вариантами"}}, ["question"]),
+]
+
+# Календарь телефона — только когда подключён; изменения — только если пользователь разрешил
+CALENDAR_READ = [
+    _fn("calendar", "Встречи из календаря пользователя за период (по умолчанию — сегодня и 7 дней вперёд).",
+        {"from": {"type": "string", "description": "YYYY-MM-DD"}, "to": {"type": "string", "description": "YYYY-MM-DD"}}),
+]
+CALENDAR_WRITE = [
+    _fn("calendar_add", "Добавить встречу в календарь пользователя (появится на телефоне в течение минуты).",
+        {"title": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
+         "end": {"type": "string", "description": "YYYY-MM-DD HH:MM; нет — по duration_min"},
+         "duration_min": {"type": "integer", "description": "по умолчанию 60"},
+         "all_day": {"type": "boolean"}, "location": {"type": "string"},
+         "notes": {"type": "string", "description": "описание: о чём встреча, ссылки"}}, ["title", "start"]),
+    _fn("calendar_change", "Перенести или переименовать встречу ([встреча N] из calendar).",
+        {"id": {"type": "integer"}, "start": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
+         "end": {"type": "string", "description": "YYYY-MM-DD HH:MM"}, "title": {"type": "string"},
+         "location": {"type": "string"}}, ["id"]),
+    _fn("calendar_delete", "Удалить встречу из календаря ([встреча N]) — только если пользователь явно просит.",
+        {"id": {"type": "integer"}}, ["id"]),
 ]
 
 AGENTS = {
@@ -235,6 +256,47 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
             return f"Не поставил: {exc}"
         return (f"Задание {sch['id']} «{sch['title']}» — {routines.describe(sch)}; "
                 f"ближайший раз {_d(sch['next_run_at'])}.")
+    if name == "calendar":
+        today = datetime.now(TZ).date()
+        try:
+            d1 = date.fromisoformat(str(args.get("from"))) if args.get("from") else today
+            d2 = date.fromisoformat(str(args.get("to"))) if args.get("to") else d1 + timedelta(days=7)
+        except ValueError:
+            return "Даты — в формате YYYY-MM-DD."
+        start = datetime(d1.year, d1.month, d1.day, tzinfo=TZ)
+        end = datetime(d2.year, d2.month, d2.day, tzinfo=TZ) + timedelta(days=1)
+        return calendarlib.overview(conn, start, min(end, start + timedelta(days=62)))
+    if name == "calendar_add":
+        start = calendarlib.parse_when(args.get("start"))
+        if start is None:
+            return "Не понял время начала: нужно YYYY-MM-DD HH:MM."
+        end = calendarlib.parse_when(args.get("end")) or start + timedelta(minutes=int(args.get("duration_min") or 60))
+        st = calendarlib.status(conn)
+        payload = {"title": str(args.get("title") or "")[:300], "begin": int(start.timestamp() * 1000),
+                   "end": int(max(end, start).timestamp() * 1000), "all_day": bool(args.get("all_day")),
+                   "location": args.get("location"), "notes": args.get("notes"), "calendar_id": st["target"]}
+        cid = calendarlib.enqueue(conn, "create", payload)
+        return (f"Добавляю в календарь: «{payload['title']}» {start:%d.%m %H:%M}–{end.astimezone(TZ):%H:%M} "
+                f"(запрос {cid}; телефон внесёт в течение минуты).")
+    if name in ("calendar_change", "calendar_delete"):
+        eid = int(args.get("id") or 0)
+        if not conn.execute("SELECT 1 FROM calendar_events WHERE event_id = %s LIMIT 1", (eid,)).fetchone():
+            return f"Встречи {eid} нет в календаре — сначала посмотри calendar."
+        if name == "calendar_delete":
+            calendarlib.enqueue(conn, "delete", {"event_id": eid})
+            return f"Удаляю встречу {eid} (телефон удалит в течение минуты)."
+        payload = {"event_id": eid}
+        for key in ("start", "end"):
+            when = calendarlib.parse_when(args.get(key))
+            if when:
+                payload["begin" if key == "start" else "end"] = int(when.timestamp() * 1000)
+        for key in ("title", "location"):
+            if args.get(key):
+                payload[key] = str(args[key])[:300]
+        if len(payload) == 1:
+            return "Нечего менять."
+        calendarlib.enqueue(conn, "update", payload)
+        return f"Меняю встречу {eid} (телефон обновит в течение минуты)."
     if name == "cancel_schedule":
         return "Задание удалено." if routines.cancel_schedule(conn, int(args.get("id") or 0)) else "Такого задания нет."
     if name == "recent_conversation":
@@ -404,7 +466,10 @@ def execute(conn, run_id: int) -> str:
         conn_specs, conn_index = connectors.tool_specs(conn, f"{run['question']} {recent}")
         services = connectors.services(conn)
         usable = [sv for sv in services if sv["read"] or sv["write"]]
-        tools = BUILTIN_TOOLS + ext_specs + conn_specs
+        cal = calendarlib.status(conn)
+        cal_tools = ((CALENDAR_READ if cal["read"] else []) + (CALENDAR_WRITE if cal["write"] else [])) \
+            if cal["connected"] else []
+        tools = BUILTIN_TOOLS + cal_tools + ext_specs + conn_specs
         if usable:  # подключить (или добавить) инструменты сервиса под конкретное дело
             tools.append(_fn("use_service", "Получить инструменты сервиса пользователя (" + ", ".join(
                 sv["name"] for sv in usable) + ") под задачу: найти, прочитать, создать или изменить там что-то. "

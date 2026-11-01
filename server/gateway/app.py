@@ -29,6 +29,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
                    ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, routines, tts, voices)
+from neuro import calendar as calendarlib
 from neuro import memory as memorylib
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
@@ -636,6 +637,48 @@ async def api_profile_voice(request: Request):
     except (KeyError, TypeError, ValueError) as exc:
         return Json({"error": str(exc)}, status_code=400)
     return Json({"voice": job["status"]})
+
+
+async def api_calendar(request: Request):
+    """Календарь телефона: GET — статус и календари; POST {"read", "write", "target"} — что можно ассистенту
+    и куда добавлять встречи; DELETE — отключить (события с сервера удаляются)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    if request.method == "DELETE":
+        await _sync(calendarlib.disconnect)
+        return Json({"ok": True})
+    if request.method == "POST":
+        body = await _body(request) or {}
+        target = body.get("target")
+        return Json(await _sync(lambda conn: calendarlib.settings(
+            conn, body.get("read"), body.get("write"), int(target) if str(target or "").lstrip("-").isdigit() else None)))
+    return Json(await _sync(calendarlib.status))
+
+
+async def api_calendar_sync(request: Request):
+    """Телефон прислал события окна {from, to (мс), events: [...], calendars: [...]}."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if not body or not isinstance(body.get("events"), list) or "from" not in body or "to" not in body:
+        return Json({"error": "events, from, to"}, status_code=400)
+    try:
+        n = await _sync(lambda conn: calendarlib.sync(conn, body["events"], body["from"], body["to"], body.get("calendars")))
+    except (TypeError, ValueError) as exc:
+        return Json({"error": str(exc)}, status_code=400)
+    return Json({"ok": True, "events": n})
+
+
+async def api_calendar_commands(request: Request):
+    """Изменения от ассистента, которые телефон должен внести в календарь; POST /{id} {"ok", "result"} — итог."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    cid = request.path_params.get("id")
+    if cid is not None:
+        body = await _body(request) or {}
+        ok = await _sync(lambda conn: calendarlib.complete(conn, int(cid), bool(body.get("ok")), str(body.get("result") or "")))
+        return Json({"ok": ok}, status_code=200 if ok else 404)
+    return Json({"items": await _sync(calendarlib.pending)})
 
 
 async def api_routines(request: Request):
@@ -1982,6 +2025,10 @@ app = Starlette(
         Route("/api/conversations/{id:int}/important", api_conversation_important, methods=["POST"]),
         Route("/api/important", api_important),
         Route("/api/agent/routines", api_routines),
+        Route("/api/calendar", api_calendar, methods=["GET", "POST", "DELETE"]),
+        Route("/api/calendar/sync", api_calendar_sync, methods=["POST"]),
+        Route("/api/calendar/commands", api_calendar_commands),
+        Route("/api/calendar/commands/{id:int}", api_calendar_commands, methods=["POST"]),
         Route("/api/agent/rules/{id:int}", api_rule, methods=["DELETE"]),
         Route("/api/agent/schedules/{id:int}", api_schedule, methods=["POST", "DELETE"]),
         Route("/api/agent/results", api_routine_results),

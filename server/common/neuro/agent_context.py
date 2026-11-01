@@ -84,7 +84,14 @@ def day_overview(conn, day: date, with_summaries: bool = True) -> str:
             line += f" — {c['summary']}"
         lines.append(line)
     head = f"{WEEKDAYS[day.weekday()]}, {day.strftime('%d.%m.%Y')}"
-    return head + ":\n" + ("\n".join(lines) if lines else "записей нет")
+    out = head + ":\n" + ("\n".join(lines) if lines else "записей нет")
+    from . import calendar  # noqa: PLC0415
+    st = calendar.status(conn)
+    if st["connected"] and st["read"]:
+        cal = calendar.events(conn, start, end)
+        if cal:
+            out += "\nПо календарю:\n" + "\n".join("• " + calendar.line(e) for e in cal)
+    return out
 
 
 def event_details(conn, eid: int, transcript_chars: int = 6000) -> str:
