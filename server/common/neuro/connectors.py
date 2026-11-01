@@ -37,15 +37,12 @@ CATALOG = {
         "description": {"ru": "Поиск по вашему Notion, страницы и задачи", "en": "Search your Notion, pages and tasks",
                         "tr": "Notion'da arama, sayfalar ve görevler", "es": "Busca en tu Notion, páginas y tareas"},
         "keywords": ["notion", "ноушн", "ношн", "ношен", "нотион", "ноушен", "ноушин", "ноцион"],
-        "task_hint": "Добавь задачу в Notion. Сначала найди базу данных задач (Tasks, Задачи, To-do) поиском; если её "
-                     "нет — создай страницу «Mnemo — задачи» и добавляй задачи туда.",
     },
     "linear": {
         "name": "Linear", "icon": "📐", "mcp": "https://mcp.linear.app/mcp",
         "description": {"ru": "Задачи и проекты в Linear", "en": "Issues and projects in Linear",
                         "tr": "Linear'da görevler ve projeler", "es": "Tareas y proyectos en Linear"},
         "keywords": ["linear", "линеар", "линир"],
-        "task_hint": "Создай задачу (issue) в Linear в команде пользователя по умолчанию.",
     },
 }
 
@@ -102,7 +99,6 @@ def listing(conn, lang: str = "ru") -> list[dict]:
             "status": r.get("status") if r.get("status") in ("connected", "error") else "off",
             "account": r.get("account"), "error": r.get("error"),
             "tools": [t.get("title") or t["name"] for t in (r.get("tools") or [])],
-            "tasks": bool((r.get("settings") or {}).get("tasks")),
             # выбор пользователя: что ассистенту можно в этом сервисе (по умолчанию — всё)
             "read": allowed(r.get("settings"), "read"), "write": allowed(r.get("settings"), "write"),
             "read_tools": sum(1 for t in r.get("tools") or [] if tool_access(t) == "read"),
@@ -240,7 +236,7 @@ def finish(conn, state: str, code: str) -> dict:
         "code_verifier": st["verifier"], "resource": endpoints["resource"]})
     account = tokens.pop("raw_ids", {}).get("workspace_name")
     _save(conn, cid, tokens=tokens, status="connected", account=account, error=None,
-          settings={"tasks": cid == "notion"}, connected_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+          settings={}, connected_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     try:
         refresh_tools(conn, cid)
     except Exception as exc:  # noqa: BLE001 — вход прошёл; инструменты подтянем при первом вопросе
@@ -435,45 +431,3 @@ def tool_specs(conn, question: str | None = None, only: str | None = None,
                 "parameters": schema}})
             index[name] = (r["id"], t["name"], f"{c['icon']} {c['name']}: {t.get('title') or t['name']}")
     return specs, index
-
-
-def send_task(conn, cid: str, task: dict) -> tuple[bool, str]:
-    """Новая задача -> сервис: короткий запуск модели только с инструментами этого сервиса."""
-    from . import llm  # noqa: PLC0415
-
-    specs, index = tool_specs(conn, only=cid, need="найти базу или страницу задач и добавить туда новую задачу: "
-                              + str(task.get("text") or ""))
-    if not specs:
-        return False, "нет инструментов сервиса"
-    row = _row(conn, cid) or {}
-    target = (row.get("settings") or {}).get("target")
-    system = (CATALOG[cid]["task_hint"] + (f" Место для задач уже выбрано: {target}." if target else "")
-              + " В конце ответь одной строкой: TARGET: <id или ссылка места, куда добавил> или ERROR: <почему>.")
-    messages = [{"role": "system", "content": system},
-                {"role": "user", "content": json.dumps({k: task.get(k) for k in ("text", "due", "assignee", "conversation")},
-                                                       ensure_ascii=False)}]
-    for _ in range(5):
-        msg = llm.chat(conn, "agent", messages, tools=specs, timeout=120)
-        calls = msg.get("tool_calls") or []
-        if not calls:
-            text = (msg.get("content") or "").strip()
-            m = re.search(r"TARGET:\s*(\S+)", text)
-            if m and not target:
-                st = dict(row.get("settings") or {})
-                st["target"] = m.group(1)[:200]
-                _save(conn, cid, settings=st)
-            return (bool(m), m.group(1) if m else text[:300])
-        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
-        for call in calls:
-            fn = call.get("function", {})
-            try:
-                args = json.loads(fn.get("arguments") or "{}") or {}
-            except ValueError:
-                args = {}
-            entry = index.get(fn.get("name", ""))
-            try:
-                out = call_tool(conn, entry[0], entry[1], args) if entry else "нет такого инструмента"
-            except ConnectorError as exc:
-                out = f"Ошибка: {exc}"
-            messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": out})
-    return False, "не уложился в шаги"

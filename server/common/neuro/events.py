@@ -181,7 +181,8 @@ def _apply(conn, day: date, result: dict, by_id: dict, existing: set[int], final
         else:
             conn.execute(
                 """UPDATE day_events SET title = %s, emoji = coalesce(%s, emoji), kind = %s,
-                       summary = coalesce(%s, summary), vivid = coalesce(%s, vivid), updated_at = now() WHERE id = %s""",
+                       summary = coalesce(%s, summary), vivid = coalesce(%s, vivid), emb = NULL, updated_at = now()
+                   WHERE id = %s""",
                 (crypto.seal(title), emoji, kind, crypto.seal(summary), vivid, eid))
         conn.execute("UPDATE conversations SET event_id = %s WHERE id = ANY(%s)", (eid, ids))
         placed.update(ids)

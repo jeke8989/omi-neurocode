@@ -101,7 +101,6 @@ fun ExtensionsScreen() {
                     val subtitles = working.map { e ->
                         when {
                             e.events.isNotEmpty() -> plural(R.plurals.ext_events, e.events.size)
-                            e.taskSync != null -> e.taskSync
                             else -> plural(R.plurals.tools, e.tools.size)
                         }
                     }
@@ -182,9 +181,9 @@ private fun ExtCapabilities(e: Extension) {
             e.tools.forEach { t -> item { ListRow(t.title, subtitle = t.description, icon = Icons.Sparkle) } }
         }
     }
-    if (e.events.isNotEmpty() || e.taskSync != null) {
+    // задачи сами в интеграции не уходят: это инструменты ассистента (по просьбе или по правилу)
+    if (e.events.isNotEmpty()) {
         Group(stringResource(R.string.ext_sends)) {
-            e.taskSync?.let { t -> item { ListRow(t, icon = Icons.Tasks) } }
             e.events.forEach { ev ->
                 item {
                     ListRow(ev.title ?: eventTitle(ev.event), icon = when (ev.event) {

@@ -432,3 +432,33 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 -- Важные разговоры: двойное нажатие кнопки во время разговора (или звёздочка в приложении)
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS important_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS conversations_important_idx ON conversations (important_at DESC) WHERE important_at IS NOT NULL;
+
+-- Память агента: смысловые отпечатки (эмбеддинги) для поиска по смыслу — зашифрованы, как и тексты
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS emb TEXT;
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS emb TEXT;
+ALTER TABLE day_events ADD COLUMN IF NOT EXISTS emb TEXT;
+
+-- Постоянные правила агента: что пользователь велел делать, с какими инструментами и когда
+CREATE TABLE IF NOT EXISTS agent_rules (
+    id          BIGSERIAL PRIMARY KEY,
+    text        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Расписание агента: «каждый день в 23:00 делай сводку в Notion» (время — в часовом поясе пользователя)
+CREATE TABLE IF NOT EXISTS agent_schedules (
+    id           BIGSERIAL PRIMARY KEY,
+    title        TEXT NOT NULL,
+    prompt       TEXT NOT NULL,
+    time_of_day  TEXT,
+    weekdays     INTEGER[] NOT NULL DEFAULT '{}',
+    once_at      TIMESTAMPTZ,
+    enabled      BOOLEAN NOT NULL DEFAULT true,
+    next_run_at  TIMESTAMPTZ,
+    last_run_at  TIMESTAMPTZ,
+    last_status  TEXT,
+    last_run_id  BIGINT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_schedules_due_idx ON agent_schedules (next_run_at) WHERE enabled;

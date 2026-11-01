@@ -223,12 +223,24 @@ data class ExtDraft(val manifest: JSONObject?, val preview: Extension?, val note
 
 data class McpInfo(val enabled: Boolean, val since: String?, val token: String? = null, val url: String)
 
+/** Постоянное правило агента («итоги встреч — в Notion»). */
+data class AgentRule(val id: Long, val text: String, val createdAt: String)
+
+/** Задание агента по расписанию («каждый день в 23:00 — сводка в Notion»). */
+data class AgentSchedule(val id: Long, val title: String, val prompt: String, val whenText: String,
+                         val nextRunAt: String?, val enabled: Boolean, val lastRunAt: String?, val lastStatus: String?)
+
+data class Routines(val rules: List<AgentRule>, val schedules: List<AgentSchedule>)
+
+/** Готовый ответ задания по расписанию (для уведомления). */
+data class RoutineResult(val runId: Long, val question: String, val answer: String)
+
 /** Знакомство: имя, чем занимается, цели; voice — none | waiting | done | failed. */
 data class Profile(val name: String?, val about: String?, val goals: List<String>, val voice: String)
 
 /** Сервис, который подключается одной кнопкой (Notion, Linear): вход через сайт сервиса, без ключей. */
 data class Connector(val id: String, val name: String, val icon: String, val description: String, val status: String,
-                     val account: String?, val error: String?, val tools: List<String>, val tasks: Boolean,
+                     val account: String?, val error: String?, val tools: List<String>,
                      /** Что ассистенту можно: просматривать (поиск, чтение); создавать и изменять. */
                      val read: Boolean = true, val write: Boolean = true) {
     val connected get() = status == "connected"
@@ -697,6 +709,35 @@ object Api {
         call("POST", "/api/extensions/install", JSONObject().put("manifest", manifest))
     }
 
+    // ---------------------------------------------------------------- правила и расписание агента
+    suspend fun routines(): Routines {
+        val o = JSONObject(call("GET", "/api/agent/routines"))
+        return Routines(
+            o.optJSONArray("rules").map { AgentRule(it.getLong("id"), it.optString("text"), it.optString("created_at")) },
+            o.optJSONArray("schedules").map {
+                AgentSchedule(it.getLong("id"), it.optString("title"), it.optString("prompt"), it.optString("when"),
+                    it.str("next_run_at"), it.optBoolean("enabled"), it.str("last_run_at"), it.str("last_status"))
+            },
+        )
+    }
+
+    suspend fun deleteRule(id: Long) {
+        call("DELETE", "/api/agent/rules/$id")
+    }
+
+    suspend fun setScheduleEnabled(id: Long, on: Boolean) {
+        call("POST", "/api/agent/schedules/$id", JSONObject().put("enabled", on))
+    }
+
+    suspend fun deleteSchedule(id: Long) {
+        call("DELETE", "/api/agent/schedules/$id")
+    }
+
+    suspend fun routineResults(after: Long): List<RoutineResult> =
+        JSONObject(call("GET", "/api/agent/results?after=$after")).optJSONArray("items").map {
+            RoutineResult(it.getLong("run_id"), it.optString("question"), it.optString("answer"))
+        }
+
     // ---------------------------------------------------------------- важные разговоры
     suspend fun important(): List<ConversationItem> =
         JSONObject(call("GET", "/api/important")).optJSONArray("items").map { conversation(it) }
@@ -724,7 +765,7 @@ object Api {
     private fun connector(o: JSONObject) = Connector(
         o.optString("id"), o.optString("name"), o.optString("icon"), o.optString("description"),
         o.optString("status", "off"), o.str("account"), o.str("error"), o.optJSONArray("tools").strings(),
-        o.optBoolean("tasks"), o.optBoolean("read", true), o.optBoolean("write", true),
+        o.optBoolean("read", true), o.optBoolean("write", true),
     )
 
     suspend fun connectors(): List<Connector> =
@@ -738,7 +779,7 @@ object Api {
     suspend fun connectorFinish(code: String, state: String): Connector = connector(JSONObject(call("POST",
         "/api/connectors/finish", JSONObject().put("code", code).put("state", state), explain = true)))
 
-    /** key: tasks | read | write. */
+    /** key: read | write — что ассистенту можно в сервисе. */
     suspend fun setConnector(id: String, key: String, on: Boolean) {
         call("POST", "/api/connectors/$id", JSONObject().put(key, on))
     }

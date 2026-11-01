@@ -568,6 +568,14 @@
     <string name="resume_recording">Resume recording</string>
     <string name="retry">Try again</string>
     <string name="right_now">Right now</string>
+    <string name="routines_channel">Assistant tasks</string>
+    <string name="routines_empty_text">Tell the assistant, for example: “every day at 23:00 make a day summary in Notion” or “put client meeting notes in Notion”</string>
+    <string name="routines_empty_title">Nothing yet</string>
+    <string name="routines_hint">The assistant adds and removes these itself — just say in the chat, e.g. “remove the 23:00 summary”</string>
+    <string name="routines_next">Next: %1$s</string>
+    <string name="routines_rules">Rules</string>
+    <string name="routines_schedules">Schedule</string>
+    <string name="routines_title">Rules and schedule</string>
     <string name="same_name_q">There\'s already a %1$s</string>
     <string name="same_name_text">If it\'s the same person, merge the voices for better recognition.</string>
     <string name="save">Save</string>
@@ -677,8 +685,6 @@
     <string name="svc_read">View</string>
     <string name="svc_read_sub">Search and read pages</string>
     <string name="svc_reconnect">Reconnect</string>
-    <string name="svc_tasks">New tasks to %1$s</string>
-    <string name="svc_tasks_sub">Tasks from conversations appear there automatically</string>
     <string name="svc_title">Services</string>
     <string name="svc_write">Create and edit</string>
     <string name="svc_write_sub">New pages, edits and comments</string>

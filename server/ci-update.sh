@@ -234,6 +234,13 @@ diag() {
      || ', знакомство ' || CASE WHEN EXISTS (SELECT 1 FROM settings WHERE key = 'profile.name') THEN 'есть' ELSE 'нет' END
      || ', фразы ' || coalesce((SELECT value::json->>'status' FROM settings WHERE key = 'profile.voice'), 'нет')
      || '; важных разговоров ' || (SELECT count(*) FROM conversations WHERE important_at IS NOT NULL)
+     || '; поиск по смыслу: память ' || (SELECT count(*) FROM memories WHERE emb IS NOT NULL AND archived_at IS NULL)
+     || '/' || (SELECT count(*) FROM memories WHERE archived_at IS NULL)
+     || ', итоги ' || (SELECT count(*) FROM conversations WHERE emb IS NOT NULL)
+     || '/' || (SELECT count(*) FROM conversations WHERE summary IS NOT NULL AND status = 'done')
+     || '; правил ' || (SELECT count(*) FROM agent_rules) || ', заданий ' || (SELECT count(*) FROM agent_schedules WHERE enabled)
+     || ' (последнее: ' || coalesce((SELECT split_part(last_status, ':', 1) FROM agent_schedules WHERE last_run_at IS NOT NULL
+                                     ORDER BY last_run_at DESC LIMIT 1), 'нет') || ')'
      FROM people"
   echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"

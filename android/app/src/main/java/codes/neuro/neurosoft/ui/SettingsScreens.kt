@@ -138,6 +138,8 @@ fun SettingsScreen() {
             // знакомство: имя, занятие, цели и голос — ИИ понимает контекст и называет по имени
             item { ListRow(stringResource(R.string.about_me), icon = Icons.Person, chevron = true,
                 onClick = { Nav.push(Route.About) }) }
+            item { ListRow(stringResource(R.string.routines_title), icon = Icons.Clock, chevron = true,
+                onClick = { Nav.push(Route.Routines) }) }
             item { ListRow(stringResource(R.string.voice_and_button), icon = Icons.Speaker, chevron = true,
                 onClick = { Nav.push(Route.Voice) }) }
             item { ListRow(stringResource(R.string.integrations), icon = Icons.Puzzle, chevron = true,

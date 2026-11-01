@@ -84,9 +84,10 @@ def insert_tasks(conn, conv_id, tasks: list[dict], source: str):
 def insert_memories(conn, conv_id, memories: list[str], source: str):
     from . import hooks, memory  # noqa: PLC0415 — hooks тянет расширения
 
-    for m in memory.clean(conn, memories, source):  # без пустого и без повторов того, что уже в памяти
-        row = conn.execute("INSERT INTO memories (conversation_id, text, source) VALUES (%s, %s, %s) "
-                           "RETURNING id, created_at", (conv_id, crypto.seal(m), source)).fetchone()
+    # без пустого и повторов; похожее на известное — объединяется со старой записью (как в Mem0)
+    for m, emb in memory.consolidate(conn, memories, source):
+        row = conn.execute("INSERT INTO memories (conversation_id, text, source, emb) VALUES (%s, %s, %s, %s) "
+                           "RETURNING id, created_at", (conv_id, crypto.seal(m), source, emb)).fetchone()
         hooks.emit(conn, "memory", {"id": row["id"], "text": m, "conversation_id": conv_id,
                                     "created_at": row["created_at"].isoformat(), "source": source})
 
@@ -138,7 +139,7 @@ class Endpointer:
 
 
 # ---------------------------------------------------------------- голосовой вопрос
-def build_context(conn, device_id: str) -> str:
+def build_context(conn, device_id: str, question: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     local = now.astimezone(TZ)
     parts = [f"Сейчас {WEEKDAYS[local.weekday()]}, {local.strftime('%d.%m.%Y %H:%M')}."]
@@ -154,9 +155,18 @@ def build_context(conn, device_id: str) -> str:
     if tasks:
         parts.append("Открытые задачи:\n" + "\n".join(
             f"- {t['text']}" + (f" (срок: {t['due']})" if t["due"] else "") for t in tasks))
-    mems = conn.execute("SELECT text FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 15").fetchall()
-    if mems:
-        parts.append("Запомненное:\n" + "\n".join(f"- {m['text']}" for m in mems))
+    # память: не вся подряд, а относящееся к вопросу (по смыслу) + пара свежих записей — токены не растут с памятью
+    from . import memory  # noqa: PLC0415
+
+    picked = memory.recall(conn, question, k=6, kinds=("memory",)) if question else []
+    fresh = conn.execute("SELECT id, text FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 3").fetchall()
+    seen, lines = set(), []
+    for m in [*picked, *fresh]:
+        if m["id"] not in seen:
+            seen.add(m["id"])
+            lines.append(f"- [память {m['id']}] {m['text']}")
+    if lines:
+        parts.append("Из памяти (подходящее к вопросу; остальное — search_memory):\n" + "\n".join(lines))
     return "\n\n".join(parts)
 
 

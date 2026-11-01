@@ -14,7 +14,8 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile
+from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile, routines
+from . import memory as memorylib
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -75,10 +76,27 @@ BUILTIN_TOOLS = [
     _fn("list_tasks", "Список задач пользователя.",
         {"status": {"type": "string", "enum": ["open", "done", "all"]}}),
     _fn("complete_task", "Отметить задачу выполненной по её id.", {"id": {"type": "integer"}}, ["id"]),
-    _fn("save_memory", "Запомнить важный факт или договорённость надолго.", {"text": {"type": "string"}}, ["text"]),
-    _fn("search_memory", "Искать в памяти, итогах и расшифровках прошлых разговоров с кулона.",
-        {"query": {"type": "string"}, "days": {"type": "integer", "description": "за сколько дней, по умолчанию 30"}},
-        ["query"]),
+    _fn("save_memory", "Запомнить факт о жизни пользователя надолго (предпочтение, договорённость, важное о людях). "
+        "Похожее на уже известное объединится со старой записью.", {"text": {"type": "string"}}, ["text"]),
+    _fn("forget_memory", "Удалить запись памяти (в архив) по её номеру — когда пользователь просит забыть "
+        "или запись неверна. Номер — из search_memory ([память N]).", {"id": {"type": "integer"}}, ["id"]),
+    _fn("search_memory", "Поиск по смыслу в памяти, событиях и итогах разговоров + точные слова в расшифровках. "
+        "Возвращает самое подходящее со ссылками; подробности — event_details / conversation_details.",
+        {"query": {"type": "string", "description": "что ищем, своими словами"},
+         "days": {"type": "integer", "description": "за сколько дней (по умолчанию — за всё время)"}}, ["query"]),
+    _fn("remember_rule", "Запомнить постоянное правило пользователя для себя: что делать, с какими инструментами "
+        "и при каких обстоятельствах («итоги встреч с клиентами — в Notion, страница Клиенты»). Для действий "
+        "по времени — schedule_task.", {"text": {"type": "string", "description": "правило одной фразой"}}, ["text"]),
+    _fn("forget_rule", "Удалить постоянное правило по номеру ([правило N]), когда пользователь просит это убрать.",
+        {"id": {"type": "integer"}}, ["id"]),
+    _fn("schedule_task", "Задание по расписанию: в срок ты сам выполнишь prompt (с теми же инструментами) и "
+        "пришлёшь результат в чат. Время — в часовом поясе пользователя. Повтор: time + days; один раз: once_at.",
+        {"title": {"type": "string", "description": "короткое название, 2–5 слов"},
+         "prompt": {"type": "string", "description": "что сделать, подробно — как задание самому себе"},
+         "time": {"type": "string", "description": "ЧЧ:ММ для повторяющегося"},
+         "days": {"type": "string", "description": "daily | weekdays | weekends | mon,wed,fri (по умолчанию daily)"},
+         "once_at": {"type": "string", "description": "YYYY-MM-DD HH:MM — для одного раза"}}, ["title", "prompt"]),
+    _fn("cancel_schedule", "Удалить задание по расписанию по номеру ([задание N]).", {"id": {"type": "integer"}}, ["id"]),
     _fn("recent_conversation", "Расшифровка того, что кулон записал за последние N минут.",
         {"minutes": {"type": "integer", "description": "по умолчанию 15"}}),
     _fn("list_conversations", "Список разговоров с итогами за последние дни.",
@@ -175,30 +193,50 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
         insert_memories(conn, None, [str(args.get("text") or "").strip()], "agent")
         return "Запомнил."
     if name == "search_memory":
-        # тексты в базе зашифрованы — ищем после расшифровки (без учёта регистра)
-        ql = str(args.get("query") or "").strip().lower()
-        since = datetime.now(timezone.utc) - timedelta(days=int(args.get("days") or 30))
-
-        def has(*vals):
-            return bool(ql) and any(v and ql in v.lower() for v in vals)
-        mems = [m for m in conn.execute(
-            "SELECT created_at, text FROM memories WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT 3000").fetchall() if has(m["text"])][:10]
-        convs = [c for c in conn.execute(
-            """SELECT started_at, title, summary FROM conversations WHERE started_at > %s
-               ORDER BY started_at DESC LIMIT 3000""", (since,)).fetchall() if has(c["title"], c["summary"])][:10]
-        segs = [s for s in conn.execute(
-            people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND NOT s.junk
-                                       ORDER BY s.started_at DESC LIMIT 20000""", (since,)).fetchall()
-                if has(s["text"])][:15]
-        evs = [e for e in conn.execute(
-            """SELECT id, started_at, title, summary, topics FROM day_events WHERE started_at > %s
-               ORDER BY started_at DESC LIMIT 2000""", (since,)).fetchall()
-               if has(e["title"], e["summary"], " ".join(e["topics"] or []))][:10]
-        out = [f"[событие #{e['id']} {_d(e['started_at'])}] {e['title']}: {e['summary'] or ''}" for e in evs]
-        out += [f"[память {_d(m['created_at'])}] {m['text']}" for m in mems]
-        out += [f"[разговор {_d(c['started_at'])}] {c['title']}: {c['summary'] or ''}" for c in convs]
-        out += [f"[фраза {_d(s['started_at'])}] {people.speaker_label(s)}: {s['text']}" for s in segs]
-        return "\n".join(out) or "Ничего не найдено. Попробуй другие слова (поиск по точному совпадению)."
+        query = str(args.get("query") or "").strip()
+        days = int(args["days"]) if str(args.get("days") or "").isdigit() else None
+        hits = memorylib.recall(conn, query, k=10, days=days)
+        out = []
+        for h in hits:
+            if h["kind"] == "memory":
+                out.append(f"[память {h['id']} {_d(h['at'])}] {h['text']}")
+            elif h["kind"] == "event":
+                out.append(f"[событие {h['id']} {_d(h['at'])}] {h['text']}")
+            else:
+                out.append(f"[разговор {h['id']} {_d(h['at'])}] {h['text']}")
+        # точные слова (номера, названия, суммы) — в самих расшифровках
+        ql = query.lower()
+        if len(ql) >= 3:
+            since = datetime.now(timezone.utc) - timedelta(days=days or 60)
+            segs = [x for x in conn.execute(
+                people.SEGMENT_SELECT + """ WHERE s.started_at > %s AND NOT s.junk
+                                           ORDER BY s.started_at DESC LIMIT 20000""", (since,)).fetchall()
+                    if ql in (x["text"] or "").lower()][:8]
+            out += [f"[фраза {_d(x['started_at'])}, разговор {x['conversation_id']}] {people.speaker_label(x)}: {x['text']}"
+                    for x in segs]
+        return "\n".join(out) or "Ничего не найдено. Попробуй другие слова или другой период."
+    if name == "forget_memory":
+        n = conn.execute("UPDATE memories SET archived_at = now() WHERE id = %s AND archived_at IS NULL",
+                         (int(args.get("id") or 0),)).rowcount
+        return "Забыл (запись в архиве, её можно вернуть в приложении)." if n else "Такой записи нет."
+    if name == "remember_rule":
+        try:
+            rid = routines.add_rule(conn, str(args.get("text") or ""))
+        except ValueError as exc:
+            return f"Не записал: {exc}"
+        return f"Правило {rid} записано — буду выполнять."
+    if name == "forget_rule":
+        return "Правило удалено." if routines.forget_rule(conn, int(args.get("id") or 0)) else "Такого правила нет."
+    if name == "schedule_task":
+        try:
+            sch = routines.add_schedule(conn, str(args.get("title") or ""), str(args.get("prompt") or ""),
+                                        args.get("time"), args.get("days"), args.get("once_at"))
+        except ValueError as exc:
+            return f"Не поставил: {exc}"
+        return (f"Задание {sch['id']} «{sch['title']}» — {routines.describe(sch)}; "
+                f"ближайший раз {_d(sch['next_run_at'])}.")
+    if name == "cancel_schedule":
+        return "Задание удалено." if routines.cancel_schedule(conn, int(args.get("id") or 0)) else "Такого задания нет."
     if name == "recent_conversation":
         minutes = max(1, min(int(args.get("minutes") or 15), 240))
         rows = conn.execute(
@@ -374,8 +412,13 @@ def execute(conn, run_id: int) -> str:
                 {"service": {"type": "string", "enum": [sv["id"] for sv in usable]},
                  "need": {"type": "string", "description": "что нужно сделать в сервисе"}}, ["service", "need"]))
 
-        context = build_context(conn, device_id) if device_id else ""
+        context = build_context(conn, device_id, run["question"]) if device_id else ""
         messages = [{"role": "system", "content": system_prompt(level, channel, lang) + "\n" + profile.prompt(conn)}]
+        standing = routines.prompt_block(conn)  # правила и расписание — коротко, всегда под рукой
+        if standing:
+            messages.append({"role": "system", "content": standing + "\nПросят убрать правило или задание — "
+                             "forget_rule / cancel_schedule по номеру. Просят делать что-то регулярно или в срок — "
+                             "schedule_task; постоянное «как и когда» — remember_rule."})
         if context:
             messages.append({"role": "system", "content": "Контекст:\n" + context})
         # шпаргалка: что было сегодня и вчера (подробности — инструментами)

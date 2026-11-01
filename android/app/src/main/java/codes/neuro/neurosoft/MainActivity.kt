@@ -43,6 +43,7 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
                 codes.neuro.neurosoft.ui.HomeState.page.value = 1
             }
             open == "wake" -> Core.wakeFromStandby(this, fromBackground = false)  // «Кулон снова рядом»
+            open == "chat" -> Nav.push(Route.Chat())  // ответ задания по расписанию
             open == "oauth" -> codes.neuro.neurosoft.ui.Connectors.returned.value = intent.getStringExtra("oauth")
             open.startsWith("day:") -> {  // утренняя сводка — сразу вчерашний день
                 Nav.reset(Route.Home)

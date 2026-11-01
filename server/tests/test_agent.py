@@ -184,7 +184,8 @@ def test_diary_picks_photos_for_events(conn, monkeypatch, tmp_path):  # noqa: F8
     assert not diary.generate_day(conn, day)  # без изменений — не пересчитываем
 
 
-def test_task_feed_goes_to_integrations(conn, monkeypatch):  # noqa: F811
+def test_tasks_are_not_pushed_into_tool_integrations(conn, monkeypatch):  # noqa: F811
+    """Интеграции — инструменты агента: новые задачи сами туда не уходят (только по просьбе или правилу)."""
     from agent import worker
     from neuro import extensions as ext
     conn.execute("DELETE FROM extensions")
@@ -199,33 +200,9 @@ def test_task_feed_goes_to_integrations(conn, monkeypatch):  # noqa: F811
     conn.execute("INSERT INTO tasks (text, due, source, target) VALUES ('Подготовить отчёт', 'пятница', "
                  "'conversation', 'notion'), ('Починить синхронизацию', NULL, 'agent', 'github')")
     sent = []
-
-    class R:
-        status_code = 200
-
-        def __init__(self, url):
-            self.text = json.dumps({"url": "https://notion.so/p1"} if "notion" in url
-                                   else {"html_url": "https://github.com/neuro-codes/neurosoft/issues/7"})
-
-        def json(self):
-            return json.loads(self.text)
-
-    def fake_request(method, url, headers=None, json=None, timeout=None):
-        sent.append((url, headers, json))
-        return R(url)
-
-    monkeypatch.setattr(ext.requests, "request", fake_request)
+    monkeypatch.setattr(ext.requests, "request", lambda *a, **k: sent.append(a) or None)
     worker.sync_task_integrations(conn)
-    worker.sync_task_integrations(conn)  # повторно не отправляет
-    notion = [s for s in sent if "notion" in s[0]]
-    github = [s for s in sent if "github" in s[0]]
-    assert len(notion) == 2 and len(github) == 1  # в GitHub — только задачи на разработку
-    assert notion[0][1]["Authorization"] == "Bearer secret_x"
-    assert "Название" in notion[0][2]["properties"]  # имя колонки из настроек подставилось в ключ
-    assert github[0][0] == "https://api.github.com/repos/neuro-codes/neurosoft/issues"
-    assert github[0][2]["title"] == "Починить синхронизацию"
-    refs = {r["ext_id"]: r["ref"] for r in conn.execute("SELECT ext_id, ref FROM task_exports WHERE ok").fetchall()}
-    assert refs["github"].endswith("/issues/7")
+    assert sent == [] and conn.execute("SELECT count(*) AS n FROM task_exports").fetchone()["n"] == 0
 
 
 def test_photos_without_ai_cost_nothing(conn, monkeypatch, tmp_path):  # noqa: F811

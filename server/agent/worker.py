@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, cleanup, connectors, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention
+from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention, routines
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
@@ -134,7 +134,7 @@ def summarize_one(conn, conv_id: int):
         insert_memories(conn, conv_id, memories, "conversation")
         # Если пока мы думали, пришли новые фразы, STT вернул статус 'open' — тогда разговор пересчитаем позже.
         conn.execute(
-            """UPDATE conversations SET title = %s, summary = %s, emoji = %s, topics = %s, error = NULL,
+            """UPDATE conversations SET title = %s, summary = %s, emoji = %s, topics = %s, error = NULL, emb = NULL,
                    updated_at = now(), status = CASE WHEN status = 'processing' THEN 'done' ELSE status END
                WHERE id = %s""",
             (crypto.seal(title), crypto.seal(summary), emoji, crypto.seal_list(topics), conv_id),
@@ -367,36 +367,12 @@ def export_tasks(conn):
             conn.execute("UPDATE tasks SET export_error = %s WHERE id = %s", (str(exc)[:500], t["id"]))
 
 
-def sync_connector_tasks(conn):
-    """Новые задачи -> подключённые сервисы (Notion, Linear), где включено «Новые задачи»."""
-    for c in conn.execute("SELECT id, settings, connected_at FROM connections WHERE status = 'connected'").fetchall():
-        if not (c["settings"] or {}).get("tasks") or not connectors.allowed(c["settings"], "write"):
-            continue  # «создавать и изменять» выключено — задачи туда не пишем
-        key = "c:" + c["id"]
-        tasks = conn.execute(
-            """SELECT t.id, t.text, t.due, t.assignee, c.title AS conversation
-               FROM tasks t LEFT JOIN conversations c ON c.id = t.conversation_id
-               WHERE t.status = 'open' AND t.created_at >= %s
-                 AND NOT EXISTS (SELECT 1 FROM task_exports e WHERE e.task_id = t.id AND e.ext_id = %s)
-               ORDER BY t.id LIMIT 3""", (c["connected_at"], key)).fetchall()
-        for t in tasks:
-            try:
-                ok, ref = connectors.send_task(conn, c["id"], t)
-            except Exception as exc:  # noqa: BLE001
-                ok, ref = False, str(exc)[:300]
-            conn.execute(
-                """INSERT INTO task_exports (task_id, ext_id, ok, ref, error) VALUES (%s, %s, %s, %s, %s)
-                   ON CONFLICT (task_id, ext_id) DO NOTHING""",
-                (t["id"], key, ok, ref if ok else None, None if ok else crypto.seal(ref)))
-            log.info("task %s -> %s: %s", t["id"], c["id"], "ok" if ok else "failed")
-
-
 def sync_task_integrations(conn):
-    """Лента задач -> подключённые сервисы. Каждая новая задача уходит во все включённые расширения
-    с хуком on_task (Notion, GitHub Issues, Telegram и любые другие из маркетплейса)."""
+    """Новые задачи -> только вебхуки, которые пользователь сам подписал на событие «задача» (n8n, Make…).
+    В интеграции-инструменты (Notion, GitHub, Telegram…) задачи сами не уходят: это инструменты агента —
+    он пользуется ими, когда просят или когда так велит постоянное правило пользователя."""
     rows = conn.execute("SELECT id, manifest, settings, installed_at FROM extensions WHERE enabled").fetchall()
-    sinks = [r for r in rows if (r["manifest"].get("on_task") or (r["manifest"].get("on") or {}).get("task"))
-             and extensions.is_ready(r)]
+    sinks = [r for r in rows if (r["manifest"].get("on") or {}).get("task") and extensions.is_ready(r)]
     if not sinks:
         return
     for sink in sinks:
@@ -454,9 +430,13 @@ def main():
                     except Exception:  # noqa: BLE001
                         log.exception("profile voice failed")
                     try:
-                        sync_connector_tasks(conn)  # Notion, Linear: новые задачи — туда
+                        routines.run_due(conn)  # задания по расписанию: «каждый день в 23:00 — сводка в Notion»
                     except Exception:  # noqa: BLE001
-                        log.exception("connector task sync failed")
+                        log.exception("schedules failed")
+                    try:
+                        memorylib.embed_tick(conn)  # смысловые отпечатки памяти, событий и итогов (поиск по смыслу)
+                    except Exception:  # noqa: BLE001
+                        log.exception("memory vectors failed")
                     try:
                         memorylib.review_tick(conn)  # один раз: накопленная память — без мусора (в архив)
                     except Exception:  # noqa: BLE001

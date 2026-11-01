@@ -104,6 +104,11 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_agent", null) ?: if (chatLevel.startsWith("claude")) "claude" else "mnemo"
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
+    /** Последний ответ задания по расписанию, о котором уже уведомили (номер запуска агента). */
+    var routineSeenRun: Long
+        get() = sp.getLong("routine_seen_run", -1L)
+        set(value) = sp.edit().putLong("routine_seen_run", value).apply()
+
     /** Знакомство, ещё не отправленное на сервер (сервер не был подключён): JSON {name, about, goals, from, to}. */
     var pendingProfile: String?
         get() = sp.getString("pending_profile", null)

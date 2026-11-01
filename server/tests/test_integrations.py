@@ -282,7 +282,7 @@ def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
     page = client.get("/oauth/callback?state=<b>x</b>&code=1", auth=False)
     assert page.status_code == 200 and "<b>x</b>" not in page.content.decode()
 
-    assert client.post("/api/connectors/notion", json={"tasks": False}).json()["ok"]
+    assert client.post("/api/connectors/notion", json={"read": True}).json()["ok"]
     assert client.delete("/api/connectors/notion").json()["ok"]
     assert next(i for i in client.get("/api/connectors").json()["items"] if i["id"] == "notion")["status"] == "off"
 
@@ -357,3 +357,123 @@ def test_service_tools_are_picked_for_the_task(conn, monkeypatch):  # noqa: F811
     monkeypatch.setattr(llm, "chat_json", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     fallback = [t["name"] for t in connectors.pick_tools(conn, tools, "что-то")]
     assert fallback[:2] == ["notion-search", "notion-create-pages"] and len(fallback) == connectors.TOOL_LIMIT
+
+
+def _fake_vectors(monkeypatch):
+    """Отпечатки без сети: по ключевым словам — «Notion»/«сводк» рядом, «кошка» далеко."""
+    import numpy as np
+
+    from neuro import embed
+    axes = ["notion", "сводк", "кошк", "мама", "кофе", "переех"]
+
+    def vec(t):
+        t = t.lower()
+        v = np.array([1.0 if a in t else 0.0 for a in axes] + [0.05], dtype=np.float32)
+        return v / np.linalg.norm(v)
+
+    monkeypatch.setattr(embed, "available", lambda: True)
+    monkeypatch.setattr(embed, "vectors", lambda conn, texts, timeout=30: [vec(t) for t in texts])
+    monkeypatch.setattr(embed, "one", lambda conn, text: vec(text))
+
+
+def test_memory_recall_and_merge(conn, monkeypatch):  # noqa: F811
+    """Память: поиск по смыслу (в контекст — только нужное), похожие факты объединяются (как в Mem0)."""
+    from neuro import llm, memory
+    from neuro.assistant import insert_memories
+    conn.execute("DELETE FROM memories")
+    _fake_vectors(monkeypatch)
+    calls = []
+
+    def fake_json(conn_, task, system, user, **kw):
+        calls.append(kw.get("usage"))
+        old_id = int(user.split("[")[1].split("]")[0])
+        return {"actions": [{"fact": 0, "op": "update", "id": old_id, "text": "Женя переехал в Москву, на Арбат"}]}
+
+    monkeypatch.setattr(llm, "chat_json", fake_json)
+    insert_memories(conn, None, ["Мама любит кофе без сахара", "Женя переехал в Казань"], "agent")
+    assert conn.execute("SELECT count(*) AS n FROM memories WHERE emb IS NULL").fetchone()["n"] == 0  # отпечатки сразу
+    # уточнение старого факта — обновляется старая запись, а не появляется вторая
+    insert_memories(conn, None, ["Женя переехал в Москву на Арбат"], "conversation")
+    texts = [r["text"] for r in conn.execute("SELECT text FROM memories WHERE archived_at IS NULL ORDER BY id").fetchall()]
+    assert texts == ["Мама любит кофе без сахара", "Женя переехал в Москву, на Арбат"] and calls == ["memory_update"]
+    hits = memory.recall(conn, "что пьёт мама? кофе", k=3, kinds=("memory",))
+    assert hits[0]["text"].startswith("Мама любит кофе")
+    assert all("кошк" not in h["text"] for h in hits)
+
+
+def test_rules_and_schedules(conn, monkeypatch):  # noqa: F811
+    """Правила и расписание агента: записать, увидеть в каждом запросе, выполнить в срок, удалить по просьбе."""
+    from datetime import datetime, timedelta, timezone
+
+    from neuro import agent_core, llm, routines
+    from neuro.assistant import TZ
+    conn.execute("DELETE FROM agent_rules")
+    conn.execute("DELETE FROM agent_schedules")
+    # следующий запуск: «каждый день в 23:00», по будням, один раз
+    after = datetime(2026, 11, 6, 22, 0, tzinfo=TZ)  # пятница
+    assert routines.next_run("23:00", [], None, after) == datetime(2026, 11, 6, 23, 0, tzinfo=TZ)
+    assert routines.next_run("09:00", [0, 1, 2, 3, 4], None, after) == datetime(2026, 11, 9, 9, 0, tzinfo=TZ)
+    assert routines.parse_days("пн, пятница") == [0, 4] and routines.parse_days("daily") == []
+
+    steps = []
+
+    def fake_chat(conn_, task, messages, tools=None, **kw):
+        steps.append(messages)
+        names = [t["function"]["name"] for t in tools or []]
+        assert {"remember_rule", "schedule_task", "forget_rule", "cancel_schedule"} <= set(names)
+        if len(steps) == 1:
+            return {"tool_calls": [
+                {"id": "1", "function": {"name": "remember_rule", "arguments": '{"text": "Сводки дня — в Notion, страница Дневник"}'}},
+                {"id": "2", "function": {"name": "schedule_task", "arguments": json.dumps(
+                    {"title": "Сводка дня", "prompt": "Сделай сводку дня и положи в Notion", "time": "23:00"})}}]}
+        return {"content": "Готово: каждый день в 23:00."}
+
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    res = agent_core.ask(conn, "делай сводку в нотион каждый день в 23", level="tools", channel="chat")
+    assert res["answer"].startswith("Готово")
+    rule = routines.rules(conn)[0]
+    sch = routines.schedules(conn)[0]
+    assert rule["text"].startswith("Сводки дня") and sch["time_of_day"] == "23:00" and sch["next_run_at"]
+    # в следующем запросе агент видит правило и задание с номерами
+    steps.clear()
+    monkeypatch.setattr(llm, "chat", lambda conn_, task, messages, tools=None, **kw: steps.append(messages) or {"content": "ок"})
+    agent_core.ask(conn, "привет", level="tools", channel="chat")
+    system = "\n".join(m["content"] for m in steps[0] if m["role"] == "system")
+    assert f"[правило {rule['id']}]" in system and f"[задание {sch['id']}]" in system and "каждый день в 23:00" in system
+
+    # пришло время — агент выполняет задание сам, ответ — в чат (канал schedule)
+    conn.execute("UPDATE agent_schedules SET next_run_at = now() - interval '1 minute' WHERE id = %s", (sch["id"],))
+    asked = []
+    monkeypatch.setattr(agent_core, "ask", lambda conn_, q, **kw: asked.append((q, kw)) or {"run_id": 1, "answer": "ok"})
+    assert routines.run_due(conn) == 1
+    assert asked[0][0].endswith("Сделай сводку дня и положи в Notion") and asked[0][1]["channel"] == "schedule"
+    again = conn.execute("SELECT next_run_at, last_status FROM agent_schedules WHERE id = %s", (sch["id"],)).fetchone()
+    assert again["last_status"] == "done" and again["next_run_at"] > datetime.now(timezone.utc)
+    assert routines.run_due(conn) == 0  # не повторяется
+
+    # «убери это» — удаляется по номеру
+    assert routines.forget_rule(conn, rule["id"]) and routines.cancel_schedule(conn, sch["id"])
+    assert routines.prompt_block(conn) == ""
+    # прошедшее время одного раза не принимается
+    try:
+        routines.add_schedule(conn, "x", "y", once_at=(datetime.now(TZ) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"))
+        raise AssertionError("должно быть отклонено")
+    except ValueError:
+        pass
+
+
+def test_routines_http(conn):  # noqa: F811
+    from neuro import routines
+    conn.execute("DELETE FROM agent_rules")
+    conn.execute("DELETE FROM agent_schedules")
+    client = Asgi(_gw().app)
+    rid = routines.add_rule(conn, "Итоги встреч с клиентами — в Notion")
+    sid = routines.add_schedule(conn, "Сводка", "Сводка дня в Notion", "23:00", "weekdays")["id"]
+    data = client.get("/api/agent/routines").json()
+    assert data["rules"][0]["text"].startswith("Итоги встреч") and data["schedules"][0]["when"] == "по будням в 23:00"
+    assert client.post(f"/api/agent/schedules/{sid}", json={"enabled": False}).json()["ok"]
+    assert client.get("/api/agent/routines").json()["schedules"][0]["enabled"] is False
+    assert client.delete(f"/api/agent/rules/{rid}").json()["ok"]
+    assert client.delete(f"/api/agent/schedules/{sid}").json()["ok"]
+    assert client.get("/api/agent/routines").json() == {"rules": [], "schedules": []}
+    assert client.get("/api/agent/results?after=0").status_code == 200

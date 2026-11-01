@@ -567,6 +567,14 @@
     <string name="resume_recording">Kayda devam et</string>
     <string name="retry">Tekrar dene</string>
     <string name="right_now">Şu anda</string>
+    <string name="routines_channel">Asistan görevleri</string>
+    <string name="routines_empty_text">Asistana söyleyin, örneğin: “her gün 23:00\'te Notion\'a gün özeti yap” ya da “müşteri toplantı notlarını Notion\'a koy”</string>
+    <string name="routines_empty_title">Henüz bir şey yok</string>
+    <string name="routines_hint">Asistan bunları kendisi ekler ve kaldırır; sohbette söyleyin, ör. “23:00 özetini kaldır”</string>
+    <string name="routines_next">Sonraki: %1$s</string>
+    <string name="routines_rules">Kurallar</string>
+    <string name="routines_schedules">Zamanlama</string>
+    <string name="routines_title">Kurallar ve zamanlama</string>
     <string name="same_name_q">Listede zaten %1$s var</string>
     <string name="same_name_text">Aynı kişiyse sesleri birleştirin, tanıma daha doğru olur.</string>
     <string name="save">Kaydet</string>
@@ -676,8 +684,6 @@
     <string name="svc_read">Görüntüleme</string>
     <string name="svc_read_sub">Sayfaları arama ve okuma</string>
     <string name="svc_reconnect">Yeniden bağla</string>
-    <string name="svc_tasks">Yeni görevler: %1$s</string>
-    <string name="svc_tasks_sub">Konuşmalardaki görevler orada kendiliğinden görünür</string>
     <string name="svc_title">Servisler</string>
     <string name="svc_write">Oluşturma ve düzenleme</string>
     <string name="svc_write_sub">Yeni sayfalar, düzenlemeler ve yorumlar</string>

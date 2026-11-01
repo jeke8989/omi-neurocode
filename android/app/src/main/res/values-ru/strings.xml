@@ -567,6 +567,14 @@
     <string name="resume_recording">Продолжить запись</string>
     <string name="retry">Повторить</string>
     <string name="right_now">Прямо сейчас</string>
+    <string name="routines_channel">Задания ассистента</string>
+    <string name="routines_empty_text">Скажите ассистенту, например: «каждый день в 23:00 делай сводку дня в Notion» или «итоги встреч с клиентами клади в Notion»</string>
+    <string name="routines_empty_title">Пока ничего</string>
+    <string name="routines_hint">Ассистент ставит и убирает их сам — скажите в чате, например: «убери сводку в 23:00»</string>
+    <string name="routines_next">Ближайший раз: %1$s</string>
+    <string name="routines_rules">Правила</string>
+    <string name="routines_schedules">Расписание</string>
+    <string name="routines_title">Правила и расписание</string>
     <string name="same_name_q">%1$s уже есть в списке</string>
     <string name="same_name_text">Если это один человек, объедините голоса — узнавание станет точнее.</string>
     <string name="save">Сохранить</string>
@@ -676,8 +684,6 @@
     <string name="svc_read">Просматривать</string>
     <string name="svc_read_sub">Искать и читать страницы</string>
     <string name="svc_reconnect">Подключить заново</string>
-    <string name="svc_tasks">Новые задачи — в %1$s</string>
-    <string name="svc_tasks_sub">Задачи из разговоров появятся там сами</string>
     <string name="svc_title">Сервисы</string>
     <string name="svc_write">Создавать и изменять</string>
     <string name="svc_write_sub">Новые страницы, правки и комментарии</string>

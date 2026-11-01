@@ -257,6 +257,7 @@ object Core {
                 } catch (_: Exception) {
                 }
                 Morning.check(app)
+                RoutineNotifications.check(app)
             }
             delay(3 * 60_000L)
         }

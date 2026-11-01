@@ -210,6 +210,25 @@ PHRASES: dict[str, dict[str, str]] = {
         "ru": "👤 Разговоры с: {name}", "en": "👤 Conversations with: {name}",
         "tr": "👤 Şununla konuşmalar: {name}", "es": "👤 Conversaciones con: {name}",
     },
+    "tool.forget_memory": {
+        "ru": "🗑 Убираю запись из памяти", "en": "🗑 Removing a memory",
+        "tr": "🗑 Bir anıyı kaldırıyorum", "es": "🗑 Quitando un recuerdo",
+    },
+    "tool.remember_rule": {
+        "ru": "📌 Запоминаю правило: {text}", "en": "📌 Saving a rule: {text}",
+        "tr": "📌 Kuralı kaydediyorum: {text}", "es": "📌 Guardando una regla: {text}",
+    },
+    "tool.forget_rule": {
+        "ru": "📌 Удаляю правило", "en": "📌 Removing a rule", "tr": "📌 Kuralı siliyorum", "es": "📌 Quitando una regla",
+    },
+    "tool.schedule_task": {
+        "ru": "⏰ Ставлю задание по расписанию", "en": "⏰ Scheduling a task",
+        "tr": "⏰ Zamanlanmış görev ekliyorum", "es": "⏰ Programando una tarea",
+    },
+    "tool.cancel_schedule": {
+        "ru": "⏰ Убираю задание", "en": "⏰ Removing a scheduled task",
+        "tr": "⏰ Zamanlanmış görevi kaldırıyorum", "es": "⏰ Quitando una tarea programada",
+    },
     "tool.important_conversations": {
         "ru": "⭐ Смотрю важные разговоры", "en": "⭐ Looking at important conversations",
         "tr": "⭐ Önemli konuşmalara bakıyorum", "es": "⭐ Revisando conversaciones importantes",

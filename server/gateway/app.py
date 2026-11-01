@@ -28,7 +28,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
-                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, routines, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -635,6 +635,58 @@ async def api_profile_voice(request: Request):
     except (KeyError, TypeError, ValueError) as exc:
         return Json({"error": str(exc)}, status_code=400)
     return Json({"voice": job["status"]})
+
+
+async def api_routines(request: Request):
+    """Правила и расписание агента (их ставит и убирает сам агент по просьбе в чате; здесь — посмотреть,
+    выключить, удалить)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+
+    def work(conn):
+        return {
+            "rules": [{"id": r["id"], "text": r["text"], "created_at": r["created_at"]} for r in routines.rules(conn)],
+            "schedules": [{"id": x["id"], "title": x["title"], "prompt": x["prompt"], "when": routines.describe(x),
+                           "next_run_at": x["next_run_at"], "enabled": x["enabled"], "last_run_at": x["last_run_at"],
+                           "last_status": (x["last_status"] or "").split(":")[0] or None}
+                          for x in routines.schedules(conn)],
+        }
+
+    return Json(await _sync(work))
+
+
+async def api_rule(request: Request):
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    rid = request.path_params["id"]
+    ok = await _sync(lambda conn: routines.forget_rule(conn, rid))
+    return Json({"ok": ok}, status_code=200 if ok else 404)
+
+
+async def api_schedule(request: Request):
+    """POST {"enabled": bool}; DELETE — удалить."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    sid = request.path_params["id"]
+    if request.method == "DELETE":
+        ok = await _sync(lambda conn: routines.cancel_schedule(conn, sid))
+    else:
+        body = await _body(request) or {}
+        ok = await _sync(lambda conn: routines.set_enabled(conn, sid, bool(body.get("enabled", True))))
+    return Json({"ok": ok}, status_code=200 if ok else 404)
+
+
+async def api_routine_results(request: Request):
+    """Готовые ответы заданий по расписанию после run_id=after — приложение показывает уведомление."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    after = _clamp(request.query_params.get("after"), 0, 0, 2**62)
+
+    def work(conn):
+        return {"items": [{"run_id": r["id"], "question": r["question"], "answer": r["answer"], "status": r["status"],
+                           "finished_at": r["finished_at"]} for r in routines.results(conn, after)]}
+
+    return Json(await _sync(work))
 
 
 async def api_conversation_reprocess(request: Request):
@@ -1318,8 +1370,8 @@ async def oauth_callback(request: Request):
 
 
 async def api_connector(request: Request):
-    """POST {"tasks", "read", "write": true|false} — новые задачи в сервис и что ассистенту можно в нём
-    (просматривать; создавать и изменять); DELETE — отключить."""
+    """POST {"read", "write": true|false} — что ассистенту можно в сервисе (просматривать; создавать и
+    изменять); DELETE — отключить."""
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
     cid = request.path_params["id"]
@@ -1333,7 +1385,7 @@ async def api_connector(request: Request):
         if row is None:
             return False
         st = dict(row["settings"] or {})
-        for key in ("tasks", "read", "write"):
+        for key in ("read", "write"):
             if key in body:
                 st[key] = bool(body[key])
         conn.execute("UPDATE connections SET settings = %s::jsonb WHERE id = %s", (json.dumps(st), cid))
@@ -1907,6 +1959,10 @@ app = Starlette(
         Route("/api/conversations/{id:int}/reprocess", api_conversation_reprocess, methods=["POST"]),
         Route("/api/conversations/{id:int}/important", api_conversation_important, methods=["POST"]),
         Route("/api/important", api_important),
+        Route("/api/agent/routines", api_routines),
+        Route("/api/agent/rules/{id:int}", api_rule, methods=["DELETE"]),
+        Route("/api/agent/schedules/{id:int}", api_schedule, methods=["POST", "DELETE"]),
+        Route("/api/agent/results", api_routine_results),
         Route("/api/profile", api_profile, methods=["GET", "POST"]),
         Route("/api/profile/voice", api_profile_voice, methods=["POST"]),
         Route("/api/tasks", api_tasks),

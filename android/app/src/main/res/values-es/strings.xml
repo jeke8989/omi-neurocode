@@ -567,6 +567,14 @@
     <string name="resume_recording">Reanudar grabación</string>
     <string name="retry">Reintentar</string>
     <string name="right_now">Ahora mismo</string>
+    <string name="routines_channel">Tareas del asistente</string>
+    <string name="routines_empty_text">Díselo al asistente, por ejemplo: «cada día a las 23:00 haz un resumen del día en Notion» o «guarda las notas de reuniones con clientes en Notion»</string>
+    <string name="routines_empty_title">Aún nada</string>
+    <string name="routines_hint">El asistente los añade y quita solo: dilo en el chat, por ejemplo «quita el resumen de las 23:00»</string>
+    <string name="routines_next">Próxima vez: %1$s</string>
+    <string name="routines_rules">Reglas</string>
+    <string name="routines_schedules">Horario</string>
+    <string name="routines_title">Reglas y horario</string>
     <string name="same_name_q">%1$s ya está en la lista</string>
     <string name="same_name_text">Si es la misma persona, une las voces para reconocerla mejor.</string>
     <string name="save">Guardar</string>
@@ -676,8 +684,6 @@
     <string name="svc_read">Ver</string>
     <string name="svc_read_sub">Buscar y leer páginas</string>
     <string name="svc_reconnect">Volver a conectar</string>
-    <string name="svc_tasks">Nuevas tareas a %1$s</string>
-    <string name="svc_tasks_sub">Las tareas de tus conversaciones aparecerán allí solas</string>
     <string name="svc_title">Servicios</string>
     <string name="svc_write">Crear y editar</string>
     <string name="svc_write_sub">Páginas nuevas, cambios y comentarios</string>

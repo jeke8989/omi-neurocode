@@ -75,6 +75,7 @@ private fun Screen(route: Route) {
         is Route.Chat -> ChatScreen(route.prefill, route.context, route.contextTitle)
         Route.Search -> SearchScreen()
         Route.Important -> ImportantScreen()
+        Route.Routines -> RoutinesScreen()
         Route.About -> AboutScreen()
         is Route.Day -> DayScreen(route.day)
         Route.Settings -> SettingsScreen()

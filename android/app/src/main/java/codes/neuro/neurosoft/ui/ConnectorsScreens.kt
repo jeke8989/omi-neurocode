@@ -220,13 +220,6 @@ fun ConnectorScreen(id: String) {
                                 icon = Icons.Edit, subtitle = stringResource(R.string.svc_write_sub))
                         }
                     }
-                    Group {
-                        item {
-                            ToggleRow(stringResource(R.string.svc_tasks, s.name), s.tasks && s.write,
-                                { change(s.copy(tasks = it), "tasks", it) }, icon = Icons.Check,
-                                subtitle = stringResource(R.string.svc_tasks_sub), enabled = s.write)
-                        }
-                    }
                 }
                 Group {
                     item {

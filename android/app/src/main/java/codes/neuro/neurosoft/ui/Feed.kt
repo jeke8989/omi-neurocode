@@ -93,6 +93,8 @@ sealed interface Route {
     data class Chat(val prefill: String? = null, val context: String? = null, val contextTitle: String? = null) : Route
     data object Search : Route
     data object Important : Route
+    /** Правила и расписание агента: что он делает сам и когда. */
+    data object Routines : Route
     /** Знакомство: имя, занятие, цели и голос (из настроек; в онбординге — шаг). */
     data object About : Route
     data class Day(val day: String) : Route
