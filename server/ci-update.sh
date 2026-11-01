@@ -171,9 +171,9 @@ diag() {
            | sort | uniq -c | sort -rn | head -5 | awk '{print $2"x"$1}' | tr '\n' ' ' || true)"
        done)
   mem=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo '?')
-  echo "::notice title=Сервисы::$ps"
-  echo "::notice title=Контейнеры::$cs"
-  echo "::notice title=Ресурсы::диск свободно $(free_mb) МБ из $(df -Pm / | awk 'NR==2{print $2}') МБ, память доступно ${mem} МБ"
+  # GitHub показывает не больше 10 заметок на шаг — поэтому связанное собрано в одну строку
+  echo "::notice title=Сервисы::$ps | $cs"
+  echo "::notice title=Сервер::диск свободно $(free_mb) МБ из $(df -Pm / | awk 'NR==2{print $2}') МБ, память доступно ${mem} МБ; health $(curl -sS -m 5 "http://127.0.0.1:${PORT:-8090}/health/full" 2>&1 | head -c 200 || true)"
   echo "::notice title=Ошибки в логах::$ex"
   # где именно падает (файл, строка, тип ошибки) — без содержимого
   local tb
@@ -182,16 +182,21 @@ diag() {
            | sed -E 's/^\S+\s+\|\s+//; s/(Error: .{0,90}).*/\1/' | tail -4 | sed "s/^/$sv: /"
        done | tr '\n' ' ' | cut -c1-900)
   [ -n "$tb" ] && echo "::notice title=Последняя ошибка::$tb"
-  echo "::notice title=Health::$(curl -sS -m 5 "http://127.0.0.1:${PORT:-8090}/health/full" 2>&1 | head -c 400 || true)"
   # расход ИИ — только цифры по задачам и моделям, без содержимого
   local q
   q="SELECT task || ' ' || model || ' вызовов=' || count(*) || ' вход=' || coalesce(sum(prompt_tokens),0)
      || ' выход=' || coalesce(sum(completion_tokens),0) || ' $=' || round(coalesce(sum(cost),0)::numeric, 3)
      FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY task, model ORDER BY sum(cost) DESC NULLS LAST LIMIT 15"
-  echo "::notice title=ИИ за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
+  local ai_tasks ai_days ai_total
+  ai_tasks=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
   q="SELECT to_char(created_at AT TIME ZONE 'Europe/Moscow', 'MM-DD') || ' $' || round(sum(cost)::numeric, 3)
      || ' (' || count(*) || ')' FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1 ORDER BY 1"
-  echo "::notice title=ИИ по дням::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)"
+  ai_days=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
+  q="SELECT 'всего с ' || to_char(min(created_at) AT TIME ZONE 'Europe/Moscow', 'DD.MM HH24:MI') || ': $'
+     || round(coalesce(sum(cost), 0)::numeric, 3) || ' за ' || round(extract(epoch FROM now() - min(created_at)) / 86400.0, 1)
+     || ' дн.' FROM llm_usage"
+  ai_total=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)
+  echo "::notice title=ИИ::$ai_total | по дням: $ai_days | по задачам за 7 дней: $ai_tasks"
   local vol
   vol="SELECT 'разговоров=' || count(*) || ' фраз=' || (SELECT count(*) FROM segments WHERE started_at > now() - interval '7 days')
      || ' вопросов=' || (SELECT count(*) FROM questions WHERE asked_at > now() - interval '7 days')
@@ -234,8 +239,7 @@ diag() {
      || ', памяти ' || (SELECT count(*) FROM memories WHERE text NOT LIKE 'enc_:%%')
      || ', точек ' || (SELECT count(*) FROM locations WHERE lat IS NOT NULL)
      || ', людей ' || (SELECT count(*) FROM people WHERE name NOT LIKE 'enc_:%%')"
-  echo "::notice title=Шифрование::$(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
-  echo "::notice title=Объём за 7 дней::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true)"
+  echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true)"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 
