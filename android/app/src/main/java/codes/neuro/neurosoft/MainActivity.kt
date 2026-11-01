@@ -42,6 +42,7 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
                 Nav.reset(Route.Home)
                 codes.neuro.neurosoft.ui.HomeState.page.value = 1
             }
+            open == "wake" -> Core.wakeFromStandby(this, fromBackground = false)  // «Кулон снова рядом»
             open.startsWith("day:") -> {  // утренняя сводка — сразу вчерашний день
                 Nav.reset(Route.Home)
                 Nav.push(Route.Day(open.removePrefix("day:")))

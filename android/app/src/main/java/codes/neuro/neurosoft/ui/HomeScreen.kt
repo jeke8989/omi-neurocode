@@ -394,6 +394,7 @@ private fun LiveStrip() {
     val upload by Core.upload.collectAsState()
     val running by Core.serviceRunning.collectAsState()
     val paused by Core.paused.collectAsState()
+    val standby by Core.standby.collectAsState()
     val voice by Core.voice.state.collectAsState()
     val state = rememberLensState()
     val fmt = rememberFmt()
@@ -425,7 +426,10 @@ private fun LiveStrip() {
         !Core.prefs.serverConfigured || upload.error == "auth" -> Strip(stringResource(R.string.live_server_pair),
             stringResource(R.string.live_server_pair_text), stringResource(R.string.connect), { Nav.push(Route.Server) },
             warn = true)
-        !running -> Strip(stringResource(R.string.live_off), stringResource(R.string.live_off_text),
+        // кулон давно не на связи: запись и уведомление выключены, Bluetooth ждёт его сам
+        !running && standby -> Strip(stringResource(R.string.pendant_away_title), stringResource(R.string.pendant_away_text),
+            stringResource(R.string.pendant_search), { Core.wakeFromStandby(context, fromBackground = false) })
+        !running -> Strip(stringResource(R.string.live_off), null,
             stringResource(R.string.turn_on), { Core.startCapture(context) })
         voice.phase == VoiceAssistant.Phase.LISTENING -> Strip(stringResource(R.string.live_listening), null,
             stringResource(R.string.cancel), { Core.voice.cancel() })

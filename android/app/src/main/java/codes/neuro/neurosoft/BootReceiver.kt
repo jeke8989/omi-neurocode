@@ -13,6 +13,11 @@ class BootReceiver : BroadcastReceiver() {
         if (!prefs.autoStart || prefs.deviceAddress == null || !Permissions.bluetoothGranted(context)) return
         try {
             Core.init(context)
+            // кулон ждали без записи — после перезагрузки снова ждём его через Bluetooth, без уведомления
+            if (prefs.standby) {
+                PendantWatch.start(context, prefs.deviceAddress!!)
+                return
+            }
             Core.startCapture(context)
         } catch (e: Exception) {
             Log.w("NeuroSoft", "auto start failed", e)

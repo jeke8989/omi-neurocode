@@ -458,7 +458,13 @@
     <string name="pause_recording">Приостановить запись</string>
     <string name="pause_sub">Кнопка-вопрос продолжит работать</string>
     <string name="pendant">Кулон</string>
+    <string name="pendant_away_text">Включу запись сам, когда он будет рядом</string>
+    <string name="pendant_away_title">Кулон не на связи</string>
+    <string name="pendant_back_text">Нажмите, чтобы продолжить запись</string>
+    <string name="pendant_back_title">Кулон снова рядом</string>
     <string name="pendant_button">Кнопка кулона</string>
+    <string name="pendant_channel">Кулон</string>
+    <string name="pendant_search">Искать</string>
     <string name="people_empty_text">Кулон начнёт различать голоса после первых разговоров. Отпечатки голосов считаются и хранятся только на вашем сервере.</string>
     <string name="people_empty_title">Пока никого</string>
     <string name="people_hints">Подсказки</string>

@@ -66,6 +66,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("paused", false)
         set(value) = sp.edit().putBoolean("paused", value).apply()
 
+    /** Кулон давно не на связи: запись и её уведомление выключены, Bluetooth ждёт кулон сам (PendantWatch). */
+    var standby: Boolean
+        get() = sp.getBoolean("standby", false)
+        set(value) = sp.edit().putBoolean("standby", value).apply()
+
     /** Реагировать на кнопку кулона. */
     var buttonActions: Boolean
         get() = sp.getBoolean("button_actions", true)

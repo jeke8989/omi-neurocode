@@ -77,6 +77,8 @@ data class DeviceStatus(
  */
 object Core {
     private const val TAG = "Mnemo"
+    private const val STANDBY_AFTER_MS = 20 * 60_000L
+    private const val QUICK_STANDBY_MS = 2 * 60_000L
     const val NOTIFICATION_CHANNEL = "capture"
     const val NOTIFICATION_ID = 1
 
@@ -105,6 +107,12 @@ object Core {
     val serviceRunning: StateFlow<Boolean> = _serviceRunning
     private val _paused = MutableStateFlow(false)
     val paused: StateFlow<Boolean> = _paused
+    private val _standby = MutableStateFlow(false)
+    /** Кулон давно не на связи — ждём его без записи и без постоянного уведомления. */
+    val standby: StateFlow<Boolean> = _standby
+    /** Сколько искать кулон, прежде чем перейти в ожидание: обычно 20 минут, после «Искать» — 2. */
+    @Volatile private var standbyAfterMs = STANDBY_AFTER_MS
+    @Volatile private var searchingSince = 0L
     private val _outages = MutableStateFlow<List<Outage>>(emptyList())
     val outages: StateFlow<List<Outage>> = _outages
 
@@ -166,6 +174,7 @@ object Core {
         uploader.batchMode = { prefs.batterySaver && !foreground && voice.state.value.phase == VoiceAssistant.Phase.IDLE }
         location = LocationTracker(app) { loc -> onLocation(loc) }
         _paused.value = prefs.paused
+        _standby.value = prefs.standby
         _outages.value = prefs.outages
         _device.value = DeviceStatus(address = prefs.deviceAddress, name = prefs.deviceName,
             heardTodayMs = prefs.heardToday(LocalDate.now().toString()))
@@ -340,10 +349,64 @@ object Core {
 
     // ------------------------------------------------------------------ запись (сервис)
     fun startCapture(context: Context) {
+        leaveStandby(context)
         ContextCompat.startForegroundService(context, Intent(context, OmiService::class.java))
     }
 
+    // ------------------------------------------------------------------ ожидание кулона
+    private fun leaveStandby(context: Context) {
+        if (!prefs.standby && !_standby.value) return
+        PendantWatch.stop(context)
+        prefs.standby = false
+        _standby.value = false
+    }
+
+    /** Кулон долго не на связи: выключаем запись и уведомление, за кулоном следит Bluetooth телефона. */
+    private fun enterStandby() {
+        val address = prefs.deviceAddress ?: return
+        Log.i(TAG, "pendant away for ${(System.currentTimeMillis() - searchingSince) / 60_000} min: standby")
+        prefs.standby = true
+        _standby.value = true
+        PendantWatch.start(app, address)  // не вышло (Bluetooth выключен) — проснёмся, когда откроют приложение
+        stopService()
+    }
+
+    private fun stopService() {
+        app.stopService(Intent(app, OmiService::class.java))
+    }
+
+    /**
+     * Кулон снова рядом (fromBackground — увидел Bluetooth) или владелец нажал «Искать»: включаем запись.
+     * Из фона Android может не дать запустить службу — тогда одно тихое уведомление «Кулон снова рядом».
+     */
+    fun wakeFromStandby(context: Context, fromBackground: Boolean) {
+        standbyAfterMs = if (fromBackground) STANDBY_AFTER_MS else QUICK_STANDBY_MS
+        try {
+            startCapture(context)
+        } catch (e: Exception) {
+            Log.w(TAG, "cannot start capture from background", e)
+            prefs.standby = true
+            _standby.value = true
+            PendantWatch.askToResume(context)
+        }
+    }
+
+    /** Раз в секунду: кулон ищем слишком долго — в ожидание. */
+    private fun checkStandby(now: Long) {
+        val d = _device.value
+        if (!_serviceRunning.value || d.state == ConnState.CONNECTED || prefs.deviceAddress == null) {
+            searchingSince = 0
+            return
+        }
+        if (searchingSince == 0L) searchingSince = now
+        if (now - searchingSince > standbyAfterMs) {
+            searchingSince = 0
+            enterStandby()
+        }
+    }
+
     fun stopCapture(context: Context) {
+        leaveStandby(context)  // выключили запись сами — кулон больше не ждём
         context.stopService(Intent(context, OmiService::class.java))
     }
 
@@ -456,6 +519,7 @@ object Core {
     }
 
     fun forgetDevice(context: Context) {
+        leaveStandby(context)
         stopCapture(context)
         prefs.deviceAddress = null
         prefs.deviceName = null
@@ -561,6 +625,7 @@ object Core {
                 )
             }
             if (++tick % 5 == 0) updateNotification()
+            checkStandby(System.currentTimeMillis())
             if (_serviceRunning.value && System.currentTimeMillis() - lastPhotoSync > 30 * 60_000) syncPhotosNow()
         }
     }
@@ -572,6 +637,7 @@ object Core {
         val prev = _device.value
         val since = when {
             state == ConnState.CONNECTED -> {
+                standbyAfterMs = STANDBY_AFTER_MS  // кулон нашёлся — дальше снова ждём его 20 минут
                 if (prev.disconnectedSince > 0 && now - prev.disconnectedSince > 3_000) {
                     val list = (prefs.outages + Outage(prev.disconnectedSince, now)).takeLast(20)
                     prefs.outages = list

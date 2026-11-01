@@ -459,7 +459,13 @@
     <string name="pause_recording">Pause recording</string>
     <string name="pause_sub">The question button keeps working</string>
     <string name="pendant">Pendant</string>
+    <string name="pendant_away_text">Recording turns on by itself when it\'s nearby</string>
+    <string name="pendant_away_title">The pendant is away</string>
+    <string name="pendant_back_text">Tap to continue recording</string>
+    <string name="pendant_back_title">The pendant is back</string>
     <string name="pendant_button">Pendant button</string>
+    <string name="pendant_channel">Pendant</string>
+    <string name="pendant_search">Search</string>
     <string name="people_empty_text">The pendant starts telling voices apart after the first conversations. Voiceprints are computed and stored only on your server.</string>
     <string name="people_empty_title">No one yet</string>
     <string name="people_hints">Suggestions</string>

@@ -458,7 +458,13 @@
     <string name="pause_recording">Kaydı duraklat</string>
     <string name="pause_sub">Soru düğmesi çalışmaya devam eder</string>
     <string name="pendant">Kolye</string>
+    <string name="pendant_away_text">Yakına gelince kayıt kendiliğinden açılır</string>
+    <string name="pendant_away_title">Kolye bağlı değil</string>
+    <string name="pendant_back_text">Kayda devam etmek için dokunun</string>
+    <string name="pendant_back_title">Kolye yeniden yakında</string>
     <string name="pendant_button">Kolye düğmesi</string>
+    <string name="pendant_channel">Kolye</string>
+    <string name="pendant_search">Ara</string>
     <string name="people_empty_text">Kolye ilk konuşmalardan sonra sesleri ayırt etmeye başlar. Ses izleri yalnızca sizin sunucunuzda hesaplanır ve saklanır.</string>
     <string name="people_empty_title">Henüz kimse yok</string>
     <string name="people_hints">Öneriler</string>

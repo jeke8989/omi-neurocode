@@ -65,6 +65,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".PendantSeenReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>

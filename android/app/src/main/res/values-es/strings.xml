@@ -458,7 +458,13 @@
     <string name="pause_recording">Pausar grabación</string>
     <string name="pause_sub">El botón de preguntas seguirá funcionando</string>
     <string name="pendant">Colgante</string>
+    <string name="pendant_away_text">La grabación se activará sola cuando esté cerca</string>
+    <string name="pendant_away_title">El colgante no está conectado</string>
+    <string name="pendant_back_text">Toca para seguir grabando</string>
+    <string name="pendant_back_title">El colgante ha vuelto</string>
     <string name="pendant_button">Botón del colgante</string>
+    <string name="pendant_channel">Colgante</string>
+    <string name="pendant_search">Buscar</string>
     <string name="people_empty_text">El colgante empieza a distinguir voces tras las primeras conversaciones. Las huellas de voz se calculan y guardan solo en tu servidor.</string>
     <string name="people_empty_title">Todavía nadie</string>
     <string name="people_hints">Sugerencias</string>
