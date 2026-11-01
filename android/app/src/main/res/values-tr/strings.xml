@@ -581,6 +581,7 @@
     <string name="price_tokens">1M token başına %1$s / %2$s</string>
     <string name="prices_live">OpenRouter fiyatları otomatik güncellenir.</string>
     <string name="prices_static">30.10.2026 tarihli fiyatlar.</string>
+    <string name="promise_add">Ekle</string>
     <string name="promise_calendar">Takvime</string>
     <string name="promise_calendar_added">Takvime eklendi</string>
     <string name="promise_card_mine">Söz verdiniz</string>
@@ -597,6 +598,8 @@
     <string name="promise_from">Kimden: %1$s</string>
     <string name="promise_kind">Kim kime</string>
     <string name="promise_mark_done">Tamamlandı</string>
+    <string name="promise_new">Yeni söz</string>
+    <string name="promise_new_hint">Ne yapılmalı</string>
     <string name="promise_no">Hayır</string>
     <string name="promise_no_calendar">Takvim uygulaması bulunamadı</string>
     <string name="promise_nudge">Hatırlat</string>

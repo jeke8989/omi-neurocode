@@ -628,6 +628,18 @@ object Api {
         if (body.length() > 0) call("POST", "/api/tasks/$id", body)
     }
 
+    /** Новое обещание вручную. Возвращает его id. */
+    suspend fun createPromise(edit: codes.neuro.neurosoft.ui.PromiseEdit): Long {
+        edit.nameVoice?.let { (pid, name) -> updatePerson(pid, name = name) }
+        val body = JSONObject().put("text", edit.text ?: "").put("kind", edit.kind ?: "mine")
+        edit.dueAt?.let {
+            body.put("due_at", java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString())
+        }
+        edit.personId?.let { body.put("counterpart_id", it) }
+        edit.personName?.let { body.put("counterpart", it) }
+        return JSONObject(call("POST", "/api/tasks", body, explain = true)).optLong("id")
+    }
+
     /** Черновик напоминания тому, кто обещал. */
     suspend fun nudge(taskId: Long): String =
         JSONObject(call("POST", "/api/tasks/$taskId/nudge", JSONObject(), slow = true)).optString("text")

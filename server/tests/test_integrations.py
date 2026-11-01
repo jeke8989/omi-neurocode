@@ -635,3 +635,14 @@ def test_promise_person_fix(conn):  # noqa: F811
     assert peoplelib.capitalize_names_once(conn) >= 1 and peoplelib.capitalize_names_once(conn) == 0
     assert conn.execute("SELECT name FROM people WHERE id = %s", (voice,)).fetchone()["name"] == "Папа"
     assert client.post(f"/api/tasks/{t['id']}", json={"counterpart_id": "x"}).status_code == 400
+
+
+def test_promise_created_by_hand(conn):  # noqa: F811
+    conn.execute("DELETE FROM tasks")
+    client = Asgi(_gw().app)
+    assert client.post("/api/tasks", json={"text": " "}).status_code == 400
+    r = client.post("/api/tasks", json={"text": "Вернуть книгу", "kind": "mine", "counterpart": "олег",
+                                         "due_at": "2026-11-05T19:00"}).json()
+    t = client.get("/api/tasks?status=all").json()["items"][0]
+    assert t["id"] == r["id"] and t["counterpart"] == "Олег" and t["source"] == "manual" and t["confirmed_at"]
+    assert t["due_at"].startswith("2026-11-05T")

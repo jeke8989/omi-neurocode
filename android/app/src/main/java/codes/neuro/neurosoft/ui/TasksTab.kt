@@ -180,7 +180,7 @@ fun TasksTab() {
             editing = null
             scope.launch {
                 try {
-                    Api.updatePromise(t.id, edit)
+                    if (t.id == 0L) Api.createPromise(edit.copy(text = edit.text ?: t.text)) else Api.updatePromise(t.id, edit)
                 } catch (_: Exception) {
                 }
                 Repo.tasks.refresh()  // новый срок — сразу в напоминания
@@ -213,6 +213,11 @@ fun TasksTab() {
                     val theirs = open.filter { it.theirs && it !in overdue }
                     item { StaleNote(res.error) }
                     item(key = "stats") { PromiseStats(all) }
+                    // своё обещание руками: «вернуть Олегу книгу до пятницы»
+                    item(key = "add") {
+                        SecondaryButton(stringResource(R.string.promise_new), { editing = blankPromise() },
+                            Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(), icon = Icons.Plus)
+                    }
                     if (open.isEmpty() && suggested.isEmpty()) {
                         item {
                             EmptyBlock(Icons.Tasks, stringResource(R.string.promises_empty_title),
@@ -584,3 +589,7 @@ private fun PromiseStats(all: List<TaskItem>) {
         }
     }
 }
+
+/** Пустое обещание для карточки «Новое обещание» (id = 0 — ещё не сохранено). */
+fun blankPromise() = TaskItem(id = 0L, text = "", due = null, assignee = null, status = "open", source = "manual",
+    conversationId = null, conversationTitle = null, exportRef = null)

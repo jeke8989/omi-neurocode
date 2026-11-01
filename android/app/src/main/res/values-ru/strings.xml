@@ -581,6 +581,7 @@
     <string name="price_tokens">%1$s / %2$s за 1M токенов</string>
     <string name="prices_live">Цены OpenRouter обновляются автоматически.</string>
     <string name="prices_static">Цены на 30.10.2026.</string>
+    <string name="promise_add">Добавить</string>
     <string name="promise_calendar">В календарь</string>
     <string name="promise_calendar_added">Добавлено в календарь</string>
     <string name="promise_card_mine">Вы обещали</string>
@@ -597,6 +598,8 @@
     <string name="promise_from">От: %1$s</string>
     <string name="promise_kind">Кто кому</string>
     <string name="promise_mark_done">Выполнено</string>
+    <string name="promise_new">Новое обещание</string>
+    <string name="promise_new_hint">Что нужно сделать</string>
     <string name="promise_no">Нет</string>
     <string name="promise_no_calendar">Не нашёл приложение календаря</string>
     <string name="promise_nudge">Напомнить</string>

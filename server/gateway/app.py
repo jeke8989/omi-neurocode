@@ -749,6 +749,8 @@ async def api_conversation_reprocess(request: Request):
 async def api_tasks(request: Request):
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
+    if request.method == "POST":
+        return await api_task_create(request)
     status = request.query_params.get("status", "open")
     async with await aconnect() as conn:
         rows = await (await conn.execute(
@@ -769,6 +771,29 @@ async def api_tasks(request: Request):
             (status, status, status),
         )).fetchall()
     return Json({"items": rows})
+
+
+async def api_task_create(request: Request):
+    """Обещание вручную: {text, kind: mine|waiting|reminder, due_at?, counterpart_id? | counterpart?}."""
+    body = await _body(request) or {}
+    text = " ".join(str(body.get("text") or "").split())[:1000]
+    if not text:
+        return Json({"error": "text"}, status_code=400)
+    kind = body.get("kind") if body.get("kind") in ("mine", "waiting", "reminder") else "mine"
+    due_at = tasklib.parse_due(body.get("due_at")) if body.get("due_at") else None
+    if body.get("due_at") and due_at is None:
+        return Json({"error": "due_at: ISO 8601"}, status_code=400)
+    pid = body.get("counterpart_id")
+    if pid is not None and not str(pid).isdigit():
+        return Json({"error": "counterpart_id"}, status_code=400)
+    name = people.proper(" ".join(str(body.get("counterpart") or "").split())[:80]) or None
+    async with await aconnect() as conn:
+        row = await (await conn.execute(
+            """INSERT INTO tasks (text, kind, due_at, counterpart_id, counterpart, source, status, confidence, confirmed_at)
+               VALUES (%s, %s, %s, %s, %s, 'manual', 'open', 1, now()) RETURNING id""",
+            (crypto.seal(text), kind, due_at, int(pid) if pid is not None else None,
+             crypto.seal(name) if pid is None else None))).fetchone()
+    return Json({"id": row["id"]})
 
 
 async def api_task_update(request: Request):
@@ -2100,7 +2125,7 @@ app = Starlette(
         Route("/api/agent/results", api_routine_results),
         Route("/api/profile", api_profile, methods=["GET", "POST"]),
         Route("/api/profile/voice", api_profile_voice, methods=["POST"]),
-        Route("/api/tasks", api_tasks),
+        Route("/api/tasks", api_tasks, methods=["GET", "POST"]),
         Route("/api/tasks/{id:int}", api_task_update, methods=["POST", "PATCH"]),
         Route("/api/memories", api_memories),
         Route("/api/memories/{id:int}", api_memory, methods=["POST", "DELETE"]),

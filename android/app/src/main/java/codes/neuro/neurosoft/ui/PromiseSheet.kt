@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -55,6 +57,7 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
     val fmt = rememberFmt()
     val context = LocalContext.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val focus = remember { FocusRequester() }
     var text by remember(t.id) { mutableStateOf(t.text) }
     var kind by remember(t.id) { mutableStateOf(t.kind) }
     var due by remember(t.id) { mutableStateOf(t.dueMillis()) }
@@ -96,12 +99,15 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = c.fog) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp).imePadding()) {
+            val isNew = t.id == 0L
             // что
             Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.paper)
                 .padding(16.dp)) {
+                if (text.isEmpty()) Txt(stringResource(R.string.promise_new_hint), T.title, c.faint)
                 BasicTextField(text, { text = it }, textStyle = T.title.copy(color = c.ink), cursorBrush = SolidColor(c.lens),
-                    modifier = Modifier.fillMaxWidth())
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus))
             }
+            if (isNew) LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) {} }
             t.evidence?.takeIf { it.isNotBlank() }?.let {
                 Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
                     Modifier.padding(horizontal = 22.dp, vertical = 8.dp), maxLines = 4)
@@ -175,14 +181,14 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                 if (due != null) Chip(stringResource(R.string.due_none), false, { due = null; dueTouched = true })
             }
 
-            // действия
+            // действия (у нового обещания — только календарь)
             Spacer(Modifier.height(18.dp))
             Wrap(modifier = Modifier.padding(horizontal = 16.dp)) {
                 Chip(stringResource(R.string.promise_calendar), false, {
                     onCalendar(t.copy(text = text.trim().ifBlank { t.text }, dueAt = due?.let {
                         Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString() }))
                 }, leading = { Icon(Icons.Calendar, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
-                if (kind == "waiting") {
+                if (kind == "waiting" && !isNew) {
                     Chip(stringResource(R.string.promise_nudge), false, { onNudge(t) },
                         leading = { Icon(Icons.Share, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
                 }
@@ -190,13 +196,13 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                     Chip(stringResource(R.string.promise_conversation), false, { onDismiss(); Nav.push(Route.Conversation(cid)) },
                         leading = { Icon(Icons.Wave, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
                 }
-                if (t.status != "done") {
+                if (t.status != "done" && !isNew) {
                     Chip(stringResource(R.string.promise_mark_done), false, onDone,
                         leading = { Icon(Icons.Check, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
                 }
             }
-            PrimaryButton(stringResource(R.string.save), { onSave(edited()) },
-                Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp).fillMaxWidth())
+            PrimaryButton(stringResource(if (isNew) R.string.promise_add else R.string.save), { onSave(edited()) },
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp).fillMaxWidth(), enabled = text.isNotBlank())
         }
     }
 }

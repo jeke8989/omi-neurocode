@@ -581,6 +581,7 @@
     <string name="price_tokens">%1$s / %2$s por 1M tokens</string>
     <string name="prices_live">Los precios de OpenRouter se actualizan solos.</string>
     <string name="prices_static">Precios a 30/10/2026.</string>
+    <string name="promise_add">Añadir</string>
     <string name="promise_calendar">Al calendario</string>
     <string name="promise_calendar_added">Añadido al calendario</string>
     <string name="promise_card_mine">Prometiste</string>
@@ -597,6 +598,8 @@
     <string name="promise_from">De: %1$s</string>
     <string name="promise_kind">Quién a quién</string>
     <string name="promise_mark_done">Hecho</string>
+    <string name="promise_new">Nueva promesa</string>
+    <string name="promise_new_hint">Qué hay que hacer</string>
     <string name="promise_no">No</string>
     <string name="promise_no_calendar">No se encontró una app de calendario</string>
     <string name="promise_nudge">Recordarle</string>
