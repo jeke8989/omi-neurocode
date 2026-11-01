@@ -104,7 +104,12 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_agent", null) ?: if (chatLevel.startsWith("claude")) "claude" else "mnemo"
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
-    /** Двойное нажатие: remember — «запомни это», pause — пауза/продолжить запись, off — ничего. */
+    /** Знакомство, ещё не отправленное на сервер (сервер не был подключён): JSON {name, about, goals, from, to}. */
+    var pendingProfile: String?
+        get() = sp.getString("pending_profile", null)
+        set(value) = sp.edit().putString("pending_profile", value).apply()
+
+    /** Двойное нажатие: remember — важный разговор, pause — пауза/продолжить запись, off — ничего. */
     var doubleTap: String
         get() = sp.getString("double_tap", "remember") ?: "remember"
         set(value) = sp.edit().putString("double_tap", value).apply()

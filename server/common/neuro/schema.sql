@@ -428,3 +428,7 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     redirect_uri  TEXT NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Важные разговоры: двойное нажатие кнопки во время разговора (или звёздочка в приложении)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS important_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS conversations_important_idx ON conversations (important_at DESC) WHERE important_at IS NOT NULL;

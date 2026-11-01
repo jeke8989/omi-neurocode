@@ -137,7 +137,7 @@ def conversation(conn, conv_id: int) -> dict:
     if not todo:
         return {"checked": 0, "changed": 0, "junk": 0}
     names = _names(conn)
-    head = "Люди, которых знает владелец: " + ", ".join(names) + "." if names else ""
+    head = "Люди, которых знает пользователь: " + ", ".join(names) + "." if names else ""
     lang = i18n.lang(conn)
     changed = junk = 0
     done_ids: list[int] = []

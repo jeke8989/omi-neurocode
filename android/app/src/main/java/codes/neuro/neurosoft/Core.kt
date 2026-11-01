@@ -472,6 +472,23 @@ object Core {
     }
 
     /** Автоматически отправить новые снимки камеры за сегодня (если включено). */
+    /** Знакомство из онбординга без сервера: отправить, как только сервер подключён. */
+    fun flushProfile() {
+        val raw = prefs.pendingProfile ?: return
+        if (!prefs.serverConfigured) return
+        scope.launch {
+            try {
+                val o = org.json.JSONObject(raw)
+                val goals = o.optJSONArray("goals")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                codes.neuro.neurosoft.net.Api.saveProfile(o.optString("name"), o.optString("about"), goals)
+                if (o.has("from")) codes.neuro.neurosoft.net.Api.profileVoice(o.getLong("from"), o.getLong("to"))
+                prefs.pendingProfile = null
+            } catch (e: Exception) {
+                Log.w(TAG, "profile not sent yet", e)
+            }
+        }
+    }
+
     fun syncPhotosNow() {
         if (!prefs.photoAutoImport || !Permissions.granted(app, Permissions.photos())) return
         if (!prefs.serverConfigured) return

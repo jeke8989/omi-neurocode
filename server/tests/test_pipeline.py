@@ -162,8 +162,6 @@ def test_full_pipeline(conn, monkeypatch):
                               {"text": "Позвонить в банк", "confidence": 0.55, "evidence": "надо бы в банк позвонить"},
                               {"text": ""}],
                     "memories": ["Отчёт нужен к пятнице"]}
-        if system.startswith(agent.REMEMBER_SYSTEM):
-            return {"memory": "Отчёт к пятнице", "tasks": []}
         return {"answer": "Создать задачу по отчёту", "tasks": [{"text": "Задача из команды"}], "memories": []}
 
     monkeypatch.setattr(llm, "chat_json", fake_llm)
@@ -197,8 +195,10 @@ def test_full_pipeline(conn, monkeypatch):
     agent.process_events(conn)
     evs = conn.execute("SELECT value, status, result FROM events ORDER BY value").fetchall()
     assert [(e["value"], e["status"]) for e in evs] == [(1, "done"), (2, "done")]
-    assert evs[0]["result"] == "Создать задачу по отчёту" and evs[1]["result"] == "Отчёт к пятнице"
-    assert conn.execute("SELECT count(*) AS n FROM memories WHERE source = 'button'").fetchone()["n"] == 1
+    assert evs[0]["result"] == "Создать задачу по отчёту" and evs[1]["result"].startswith("important conversation")
+    # двойное нажатие — важный разговор, а не запись в память
+    assert conn.execute("SELECT count(*) AS n FROM memories WHERE source = 'button'").fetchone()["n"] == 0
+    assert conn.execute("SELECT count(*) AS n FROM conversations WHERE important_at IS NOT NULL").fetchone()["n"] == 1
     assert conn.execute("SELECT count(*) AS n FROM tasks WHERE source = 'agent'").fetchone()["n"] == 1
     assert conn.execute("SELECT via FROM questions").fetchone()["via"] == "offline"
 

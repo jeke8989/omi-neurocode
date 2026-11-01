@@ -92,7 +92,7 @@ def validate(m: dict) -> dict:
 
 
 def _user_url_key(url_template: str, m: dict) -> str | None:
-    """«{settings.url}» целиком, и эта настройка — адрес (type: url): адрес задаёт сам владелец, не модель."""
+    """«{settings.url}» целиком, и эта настройка — адрес (type: url): адрес задаёт сам пользователь, не модель."""
     whole = PLACEHOLDER.fullmatch(url_template or "")
     if not whole or not whole.group(1).startswith("settings."):
         return None
@@ -108,7 +108,7 @@ def check_user_url(url: str):
 
 
 def resolve_url(url_template: str, args: dict, settings: dict, m: dict) -> str:
-    """Готовый адрес запроса с проверкой домена (или адрес владельца из настроек)."""
+    """Готовый адрес запроса с проверкой домена (или адрес пользователя из настроек)."""
     key = _user_url_key(url_template, m)
     if key:
         url = str(settings.get(key) or "")
@@ -122,7 +122,7 @@ def resolve_url(url_template: str, args: dict, settings: dict, m: dict) -> str:
 def _template_hosts(url_template: str, m: dict | None = None) -> list[str]:
     """Все домены, куда может пойти запрос по шаблону. {app.locale} в домене разрешён (ru.wikipedia.org…):
     его задаёт приложение, а не модель, и каждый вариант должен быть в permissions.hosts.
-    Адрес целиком из настройки type=url — его вводит владелец: домены не проверяем."""
+    Адрес целиком из настройки type=url — его вводит пользователь: домены не проверяем."""
     if m is not None and _user_url_key(url_template, m):
         return []
     if "{app.locale}" in (urlparse(url_template).netloc or ""):

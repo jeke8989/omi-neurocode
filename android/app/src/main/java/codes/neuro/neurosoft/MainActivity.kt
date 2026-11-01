@@ -64,6 +64,7 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
         // под защитой — в списке недавних приложений вместо экрана пустая карточка
         if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(!AppLock.enabled)
         Core.syncPhotosNow()
+        Core.flushProfile()
         codes.neuro.neurosoft.ui.Connectors.version.intValue++  // вернулись из браузера — свежий статус сервисов
     }
 

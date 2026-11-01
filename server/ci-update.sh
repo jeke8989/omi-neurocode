@@ -229,6 +229,11 @@ diag() {
      || '; память: ' || (SELECT count(*) FROM memories WHERE archived_at IS NULL) || ', в архиве '
      || (SELECT count(*) FROM memories WHERE archived_at IS NOT NULL) || ', не проверено '
      || (SELECT count(*) FROM memories WHERE NOT reviewed AND source <> 'button' AND archived_at IS NULL)
+     || '; пользователь: голос ' || CASE WHEN bool_or(is_owner) THEN 'узнан' ELSE 'не узнан' END
+     || ', имя ' || CASE WHEN bool_or(is_owner AND name IS NOT NULL) THEN 'есть' ELSE 'нет' END
+     || ', знакомство ' || CASE WHEN EXISTS (SELECT 1 FROM settings WHERE key = 'profile.name') THEN 'есть' ELSE 'нет' END
+     || ', фразы ' || coalesce((SELECT value::json->>'status' FROM settings WHERE key = 'profile.voice'), 'нет')
+     || '; важных разговоров ' || (SELECT count(*) FROM conversations WHERE important_at IS NOT NULL)
      FROM people"
   echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
@@ -243,7 +248,9 @@ diag() {
   # сервисы одной кнопкой: только статус (имена аккаунтов и токены не печатаем — логи CI публичные)
   local svc
   svc=$(docker compose exec -T db psql -U neuro -d neuro -tAc "SELECT string_agg(id || '=' || status
-        || CASE WHEN error IS NOT NULL THEN '(ошибка)' ELSE '' END, ',') FROM connections" 2>/dev/null | tr '\n' ' ' || true)
+        || ' инструментов ' || coalesce(jsonb_array_length(tools), 0)
+        || ' чтение ' || coalesce(settings->>'read', 'true') || ' изменение ' || coalesce(settings->>'write', 'true')
+        || CASE WHEN error IS NOT NULL THEN ' (ошибка)' ELSE '' END, ', ') FROM connections" 2>/dev/null | tr -d '\n' || true)
   echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true) | сервисы: ${svc:-нет}"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }

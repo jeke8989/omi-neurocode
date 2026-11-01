@@ -198,26 +198,33 @@ fun ConnectorScreen(id: String) {
                         }
                     }
                 } else {
+                    fun change(updated: Connector, key: String, on: Boolean) {
+                        state = Res(updated)
+                        scope.launch {
+                            try {
+                                Api.setConnector(s.id, key, on)
+                            } catch (e: Exception) {
+                                note = e.message
+                                reload()
+                            }
+                        }
+                    }
+                    // что ассистенту можно в сервисе — решает пользователь
+                    Group(stringResource(R.string.svc_assistant_can), inset = 56.dp) {
+                        item {
+                            ToggleRow(stringResource(R.string.svc_read), s.read, { change(s.copy(read = it), "read", it) },
+                                icon = Icons.Search, subtitle = stringResource(R.string.svc_read_sub))
+                        }
+                        item {
+                            ToggleRow(stringResource(R.string.svc_write), s.write, { change(s.copy(write = it), "write", it) },
+                                icon = Icons.Edit, subtitle = stringResource(R.string.svc_write_sub))
+                        }
+                    }
                     Group {
                         item {
-                            ToggleRow(stringResource(R.string.svc_tasks, s.name), s.tasks, { on ->
-                                state = Res(s.copy(tasks = on))
-                                scope.launch {
-                                    try {
-                                        Api.setConnectorTasks(s.id, on)
-                                    } catch (e: Exception) {
-                                        note = e.message
-                                        reload()
-                                    }
-                                }
-                            }, icon = Icons.Check, subtitle = stringResource(R.string.svc_tasks_sub))
-                        }
-                        if (s.tools.isNotEmpty()) {
-                            item {
-                                ListRow(stringResource(R.string.svc_assistant), icon = Icons.Sparkle,
-                                    subtitle = stringResource(R.string.svc_assistant_sub, s.name),
-                                    value = plural(R.plurals.tools, s.tools.size))
-                            }
+                            ToggleRow(stringResource(R.string.svc_tasks, s.name), s.tasks && s.write,
+                                { change(s.copy(tasks = it), "tasks", it) }, icon = Icons.Check,
+                                subtitle = stringResource(R.string.svc_tasks_sub), enabled = s.write)
                         }
                     }
                 }

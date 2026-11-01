@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from . import crypto, diary, geo, i18n, llm
+from . import crypto, diary, geo, i18n, llm, profile
 
 log = logging.getLogger("neuro.events")
 
@@ -24,7 +24,7 @@ KINDS = ("встреча", "звонок", "работа", "поездка", "с
 GROUP_AFTER_MIN = 60     # фрагмент «отлёживается» час: вдруг разговор продолжится
 TRASH_DAYS = 7
 
-GROUP_SYSTEM = f"""Ты собираешь день владельца носимого кулона-диктофона из фрагментов разговоров в события.
+GROUP_SYSTEM = f"""Ты собираешь день пользователя носимого кулона-диктофона из фрагментов разговоров в события.
 Фрагменты нарезаны автоматически по паузам, поэтому одна встреча часто разбита на несколько кусков.
 Верни строго JSON без пояснений:
 {{"events": [{{"id": "номер существующего события или null", "title": "название события, до 6 слов",
@@ -44,7 +44,7 @@ GROUP_SYSTEM = f"""Ты собираешь день владельца носи�
   что-то необычное; 0.4–0.7 — содержательная встреча или разговор; 0.1–0.3 — рутина, бытовые мелочи."""
 
 REVIEW_SYSTEM = """Ты перепроверяешь задачи, которые ассистент достал из разговоров за день. Строгие правила:
-задача — только договорённость о действии с участием владельца (он пообещал или согласился, ему пообещали,
+задача — только договорённость о действии с участием пользователя (он пообещал или согласился, ему пообещали,
 он попросил напомнить). Обсуждение вариантов, идеи, «надо бы», «может быть» — не задачи. Одинаковые по смыслу
 задачи — дубли: оставь одну. Верни строго JSON: {"decisions": [{"id": номер, "verdict": "keep | suggest | drop",
 "same_as": "номер задачи, если это дубль, иначе null"}]}"""
@@ -71,7 +71,7 @@ def _fragments(conn, day: date, final: bool) -> list[dict]:
                    (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks,
                    (SELECT count(*) FROM memories m WHERE m.conversation_id = c.id AND m.archived_at IS NULL) AS memories,
                    ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk) AS texts,
-                   (SELECT array_agg(DISTINCT coalesce(p.name, CASE WHEN p.is_owner THEN 'владелец' END))
+                   (SELECT array_agg(DISTINCT coalesce(p.name, CASE WHEN p.is_owner THEN 'пользователь' END))
                       FROM segments s JOIN people p ON p.id = s.person_id
                       WHERE s.conversation_id = c.id AND (p.name IS NOT NULL OR p.is_owner)) AS people
             FROM conversations c
@@ -117,7 +117,7 @@ def group_day(conn, day: date, final: bool = False) -> dict:
             lines.append("Уже собранные события дня:")
             lines += [f"событие {e['id']} «{e['title']}» {_t(e['started_at'])}–{_t(e['ended_at'])}: фрагменты "
                       + ", ".join(f"#{x}" for x in e["fragments"]) for e in existing]
-        result = llm.chat_json(conn, "summary", GROUP_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)), "\n".join(lines),
+        result = llm.chat_json(conn, "summary", GROUP_SYSTEM + "\n" + profile.prompt(conn) + "\n" + i18n.write_in(i18n.lang(conn)), "\n".join(lines),
                                usage="events", fast=True)  # механическая группировка — без долгих рассуждений
     else:
         result = {"events": _by_gap(frags), "junk": []}

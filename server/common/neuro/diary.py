@@ -20,7 +20,7 @@ from pathlib import Path
 
 import requests
 
-from . import config, crypto, i18n, llm
+from . import config, crypto, i18n, llm, profile
 from .assistant import TZ, WEEKDAYS
 
 log = logging.getLogger("neuro.diary")
@@ -184,7 +184,7 @@ def _data_url(jpeg: bytes) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
 
 
-ANALYZE_PROMPT = """Это фото с телефона владельца. Реши, годится ли оно для личного дневника дня.
+ANALYZE_PROMPT = """Это фото с телефона пользователя. Реши, годится ли оно для личного дневника дня.
 Верни строго JSON: {"caption": "что происходит на фото, одна живая фраза",
 "kind": "moment | screenshot | document | receipt | other",
 "score": число 0–10 — насколько это интересный момент дня (люди, места, еда, события выше; случайные кадры ниже)}"""
@@ -333,7 +333,7 @@ def material_text(m: dict, max_photos: int) -> str:
     return "\n".join(lines)
 
 
-DIARY_SYSTEM = """Ты ведёшь личный дневник владельца кулона Mnemo. По данным его дня собери красивую ленту.
+DIARY_SYSTEM = """Ты ведёшь личный дневник пользователя кулона Mnemo. По данным его дня собери красивую ленту.
 Верни строго JSON:
 {"title": "заголовок дня, до 6 слов",
  "emoji": "одно эмодзи — символ дня",
@@ -359,7 +359,7 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
     if row and row["content_hash"] == content_hash and row["status"] == "done" and not force:
         conn.execute("UPDATE diary_days SET generated_at = now() WHERE day = %s", (day,))
         return False
-    result = llm.chat_json(conn, "diary", DIARY_SYSTEM + "\n" + i18n.write_in(lang), text)
+    result = llm.chat_json(conn, "diary", DIARY_SYSTEM + "\n" + profile.prompt(conn) + "\n" + i18n.write_in(lang), text)
     photo_ids = {p["id"] for p in m["photos"] if p["event"]}
     highlights, used = [], []
     for h in result.get("highlights") or []:

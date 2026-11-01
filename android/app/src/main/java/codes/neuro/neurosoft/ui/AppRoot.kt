@@ -74,6 +74,8 @@ private fun Screen(route: Route) {
         Route.McpAccess -> McpAccessScreen()
         is Route.Chat -> ChatScreen(route.prefill, route.context, route.contextTitle)
         Route.Search -> SearchScreen()
+        Route.Important -> ImportantScreen()
+        Route.About -> AboutScreen()
         is Route.Day -> DayScreen(route.day)
         Route.Settings -> SettingsScreen()
         Route.Device -> DeviceScreen()

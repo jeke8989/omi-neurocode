@@ -64,12 +64,13 @@ def stt_language(conn) -> str | None:
 
 
 def write_in(code: str) -> str:
-    """Указание модели, на каком языке писать текст для владельца."""
+    """Указание модели, на каком языке писать текст для пользователя."""
     code = normalize(code)
     if code == "ru":
-        return "Все тексты для владельца пиши по-русски."
-    return (f"Write every text field for the owner in {LANGS[code]['english']} "
-            f"(the instructions above are in Russian, but the output must be in {LANGS[code]['english']}).")
+        return "Все тексты пиши по-русски. О пользователе — по имени или на «вы», не «владелец»."
+    return (f"Write every text field in {LANGS[code]['english']} "
+            f"(the instructions above are in Russian, but the output must be in {LANGS[code]['english']}). "
+            "Refer to the user by name or as “you”, never as “the owner”.")
 
 
 def reply_in(code: str) -> str:
@@ -77,8 +78,8 @@ def reply_in(code: str) -> str:
     code = normalize(code)
     name = LANGS[code]["english"]
     if code == "ru":
-        return "Отвечай по-русски, а если владелец обратился на другом языке — на его языке."
-    return f"Answer in {name}; if the owner writes or speaks in another language, answer in that language."
+        return "Отвечай по-русски, а если пользователь обратился на другом языке — на его языке."
+    return f"Answer in {name}; if the user writes or speaks in another language, answer in that language."
 
 
 # Короткие фразы сервера (голос, шаги агента, ответы инструментов).
@@ -208,6 +209,10 @@ PHRASES: dict[str, dict[str, str]] = {
     "tool.person_conversations": {
         "ru": "👤 Разговоры с: {name}", "en": "👤 Conversations with: {name}",
         "tr": "👤 Şununla konuşmalar: {name}", "es": "👤 Conversaciones con: {name}",
+    },
+    "tool.important_conversations": {
+        "ru": "⭐ Смотрю важные разговоры", "en": "⭐ Looking at important conversations",
+        "tr": "⭐ Önemli konuşmalara bakıyorum", "es": "⭐ Revisando conversaciones importantes",
     },
     "tool.day_events": {
         "ru": "📅 Смотрю события: {day}", "en": "📅 Looking at events: {day}",

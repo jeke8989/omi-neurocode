@@ -353,6 +353,10 @@ fun ConversationRow(c: ConversationItem, fmt: Fmt, showDay: Boolean = false) {
         Column(Modifier.weight(1f)) {
             Txt(c.title ?: c.preview ?: stringResource(R.string.untitled), T.bodyStrong, maxLines = 2)
             Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (c.important) {
+                    Icon(Icons.StarFilled, null, tint = colors.amber, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                }
                 Txt((if (showDay) fmt.dayShortTitle(fmt.dayOf(c.startedAt)) + ", " else "") + fmt.time(c.startedAt),
                     T.caption, colors.graphite)
                 if (c.tasksCount > 0) {

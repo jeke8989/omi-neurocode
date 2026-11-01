@@ -27,7 +27,7 @@ import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.ble.ConnState
 import kotlinx.coroutines.delay
 
-private enum class Step { WELCOME, PERMISSIONS, PAIRING, DONE }
+private enum class Step { WELCOME, PERMISSIONS, PAIRING, INTRO, DONE }
 
 /** Первый запуск без настроек: разрешения → кулон находится и подключается сам → запись идёт. */
 @Composable
@@ -60,7 +60,9 @@ fun OnboardingScreen() {
                     step = if (Permissions.bluetoothGranted(context)) Step.PAIRING else Step.PERMISSIONS
                 }
                 Step.PERMISSIONS -> PermissionsStep { step = Step.PAIRING }
-                Step.PAIRING -> Pairing { step = Step.DONE }
+                // знакомство — при первом запуске: имя, занятие, цели и голос по фразам (кулон уже на связи)
+                Step.PAIRING -> Pairing { step = if (first) Step.INTRO else Step.DONE }
+                Step.INTRO -> IntroFlow(onboarding = true) { step = Step.DONE }
                 Step.DONE -> Done { finish() }
             }
         }

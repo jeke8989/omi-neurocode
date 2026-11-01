@@ -28,7 +28,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
-                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -449,7 +449,7 @@ async def api_conversations(request: Request):
         return _unauthorized()
     limit = _clamp(request.query_params.get("limit"), 50, 1, 300)
     offset = _clamp(request.query_params.get("offset"), 0, 0, 1_000_000)
-    day = request.query_params.get("day") or None  # YYYY-MM-DD в часовом поясе владельца
+    day = request.query_params.get("day") or None  # YYYY-MM-DD в часовом поясе пользователя
     if day:
         try:
             date.fromisoformat(day)
@@ -547,7 +547,8 @@ async def api_conversation(request: Request):
             return Json({"deleted": res.rowcount})
         conv = await (await conn.execute(
             """SELECT id, device_id, started_at, last_activity AS ended_at, status, title, summary, error, emoji,
-                      topics, greatest(0, extract(epoch FROM last_activity - started_at))::int AS duration_sec
+                      topics, greatest(0, extract(epoch FROM last_activity - started_at))::int AS duration_sec,
+                      important_at IS NOT NULL AS important
                FROM conversations WHERE id = %s""", (cid,)
         )).fetchone()
         if conv is None:
@@ -578,6 +579,62 @@ async def api_conversation(request: Request):
             "ORDER BY id", (cid,)
         )).fetchall()
     return Json(conv)
+
+
+async def api_conversation_important(request: Request):
+    """Звёздочка: {"on": true|false} — важный разговор (как двойное нажатие кнопки)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    cid = request.path_params["id"]
+    body = await _body(request) or {}
+    on = bool(body.get("on", True))
+    async with await aconnect() as conn:
+        res = await conn.execute(
+            "UPDATE conversations SET important_at = CASE WHEN %s THEN coalesce(important_at, now()) END WHERE id = %s",
+            (on, cid))
+    if not res.rowcount:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"ok": True, "important": on})
+
+
+async def api_important(request: Request):
+    """Важные разговоры — по дате, новые сверху."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+
+    def work(conn):
+        rows = conn.execute(EVENT_FRAGMENTS_SQL + """ WHERE c.important_at IS NOT NULL AND c.trashed_at IS NULL
+                                                    ORDER BY c.started_at DESC LIMIT 300""").fetchall()
+        return {"items": previews(rows)}
+
+    return Json(await _sync(work))
+
+
+async def api_profile(request: Request):
+    """Знакомство: GET — имя, чем занимается, цели, статус голоса; POST — сохранить (любые поля)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    if request.method == "GET":
+        return Json(await _sync(profile.get))
+    body = await _body(request) or {}
+    goals = body.get("goals")
+    if goals is not None and not isinstance(goals, list):
+        return Json({"error": "goals: list"}, status_code=400)
+    return Json(await _sync(lambda conn: profile.save(conn, body.get("name"), body.get("about"), goals)))
+
+
+async def api_profile_voice(request: Request):
+    """Прочитал фразы вслух: {"from": ms, "to": ms} — голос в этом окне станет голосом пользователя."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request) or {}
+    try:
+        start = datetime.fromtimestamp(int(body["from"]) / 1000, timezone.utc)
+        end = datetime.fromtimestamp(int(body["to"]) / 1000, timezone.utc)
+        job = await _sync(lambda conn: profile.start_voice(conn, start, end))
+    except (KeyError, TypeError, ValueError) as exc:
+        return Json({"error": str(exc)}, status_code=400)
+    return Json({"voice": job["status"]})
 
 
 async def api_conversation_reprocess(request: Request):
@@ -930,7 +987,7 @@ async def answer_voice(device: str, client_id: str | None, pcm: bytes, websocket
         return {"type": "answer", "question": "", "error": True, "answer": i18n.t(lang, "voice.failed")}
     if not question:
         return {"type": "answer", "question": "", "answer": i18n.t(lang, "voice.not_heard")}
-    # вопрос по кнопке — точно голос владельца: STT дообучит по нему отпечаток «Я»
+    # вопрос по кнопке — точно голос пользователя: STT дообучит по нему отпечаток «Я»
     try:
         await anyio.to_thread.run_sync(voices.queue_owner_sample, pcm)
     except Exception:  # noqa: BLE001
@@ -1175,7 +1232,7 @@ async def api_extension_install(request: Request):
         return Json({"error": "bad json"}, status_code=400)
 
     def load():
-        if isinstance(body.get("manifest"), dict):  # собранная с ассистентом и проверенная владельцем
+        if isinstance(body.get("manifest"), dict):  # собранная с ассистентом и проверенная пользователем
             return extensions.validate(dict(body["manifest"])), "assistant"
         if body.get("manifest_url"):
             return extensions.load_manifest(str(body["manifest_url"]))
@@ -1261,7 +1318,8 @@ async def oauth_callback(request: Request):
 
 
 async def api_connector(request: Request):
-    """POST {"tasks": true|false} — новые задачи в сервис; DELETE — отключить."""
+    """POST {"tasks", "read", "write": true|false} — новые задачи в сервис и что ассистенту можно в нём
+    (просматривать; создавать и изменять); DELETE — отключить."""
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
     cid = request.path_params["id"]
@@ -1275,8 +1333,9 @@ async def api_connector(request: Request):
         if row is None:
             return False
         st = dict(row["settings"] or {})
-        if "tasks" in body:
-            st["tasks"] = bool(body["tasks"])
+        for key in ("tasks", "read", "write"):
+            if key in body:
+                st[key] = bool(body[key])
         conn.execute("UPDATE connections SET settings = %s::jsonb WHERE id = %s", (json.dumps(st), cid))
         return True
 
@@ -1323,7 +1382,7 @@ async def api_extension(request: Request):
         if "enabled" in body:
             await conn.execute("UPDATE extensions SET enabled = %s WHERE id = %s", (bool(body["enabled"]), ext_id))
         if isinstance(body.get("settings"), dict):
-            row = await (await conn.execute("SELECT manifest FROM extensions WHERE id = %s", (ext_id,))).fetchone()
+            row = await (await conn.execute("SELECT manifest, settings FROM extensions WHERE id = %s", (ext_id,))).fetchone()
             urls = {st["key"] for st in ((row or {}).get("manifest") or {}).get("settings") or [] if st.get("type") == "url"}
             for k in urls & set(body["settings"]):
                 if body["settings"][k]:
@@ -1335,6 +1394,12 @@ async def api_extension(request: Request):
             clean = {str(k): crypto.seal(str(v)) for k, v in body["settings"].items() if v is not None}
             await conn.execute("UPDATE extensions SET settings = settings || %s::jsonb WHERE id = %s",
                                (json.dumps(clean, ensure_ascii=False), ext_id))
+            # заполнили всё нужное впервые — интеграция заработала, включаем сразу (без второго нажатия)
+            if row and not extensions.is_ready(row) and "enabled" not in body:
+                now = await (await conn.execute("SELECT manifest, settings FROM extensions WHERE id = %s",
+                                                (ext_id,))).fetchone()
+                if now and extensions.is_ready(now):
+                    await conn.execute("UPDATE extensions SET enabled = true WHERE id = %s", (ext_id,))
     return Json({"ok": True})
 
 
@@ -1696,7 +1761,7 @@ EVENT_FRAGMENTS_SQL = """
 SELECT c.id, c.event_id, c.started_at, c.last_activity AS ended_at, c.status, c.title, c.summary, c.emoji,
        greatest(0, extract(epoch FROM c.last_activity - c.started_at))::int AS duration_sec,
        (SELECT count(*) FROM tasks t WHERE t.conversation_id = c.id AND t.status <> 'dismissed') AS tasks_count,
-       c.topics, """ + people.participants_sql("c") + """ AS people,
+       c.topics, c.important_at IS NOT NULL AS important, """ + people.participants_sql("c") + """ AS people,
        ARRAY(SELECT s.text FROM segments s WHERE s.conversation_id = c.id AND NOT s.junk
              ORDER BY s.started_at LIMIT 6) AS preview
 FROM conversations c
@@ -1706,7 +1771,9 @@ FROM conversations c
 def _events_day(conn, day: str) -> dict:
     events = conn.execute(
         """SELECT e.id, e.day, e.started_at, e.ended_at, e.title, e.emoji, e.kind, e.summary, e.topics, e.photo_id,
-                  e.status, """ + people.event_people_sql("e") + """ AS people
+                  e.status, """ + people.event_people_sql("e") + """ AS people,
+                  EXISTS (SELECT 1 FROM conversations c WHERE c.event_id = e.id AND c.important_at IS NOT NULL
+                          AND c.trashed_at IS NULL) AS important
            FROM day_events e WHERE e.day = %s ORDER BY e.started_at DESC""", (day,)).fetchall()
     frags = conn.execute(
         EVENT_FRAGMENTS_SQL + """ WHERE c.trashed_at IS NULL AND (c.started_at AT TIME ZONE %s)::date = %s
@@ -1838,6 +1905,10 @@ app = Starlette(
         Route("/api/search", api_search),
         Route("/api/conversations/{id:int}", api_conversation, methods=["GET", "DELETE"]),
         Route("/api/conversations/{id:int}/reprocess", api_conversation_reprocess, methods=["POST"]),
+        Route("/api/conversations/{id:int}/important", api_conversation_important, methods=["POST"]),
+        Route("/api/important", api_important),
+        Route("/api/profile", api_profile, methods=["GET", "POST"]),
+        Route("/api/profile/voice", api_profile_voice, methods=["POST"]),
         Route("/api/tasks", api_tasks),
         Route("/api/tasks/{id:int}", api_task_update, methods=["POST", "PATCH"]),
         Route("/api/memories", api_memories),

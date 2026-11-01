@@ -4,7 +4,7 @@
 1. «Подключить» в приложении -> сервер находит у сервиса адрес входа (Protected Resource Metadata ->
    Authorization Server Metadata) и сам регистрирует Mnemo как клиента (Dynamic Client Registration) —
    ничего заводить в кабинете разработчика не нужно.
-2. Владелец входит в сервис в браузере и разрешает доступ (PKCE S256, state).
+2. Пользователь входит в сервис в браузере и разрешает доступ (PKCE S256, state).
 3. Сервис возвращает код в приложение (codes.neuro.mnemo://oauth) или на сервер (/oauth/callback);
    сервер меняет код на токены и хранит их зашифрованными. Токены обновляются сами.
 4. Инструменты сервиса (поиск, страницы, задачи…) становятся инструментами ассистента. Чтобы не тратить
@@ -36,7 +36,7 @@ CATALOG = {
         "name": "Notion", "icon": "🗒", "mcp": "https://mcp.notion.com/mcp",
         "description": {"ru": "Поиск по вашему Notion, страницы и задачи", "en": "Search your Notion, pages and tasks",
                         "tr": "Notion'da arama, sayfalar ve görevler", "es": "Busca en tu Notion, páginas y tareas"},
-        "keywords": ["notion", "ноушн", "ношн", "нотион", "ноушен"],
+        "keywords": ["notion", "ноушн", "ношн", "ношен", "нотион", "ноушен", "ноушин", "ноцион"],
         "task_hint": "Добавь задачу в Notion. Сначала найди базу данных задач (Tasks, Задачи, To-do) поиском; если её "
                      "нет — создай страницу «Mnemo — задачи» и добавляй задачи туда.",
     },
@@ -45,13 +45,33 @@ CATALOG = {
         "description": {"ru": "Задачи и проекты в Linear", "en": "Issues and projects in Linear",
                         "tr": "Linear'da görevler ve projeler", "es": "Tareas y proyectos en Linear"},
         "keywords": ["linear", "линеар", "линир"],
-        "task_hint": "Создай задачу (issue) в Linear в команде владельца по умолчанию.",
+        "task_hint": "Создай задачу (issue) в Linear в команде пользователя по умолчанию.",
     },
 }
 
 
 class ConnectorError(RuntimeError):
     pass
+
+
+# Что может ассистент в сервисе — выбирает пользователь: «просматривать» (поиск, чтение) и «создавать и изменять».
+READ_NAME = re.compile(r"(search|fetch|get|list|read|query|find|view|retrieve|lookup|whoami|self)", re.I)
+
+
+def tool_access(t: dict) -> str:
+    """read | write: по подсказкам сервиса (readOnlyHint), иначе по имени (search, get, list… — чтение)."""
+    if t.get("access") in ("read", "write"):
+        return t["access"]
+    hints = t.get("annotations") or {}
+    if hints.get("readOnlyHint") is True:
+        return "read"
+    if hints.get("readOnlyHint") is False or hints.get("destructiveHint") is True:
+        return "write"
+    return "read" if READ_NAME.search(t.get("name") or "") else "write"
+
+
+def allowed(settings: dict | None, access: str) -> bool:
+    return (settings or {}).get(access, True) is not False
 
 
 # ---------------------------------------------------------------- хранение
@@ -78,11 +98,15 @@ def listing(conn, lang: str = "ru") -> list[dict]:
         out.append({
             "id": cid, "name": c["name"], "icon": c["icon"],
             "description": c["description"].get(lang) or c["description"]["ru"],
-            # «pending» — вход начат, но не закончен (закрыли браузер): для владельца это «не подключено»
+            # «pending» — вход начат, но не закончен (закрыли браузер): для пользователя это «не подключено»
             "status": r.get("status") if r.get("status") in ("connected", "error") else "off",
             "account": r.get("account"), "error": r.get("error"),
             "tools": [t.get("title") or t["name"] for t in (r.get("tools") or [])],
             "tasks": bool((r.get("settings") or {}).get("tasks")),
+            # выбор пользователя: что ассистенту можно в этом сервисе (по умолчанию — всё)
+            "read": allowed(r.get("settings"), "read"), "write": allowed(r.get("settings"), "write"),
+            "read_tools": sum(1 for t in r.get("tools") or [] if tool_access(t) == "read"),
+            "write_tools": sum(1 for t in r.get("tools") or [] if tool_access(t) == "write"),
         })
     return out
 
@@ -308,7 +332,7 @@ def _parse(r: requests.Response) -> dict:
 def refresh_tools(conn, cid: str) -> list[dict]:
     result = _rpc(conn, cid, "tools/list")
     tools = [{"name": t["name"], "title": (t.get("annotations") or {}).get("title") or t.get("title") or t["name"],
-              "description": (t.get("description") or "")[:1000],
+              "description": (t.get("description") or "")[:1000], "access": tool_access(t),
               "schema": t.get("inputSchema") or {"type": "object", "properties": {}}}
              for t in result.get("tools") or [] if t.get("name")]
     _save(conn, cid, tools=tools)
@@ -328,18 +352,44 @@ def tool_name(cid: str, name: str) -> str:
     return f"c_{cid}__{re.sub(r'[^a-zA-Z0-9_]', '_', name)}"[:64]
 
 
+def services(conn) -> list[dict]:
+    """Подключённые сервисы и что ассистенту в них можно — для подсказки ассистенту."""
+    out = []
+    for r in conn.execute("SELECT id, settings FROM connections WHERE status = 'connected' ORDER BY id").fetchall():
+        c = CATALOG.get(r["id"])
+        if c:
+            out.append({"id": r["id"], "name": c["name"], "icon": c["icon"], "keywords": c["keywords"],
+                        "read": allowed(r["settings"], "read"), "write": allowed(r["settings"], "write")})
+    return out
+
+
+def mentioned(text: str | None) -> set[str]:
+    """Какие сервисы упомянуты в тексте («найди в ноушене…»)."""
+    q = (text or "").lower()
+    return {cid for cid, c in CATALOG.items() if any(k in q for k in c["keywords"])}
+
+
 def tool_specs(conn, question: str | None = None, only: str | None = None) -> tuple[list[dict], dict]:
     """Инструменты подключённых сервисов. question — показываем только сервисы, о которых спрашивают
-    (иначе каждый вопрос тянул бы десятки чужих описаний и стоил дороже)."""
-    q = (question or "").lower()
+    (иначе каждый вопрос тянул бы десятки чужих описаний и стоил дороже). Действия, которые пользователь
+    выключил («просматривать», «создавать и изменять»), ассистенту не показываем вовсе."""
+    wanted = mentioned(question)
     specs, index = [], {}
-    for r in conn.execute("SELECT id, tools FROM connections WHERE status = 'connected'").fetchall():
+    for r in conn.execute("SELECT id, tools, settings FROM connections WHERE status = 'connected'").fetchall():
         c = CATALOG.get(r["id"])
         if not c or (only and r["id"] != only):
             continue
-        if question is not None and not only and not any(k in q for k in c["keywords"]):
+        if question is not None and not only and r["id"] not in wanted:
             continue
-        for t in r["tools"] or []:
+        tools = r["tools"] or []
+        if not tools:  # при входе список не подтянулся (сервис был занят) — берём сейчас
+            try:
+                tools = refresh_tools(conn, r["id"])
+            except Exception as exc:  # noqa: BLE001
+                log.warning("%s: tools unavailable: %s", r["id"], exc)
+        for t in tools:
+            if not allowed(r["settings"], tool_access(t)):
+                continue
             schema = t.get("schema") if isinstance(t.get("schema"), dict) else {}
             if schema.get("type") != "object":
                 schema = {"type": "object", "properties": {}}

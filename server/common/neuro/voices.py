@@ -54,8 +54,8 @@ MIN_EMBED_SEC = 1.0               # короче — отпечаток нена
 MIN_NEW_VOICE_SEC = 2.0           # дообучение — только по уверенным отрезкам
 MIN_NEW_PERSON_SEC = config.env_float("SPEAKER_MIN_NEW_SEC", 8.0)  # новый «Голос N» — если говорил столько
 MIN_MATCH_SEC = 3.0               # «похоже, но не уверены» подписываем, только если речи достаточно
-# Новый «Голос N» — только у того, кто разговаривает с владельцем: реплики сменяют друг друга (пауза не больше
-# REPLY_GAP_SEC) хотя бы MIN_REPLIES раз. Реклама, объявления, телевизор и чужие разговоры рядом владельцу не
+# Новый «Голос N» — только у того, кто разговаривает с пользователем: реплики сменяют друг друга (пауза не больше
+# REPLY_GAP_SEC) хотя бы MIN_REPLIES раз. Реклама, объявления, телевизор и чужие разговоры рядом пользователю не
 # отвечают — им «Голос N» не заводим.
 REPLY_GAP_SEC = 4.0
 MIN_REPLIES = 2
@@ -477,7 +477,7 @@ def enabled(conn) -> bool:
 
 
 def others_enabled(conn) -> bool:
-    """«Запоминать голоса собеседников»: выключено — узнаём только владельца и тех, кого он назвал."""
+    """«Запоминать голоса собеседников»: выключено — узнаём только пользователя и тех, кого он назвал."""
     return _setting(conn, "voices.others") == "1"
 
 
@@ -486,7 +486,7 @@ def has_owner(conn) -> bool:
 
 
 def purge_unnamed(conn) -> int:
-    """Забыть все безымянные голоса (кроме владельца). Возвращает, сколько забыто."""
+    """Забыть все безымянные голоса (кроме пользователя). Возвращает, сколько забыто."""
     rows = conn.execute("SELECT id FROM people WHERE name IS NULL AND NOT is_owner").fetchall()
     for r in rows:
         forget_person(conn, r["id"])
@@ -594,7 +594,7 @@ def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict
 
 
 def replies(cluster_segs: list, times: dict, owner_spans: list) -> int:
-    """Сколько раз этот голос и владелец сменяли друг друга (ответ в пределах REPLY_GAP_SEC)."""
+    """Сколько раз этот голос и пользователь сменяли друг друга (ответ в пределах REPLY_GAP_SEC)."""
     if not owner_spans:
         return 0
     owner = sorted((st, st + timedelta(seconds=sec)) for st, sec in owner_spans)
@@ -649,7 +649,7 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     owner_ids = {sid for i, c in enumerate(order) if owner and found[i][0] == owner for sid, _, _ in c.segs}
     owner_ids |= {s["id"] for s in segs if owner and s["person_id"] == owner}
     owner_spans = [times[sid] for sid in owner_ids]
-    # 2) незнакомцы: новый «Голос N» — только если отвечает владельцу
+    # 2) незнакомцы: новый «Голос N» — только если отвечает пользователю
     for i, c in enumerate(order):
         result["voices"] += 1
         pid, score, pins = found[i]
@@ -728,13 +728,13 @@ PRUNE_KEY = "voices.pruned_v1"
 
 
 def prune_background(conn) -> int:
-    """Один раз: безымянные голоса, которые ни разу не отвечали владельцу (реклама, объявления, люди рядом), —
+    """Один раз: безымянные голоса, которые ни разу не отвечали пользователю (реклама, объявления, люди рядом), —
     в «фон». Они не пропадают (их можно вернуть в карточке голоса), но и не мешают в людях и расшифровках."""
     if conn.execute("SELECT 1 FROM settings WHERE key = %s", (PRUNE_KEY,)).fetchone():
         return 0
     row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
     if row is None:
-        return 0  # пока не знаем голос владельца — не с кем сравнивать
+        return 0  # пока не знаем голос пользователя — не с кем сравнивать
     owner = row["id"]
     hidden = 0
     for p in conn.execute(
@@ -772,7 +772,7 @@ def pending_conversations(conn, idle_sec: int) -> list[int]:
 # ======================================================================= уборка дублей
 def dedupe(conn) -> dict:
     """Безымянные голоса, похожие друг на друга, склеиваем сами. Безымянный, похожий на названного
-    человека (или владельца), — подсказка «это он?»: двух разных людей с одним голосом не склеиваем молча."""
+    человека (или пользователя), — подсказка «это он?»: двух разных людей с одним голосом не склеиваем молча."""
     th = thresholds()
     # голос, прозвучавший в одном разговоре и не встретившийся 30 дней, забываем сам
     stale = conn.execute(
@@ -872,12 +872,12 @@ def migrate_backend(conn) -> int:
     return done
 
 
-# ======================================================================= голос владельца по кнопке
+# ======================================================================= голос пользователя по кнопке
 OWNER_DIR = VOICE_DIR / "owner"
 
 
 def queue_owner_sample(pcm: bytes):
-    """Gateway: звук вопроса по кнопке (это всегда владелец) — в очередь на дообучение (в gateway нет модели)."""
+    """Gateway: звук вопроса по кнопке (это всегда пользователь) — в очередь на дообучение (в gateway нет модели)."""
     if len(pcm) < SAMPLE_RATE * 2 * 2:  # меньше 2 с — мало
         return
     OWNER_DIR.mkdir(parents=True, exist_ok=True)
@@ -901,7 +901,7 @@ def owner_embedding(pcm: bytes) -> tuple[np.ndarray | None, float]:
 
 
 def enroll_owner(conn) -> int:
-    """STT: дообучить «Я» по вопросам с кнопки. Владельца ещё нет — им становится похожий голос
+    """STT: дообучить «Я» по вопросам с кнопки. Пользователя ещё нет — им становится похожий голос
     или новый человек. Возвращает число учтённых вопросов."""
     if not OWNER_DIR.exists():
         return 0
@@ -1011,7 +1011,7 @@ def confirm_person(conn, person_id: int):
 
 
 def suggest_owner(conn) -> dict | None:
-    """«Это вы?»: владелец кулона говорит громче всех (микрофон у него на груди) и есть почти везде."""
+    """«Это вы?»: пользователь кулона говорит громче всех (микрофон у него на груди) и есть почти везде."""
     if has_owner(conn):
         return None
     return conn.execute(
@@ -1034,7 +1034,7 @@ def forget_person(conn, person_id: int):
 
 
 def forget_all(conn) -> int:
-    """Забыть все голоса, включая владельца."""
+    """Забыть все голоса, включая пользователя."""
     rows = conn.execute("SELECT id FROM people").fetchall()
     conn.execute("UPDATE segments SET person_id = NULL, voice_score = NULL, embedding = NULL "
                  "WHERE person_id IS NOT NULL OR embedding IS NOT NULL")
@@ -1048,7 +1048,7 @@ def forget_all(conn) -> int:
 
 
 def label(p: dict | None, owner_word: str = "Я", voice_word: str = "Голос") -> str:
-    """Подпись говорящего: имя, «Я» для владельца, иначе «Голос N»."""
+    """Подпись говорящего: имя, «Я» для пользователя, иначе «Голос N»."""
     if not p or p.get("number") is None and not p.get("name") and not p.get("is_owner"):
         return "?"
     if p.get("is_owner"):

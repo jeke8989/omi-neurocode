@@ -95,20 +95,34 @@ fun ExtensionsScreen() {
             else -> {
                 val (mine, available) = data
                 ConnectorsGroup { note = it }
-                if (mine.isNotEmpty()) {
-                    val subtitles = mine.map { e ->
+                // «Подключено» — только то, что реально работает; остальное — «Нужно настроить» с тем, чего не хватает
+                val (working, unfinished) = mine.partition { it.ready && it.enabled }
+                if (working.isNotEmpty()) {
+                    val subtitles = working.map { e ->
                         when {
-                            !e.ready -> stringResource(R.string.needs_setup)
-                            !e.enabled -> stringResource(R.string.off)
                             e.events.isNotEmpty() -> plural(R.plurals.ext_events, e.events.size)
                             e.taskSync != null -> e.taskSync
                             else -> plural(R.plurals.tools, e.tools.size)
                         }
                     }
                     Group(stringResource(R.string.connected), inset = 22.dp) {
-                        mine.forEachIndexed { i, e ->
+                        working.forEachIndexed { i, e ->
                             item {
                                 ListRow(listOfNotNull(e.icon, e.name).joinToString(" "), subtitle = subtitles[i], chevron = true,
+                                    onClick = { Nav.push(Route.Extension(e.id)) }, trailing = null)
+                            }
+                        }
+                    }
+                }
+                if (unfinished.isNotEmpty()) {
+                    val needs = stringResource(R.string.ext_needs)
+                    val off = stringResource(R.string.off)
+                    Group(stringResource(R.string.needs_setup), inset = 22.dp) {
+                        unfinished.forEach { e ->
+                            val missing = e.settings.filter { it.required && !it.filled }.joinToString(", ") { it.title }
+                            item {
+                                ListRow(listOfNotNull(e.icon, e.name).joinToString(" "),
+                                    subtitle = if (missing.isNotEmpty()) "$needs: $missing" else off, chevron = true,
                                     onClick = { Nav.push(Route.Extension(e.id)) }, trailing = null)
                             }
                         }

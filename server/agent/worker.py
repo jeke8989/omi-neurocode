@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, cleanup, connectors, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, retention
+from neuro import agent_core, cleanup, connectors, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
@@ -19,7 +19,7 @@ from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_me
 log = logging.getLogger("neuro.agent")
 MAX_ATTEMPTS = 3
 
-SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают расшифровку разговора, записанного носимым микрофоном владельца.
+SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают расшифровку разговора, записанного носимым микрофоном пользователя.
 Расшифровка автоматическая и может содержать ошибки распознавания.
 Верни строго JSON-объект без пояснений и без markdown:
 {{"title": "название разговора, до 8 слов",
@@ -33,10 +33,6 @@ SUMMARY_SYSTEM = f"""Ты — ассистент Mnemo. Тебе дают рас
 {people.SUMMARY_PEOPLE_RULES}
 {memorylib.RULES}"""
 
-REMEMBER_SYSTEM = f"""Владелец кулона дважды нажал кнопку «запомни это». Тебе дан фрагмент расшифровки перед нажатием
-(может содержать ошибки распознавания). Верни строго JSON:
-{{"memory": "что именно стоит запомнить, 1–2 предложения", "tasks": [{tasklib.SCHEMA}]}}
-{tasklib.RULES}"""
 
 
 def first_words(segs: list[dict], n: int = 7, lang: str = i18n.DEFAULT) -> str:
@@ -110,7 +106,7 @@ def summarize_one(conn, conv_id: int):
     if not segs:
         title = i18n.t(lang, "conversation.empty")
     elif llm.configured() and text_len >= 40:
-        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + i18n.write_in(lang),
+        result = llm.chat_json(conn, "summary", SUMMARY_SYSTEM + "\n" + profile.prompt(conn) + "\n" + i18n.write_in(lang),
                                tasklib.context(conn, segs[0]["started_at"]) + "\n\n" + transcript_text(segs))
         title = str(result.get("title") or "").strip()
         if not title or title == "-":
@@ -216,23 +212,26 @@ def _conversation_of(segs: list[dict]):
 
 
 def handle_remember(conn, ev: dict, segs: list[dict]):
+    """Двойное нажатие во время разговора — «это важный разговор»: помечаем сам разговор (его потом легко найти:
+    звёздочка, «Важные», ассистент), а не пишем кусок в память."""
     conv_id = _conversation_of(segs)
-    when = ev["ts"].astimezone(TZ).strftime("%d.%m %H:%M")
-    tasks: list[dict] = []
-    if not segs:
-        memory = i18n.t(i18n.lang(conn), "memory.mark", when=when)
-    elif llm.configured():
-        result = llm.chat_json(conn, "remember", REMEMBER_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
-                               tasklib.context(conn, ev["ts"]) + "\n\n" + transcript_text(segs))
-        memory = str(result.get("memory") or "").strip() or " ".join(s["text"] for s in segs)
-        tasks = tasklib.classify(conn, result.get("tasks"), people.labels_map(segs), None, source="button")
-    else:
-        memory = " ".join(s["text"] for s in segs)
+    if conv_id is None:  # в окне тишина — разговор, который шёл рядом с нажатием
+        row = conn.execute(
+            """SELECT id FROM conversations WHERE device_id = %s AND trashed_at IS NULL
+                 AND started_at <= %s + interval '2 minutes' AND last_activity >= %s - interval '10 minutes'
+               ORDER BY abs(extract(epoch FROM last_activity - %s)) LIMIT 1""",
+            (ev["device_id"], ev["ts"], ev["ts"], ev["ts"])).fetchone()
+        conv_id = row["id"] if row else None
+    if conv_id is None:
+        if ev["created_at"] > datetime.now(timezone.utc) - timedelta(minutes=30):
+            return  # звук разговора ещё не расшифрован — попробуем позже
+        set_event(conn, ev["id"], "done", "no conversation")
+        return
     with conn.transaction():
-        insert_memories(conn, conv_id, [f"{memory}"], "button")
-        tasklib.save(conn, conv_id, tasks, "button")
-        set_event(conn, ev["id"], "done", memory[:500])
-    log.info("remember @%s: %s", when, memory[:120])
+        conn.execute("UPDATE conversations SET important_at = coalesce(important_at, %s) WHERE id = %s",
+                     (ev["ts"], conv_id))
+        set_event(conn, ev["id"], "done", f"important conversation {conv_id}")
+    log.info("conversation %s marked important by the button", conv_id)
 
 
 def handle_command(conn, ev: dict, segs: list[dict]):
@@ -271,7 +270,7 @@ def quick_tasks(conn):
     for seg in rows:
         if not tasklib.TRIGGER.search(seg["text"] or ""):
             continue
-        # только голос владельца: чужое «напомни» (собеседник, телевизор) задачей не становится
+        # только голос пользователя: чужое «напомни» (собеседник, телевизор) задачей не становится
         if owner_known and seg["person_id"] and not seg["person_owner"]:
             continue
         if done_until and seg["started_at"] <= done_until:
@@ -282,7 +281,7 @@ def quick_tasks(conn):
             (seg["id"], seg["started_at"] - timedelta(seconds=60), seg["started_at"] + timedelta(seconds=45))).fetchall()
         done_until = seg["started_at"] + timedelta(seconds=45)
         try:
-            result = llm.chat_json(conn, "remember", tasklib.QUICK_SYSTEM + "\n" + i18n.write_in(i18n.lang(conn)),
+            result = llm.chat_json(conn, "remember", tasklib.QUICK_SYSTEM + "\n" + profile.prompt(conn) + "\n" + i18n.write_in(i18n.lang(conn)),
                                    tasklib.context(conn, seg["started_at"]) + "\n\n" + transcript_text(window),
                                    usage="quick_task")
         except Exception:  # noqa: BLE001
@@ -371,8 +370,8 @@ def export_tasks(conn):
 def sync_connector_tasks(conn):
     """Новые задачи -> подключённые сервисы (Notion, Linear), где включено «Новые задачи»."""
     for c in conn.execute("SELECT id, settings, connected_at FROM connections WHERE status = 'connected'").fetchall():
-        if not (c["settings"] or {}).get("tasks"):
-            continue
+        if not (c["settings"] or {}).get("tasks") or not connectors.allowed(c["settings"], "write"):
+            continue  # «создавать и изменять» выключено — задачи туда не пишем
         key = "c:" + c["id"]
         tasks = conn.execute(
             """SELECT t.id, t.text, t.due, t.assignee, c.title AS conversation
@@ -450,6 +449,10 @@ def main():
                     process_events(conn)
                     export_tasks(conn)
                     sync_task_integrations(conn)
+                    try:
+                        profile.voice_tick(conn)  # знакомство: прочитанные фразы -> голос пользователя
+                    except Exception:  # noqa: BLE001
+                        log.exception("profile voice failed")
                     try:
                         sync_connector_tasks(conn)  # Notion, Linear: новые задачи — туда
                     except Exception:  # noqa: BLE001

@@ -92,6 +92,9 @@ sealed interface Route {
     /** context — «event:12», «conversation:5», «day:2026-10-31»: чат открыт с этого экрана, агент сразу видит его. */
     data class Chat(val prefill: String? = null, val context: String? = null, val contextTitle: String? = null) : Route
     data object Search : Route
+    data object Important : Route
+    /** Знакомство: имя, занятие, цели и голос (из настроек; в онбординге — шаг). */
+    data object About : Route
     data class Day(val day: String) : Route
     data object Settings : Route
     data object Device : Route

@@ -100,8 +100,16 @@ fun SearchScreen() {
             when {
                 state.loading && r == null -> item { LoadingBlock() }
                 state.error != null -> item { ErrorBlock(state.error, { attempt++ }) }
-                r == null -> item {
-                    EmptyBlock(Icons.Search, stringResource(R.string.search_title), "")
+                r == null -> {
+                    item {
+                        Group {
+                            item {
+                                ListRow(stringResource(R.string.important_title), icon = Icons.Star, chevron = true,
+                                    onClick = { Nav.push(Route.Important) })
+                            }
+                        }
+                    }
+                    item { EmptyBlock(Icons.Search, stringResource(R.string.search_title), "") }
                 }
                 r.isEmpty -> item {
                     EmptyBlock(Icons.Search, stringResource(R.string.search_nothing), "")

@@ -135,6 +135,9 @@ fun SettingsScreen() {
         }
 
         Group(stringResource(R.string.assistant)) {
+            // знакомство: имя, занятие, цели и голос — ИИ понимает контекст и называет по имени
+            item { ListRow(stringResource(R.string.about_me), icon = Icons.Person, chevron = true,
+                onClick = { Nav.push(Route.About) }) }
             item { ListRow(stringResource(R.string.voice_and_button), icon = Icons.Speaker, chevron = true,
                 onClick = { Nav.push(Route.Voice) }) }
             item { ListRow(stringResource(R.string.integrations), icon = Icons.Puzzle, chevron = true,
@@ -664,8 +667,8 @@ fun MemoriesScreen() {
         val all = state.data?.first
         val items = all?.filter { m ->
             when (tab) {
-                0 -> m.source == "button"
-                1 -> m.source != "button"
+                0 -> m.source == "button" || m.source == "agent"  // попросили сами: «запомни, что…»
+                1 -> m.source != "button" && m.source != "agent"
                 else -> true
             }
         }

@@ -61,6 +61,10 @@ fun EventRow(e: EventItem, fmt: Fmt) {
             Txt(e.title ?: e.fragments.firstNotNullOfOrNull { it.title } ?: stringResource(R.string.untitled),
                 T.bodyStrong, maxLines = 2)
             Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (e.important) {
+                    Icon(Icons.StarFilled, null, tint = colors.amber, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                }
                 Txt(fmt.time(e.startedAt) + "–" + fmt.time(e.endedAt), T.caption, colors.graphite, maxLines = 1)
                 if (e.fragments.size > 1) {
                     Spacer(Modifier.width(10.dp))

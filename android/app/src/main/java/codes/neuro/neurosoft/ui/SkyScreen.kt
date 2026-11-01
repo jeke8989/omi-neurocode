@@ -36,6 +36,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -82,11 +85,20 @@ class SkyGraph(val nodes: List<SkyNode>, val edges: List<SkyEdge>) {
     val isEmpty get() = nodes.none { !it.center }
 }
 
-/** Короткая подпись: обрезаем по границе слова, с многоточием — без «Третьяковская гал». */
-fun shortLabel(text: String?, max: Int = 24): String? {
+/** Короткие слова, на которых подпись не должна обрываться: «Прогулка и…» ничего не говорит. */
+private val DANGLING = setOf("и", "в", "во", "на", "с", "со", "по", "к", "ко", "о", "об", "от", "до", "для", "за", "из",
+    "у", "а", "но", "или", "при", "про", "the", "and", "of", "to", "in", "on", "for", "with", "at", "a", "an", "or",
+    "ve", "ile", "ya", "y", "e", "de", "del", "en", "con", "para", "la", "el", "los", "las")
+
+/** Короткая подпись: обрезаем по границе слова, с многоточием — без «Третьяковская гал» и без «Прогулка и…». */
+fun shortLabel(text: String?, max: Int = 42): String? {
     val t = text?.trim()?.ifBlank { null } ?: return null
     if (t.length <= max) return t
-    val cut = t.take(max + 1).substringBeforeLast(' ').trimEnd(',', '.', ':', '—', '-', ' ')
+    val trim = charArrayOf(',', '.', ':', '—', '-', ' ')
+    var cut = t.take(max + 1).substringBeforeLast(' ').trimEnd(*trim)
+    while (cut.contains(' ') && cut.substringAfterLast(' ').lowercase() in DANGLING) {
+        cut = cut.substringBeforeLast(' ').trimEnd(*trim)
+    }
     return (if (cut.length >= max / 2) cut else t.take(max).trimEnd()) + "…"
 }
 
@@ -415,8 +427,11 @@ private fun DrawScope.drawLabels(
         val text = n.label ?: continue
         val p = pts[i]
         if (p.x < -40 * dp || p.y < -40 * dp || p.x > size.width + 40 * dp || p.y > size.height + 40 * dp) continue
-        val layout = measurer.measure(text, if (n.center) centerStyle else style, maxLines = 1)
-        val tw = layout.size.width.toFloat()
+        // до двух строк: название читается целиком, а не «Прогулка и…»
+        val layout = measurer.measure(text, (if (n.center) centerStyle else style).copy(textAlign = TextAlign.Center),
+            overflow = TextOverflow.Ellipsis, maxLines = 2, constraints = Constraints(maxWidth = (156 * dp).toInt()))
+        val tw = (0 until layout.lineCount).maxOf { layout.getLineRight(it) - layout.getLineLeft(it) }
+        val shift = (layout.size.width - tw) / 2f  // строки по центру: слева от текста — пустое поле
         val th = layout.size.height.toFloat()
         val r = radius(n) + 4 * dp
         val candidates = listOf(
@@ -438,7 +453,7 @@ private fun DrawScope.drawLabels(
             ?: continue
         placed += Rect(spot, androidx.compose.ui.geometry.Size(tw, th)).inflate(3 * dp)
         val dim = if (related == null || i in related) 1f else 0.3f
-        drawText(layout, topLeft = spot, alpha = (n.alpha * dim).coerceIn(0.3f, 1f))
+        drawText(layout, topLeft = spot - Offset(shift, 0f), alpha = (n.alpha * dim).coerceIn(0.3f, 1f))
     }
 }
 
@@ -632,7 +647,9 @@ private fun SkyDetails(n: SkyNode, graph: Graph?, period: Int, now: Long, fmt: F
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Txt(n.label ?: stringResource(R.string.untitled), T.bodyStrong, StarLight, maxLines = 1)
+                // в карточке — название полностью (на карте оно может быть сокращено)
+                val title = e?.let { listOfNotNull(it.emoji, it.title).joinToString(" ").ifBlank { null } } ?: n.label
+                Txt(title ?: stringResource(R.string.untitled), T.bodyStrong, StarLight, maxLines = 3)
                 val day = if (n.last > 0) fmt.dayShortTitle(Instant.ofEpochMilli(n.last).atZone(ZoneId.systemDefault())
                     .toLocalDate().toString()) else null
                 val line = when {

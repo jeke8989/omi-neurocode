@@ -200,7 +200,9 @@ def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
             if method == "tools/list":
                 body = {"jsonrpc": "2.0", "id": 2, "result": {"tools": [
                     {"name": "notion-search", "description": "Search Notion", "inputSchema": {
-                        "type": "object", "properties": {"query": {"type": "string"}}}}]}}
+                        "type": "object", "properties": {"query": {"type": "string"}}}},
+                    {"name": "notion-create-pages", "description": "Create pages", "inputSchema": {
+                        "type": "object", "properties": {"title": {"type": "string"}}}}]}}
                 return R(data=None, headers={"Content-Type": "text/event-stream"},
                          text="event: message\ndata: " + __import__("json").dumps(body) + "\n\n")
             if method == "tools/call":
@@ -223,7 +225,9 @@ def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
 
     assert client.post("/api/connectors/finish", json={"state": "bad", "code": "x"}).status_code == 400
     card = client.post("/api/connectors/finish", json={"state": q["state"][0], "code": "code-1"}).json()
-    assert card["status"] == "connected" and card["account"] == "Мой Notion" and card["tools"] == ["notion-search"]
+    assert card["status"] == "connected" and card["account"] == "Мой Notion"
+    assert card["tools"] == ["notion-search", "notion-create-pages"]
+    assert (card["read"], card["write"], card["read_tools"], card["write_tools"]) == (True, True, 1, 1)
     form = seen["token_forms"][0]
     assert form["redirect_uri"] == "codes.neuro.mnemo://oauth" and form["code"] == "code-1"
     import base64 as _b64
@@ -237,6 +241,34 @@ def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
     specs, index = connectors.tool_specs(conn, "найди в notion план")
     assert specs[0]["function"]["name"] == "c_notion__notion_search"
     assert connectors.call_tool(conn, "notion", "notion-search", {"query": "план"}) == "Страница: План"
+
+    # что можно ассистенту — выбирает пользователь: без «создавать и изменять» остаётся только поиск
+    assert client.post("/api/connectors/notion", json={"write": False}).json()["ok"]
+    assert [x["function"]["name"] for x in connectors.tool_specs(conn, "notion")[0]] == ["c_notion__notion_search"]
+    client.post("/api/connectors/notion", json={"write": True})
+
+    # ассистент сам подключает Notion, даже если в вопросе нет слова «Notion» (use_service), и создаёт страницу
+    from neuro import agent_core, llm
+    seen_tools = []
+
+    def fake_chat(conn_, task, messages, tools=None, **kw):
+        names = [t["function"]["name"] for t in tools or []]
+        seen_tools.append(names)
+        if len(seen_tools) == 1:
+            assert "use_service" in names and "c_notion__notion_create_pages" not in names
+            assert any("Notion — можно просматривать" in m["content"] for m in messages if m["role"] == "system")
+            return {"tool_calls": [{"id": "1", "function": {"name": "use_service", "arguments": '{"service": "notion"}'}}]}
+        if len(seen_tools) == 2:
+            assert "c_notion__notion_create_pages" in names
+            return {"tool_calls": [{"id": "2", "function": {"name": "c_notion__notion_create_pages",
+                                                            "arguments": '{"title": "План поездки"}'}}]}
+        return {"content": "Создал страницу «План поездки»."}
+
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    res = agent_core.ask(conn, "сделай страницу с планом поездки", level="tools", channel="chat")
+    assert res["answer"] == "Создал страницу «План поездки»." and len(seen_tools) == 3
+    called = [p[1] for p in seen["posts"] if p[1] and p[1].get("method") == "tools/call"]
+    assert called[-1]["params"] == {"name": "notion-create-pages", "arguments": {"title": "План поездки"}}
 
     # токен истёк — обновляется сам (новый refresh-токен сохраняется)
     tokens = conn.execute("SELECT tokens FROM connections WHERE id = 'notion'").fetchone()["tokens"]
@@ -253,3 +285,52 @@ def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
     assert client.post("/api/connectors/notion", json={"tasks": False}).json()["ok"]
     assert client.delete("/api/connectors/notion").json()["ok"]
     assert next(i for i in client.get("/api/connectors").json()["items"] if i["id"] == "notion")["status"] == "off"
+
+
+def test_profile_voice_and_important(conn):  # noqa: F811
+    """Знакомство: имя, занятие, цели — в контекст ИИ, без слова «владелец»; голос по прочитанным фразам;
+    важный разговор — звёздочкой и в списке «Важные»."""
+    from datetime import datetime, timedelta, timezone
+
+    from neuro import profile
+    gw = _gw()
+    client = Asgi(gw.app)
+    conn.execute("DELETE FROM settings WHERE key LIKE 'profile.%%'")
+    conn.execute("DELETE FROM segments")
+    conn.execute("DELETE FROM people")
+    p = client.post("/api/profile", json={"name": " Женя ", "about": "продакт в финтехе",
+                                          "goals": ["Не забывать договорённости", ""]}).json()
+    assert p["name"] == "Женя" and p["goals"] == ["Не забывать договорённости"] and p["voice"] == "none"
+    text = profile.prompt(conn)
+    assert "Женя" in text and "продакт в финтехе" in text and "«владелец» в текстах не используй" in text
+
+    # прочитал фразы: окно [t0, t1]; в нём больше всех говорил «Голос 1» — это он
+    t0 = datetime.now(timezone.utc) - timedelta(minutes=5)
+    t1 = t0 + timedelta(seconds=40)
+    voice = conn.execute("INSERT INTO people (number) VALUES (1) RETURNING id").fetchone()["id"]
+    other = conn.execute("INSERT INTO people (number) VALUES (2) RETURNING id").fetchone()["id"]
+    conn.execute("INSERT INTO audio_chunks (device_id, started_at, duration_ms, status) VALUES ('d', %s, 60000, 'done')",
+                 (t0 - timedelta(seconds=10),))
+    for pid, a, b in ((voice, 2, 30), (other, 31, 35)):
+        conn.execute("""INSERT INTO segments (device_id, started_at, ended_at, text, person_id)
+                        VALUES ('d', %s, %s, 'фраза', %s)""", (t0 + timedelta(seconds=a), t0 + timedelta(seconds=b), pid))
+    ms = lambda d: int(d.timestamp() * 1000)  # noqa: E731
+    assert client.post("/api/profile/voice", json={"from": ms(t0), "to": ms(t1)}).json()["voice"] == "waiting"
+    assert profile.voice_tick(conn) == "done"
+    me = conn.execute("SELECT id, name, is_owner FROM people WHERE is_owner").fetchone()
+    assert me["id"] == voice and me["name"] == "Женя"
+    assert client.get("/api/profile").json()["voice"] == "done"
+    # в расшифровке для модели — имя, а не «владелец»
+    from neuro import people as peoplelib
+    seg = conn.execute(peoplelib.SEGMENT_SELECT + " WHERE s.person_id = %s LIMIT 1", (voice,)).fetchone()
+    assert peoplelib.speaker_label(seg).rstrip("?") == "Женя"
+
+    # важный разговор: звёздочка и список
+    cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status, title)
+                          VALUES ('d', now() - interval '1 hour', now() - interval '50 minutes', 'done', 'Созвон')
+                          RETURNING id""").fetchone()["id"]
+    assert client.post(f"/api/conversations/{cid}/important", json={"on": True}).json()["important"]
+    assert client.get(f"/api/conversations/{cid}").json()["important"] is True
+    assert [i["id"] for i in client.get("/api/important").json()["items"]] == [cid]
+    client.post(f"/api/conversations/{cid}/important", json={"on": False})
+    assert client.get("/api/important").json()["items"] == []

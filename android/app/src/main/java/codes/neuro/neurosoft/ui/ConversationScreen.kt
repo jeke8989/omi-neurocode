@@ -103,6 +103,21 @@ fun ConversationScreen(id: Long) {
     Column(Modifier.fillMaxSize()) {
         TopBar(null, { Nav.pop() }) {
             if (d != null) {
+                // важный разговор — как двойное нажатие кнопки кулона
+                val important = d.item.important
+                IconCircle(if (important) Icons.StarFilled else Icons.Star,
+                    stringResource(if (important) R.string.important_off else R.string.important_on), {
+                        state = Res(d.copy(item = d.item.copy(important = !important)))
+                        scope.launch {
+                            try {
+                                Api.setImportant(id, !important)
+                                Repo.events(fmt.dayOf(d.item.startedAt)).refresh()
+                            } catch (_: Exception) {
+                                reload()
+                            }
+                        }
+                    }, size = 40.dp, tint = if (important) c.amber else c.ink)
+                Spacer(Modifier.width(8.dp))
                 IconCircle(Icons.Share, stringResource(R.string.share), {
                     val text = buildString {
                         append(d.item.title ?: "").append("\n")

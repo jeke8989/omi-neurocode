@@ -255,7 +255,7 @@ def test_summary_names_tasks_topics_and_suggestions(clean, monkeypatch):
     rows2 = run_chunk(conn, pcm2, Timed(spans2), minutes_ago=10)
     assert rows2[0]["person_id"] == anna_id  # второй разговор — тот же голос
 
-    assert "Владелец (Женя):" in seen["user"] and "Голос 2:" in seen["user"]
+    assert "Женя:" in seen["user"] and "Владелец" not in seen["user"] and "Голос 2:" in seen["user"]
     assert '"speakers"' in seen["system"] and '"topics"' in seen["system"]
     conv = conn.execute("SELECT topics FROM conversations WHERE id = %s", (conv_id,)).fetchone()
     assert conv["topics"] == ["отчёт", "сроки"]
@@ -283,7 +283,7 @@ def test_summary_names_tasks_topics_and_suggestions(clean, monkeypatch):
     # агент знает людей
     from neuro import agent_core
     overview = agent_core.run_builtin(conn, "people", {}, None)
-    assert "Анна" in overview and "Владелец (Женя)" in overview
+    assert "Анна" in overview and "Женя — сам пользователь" in overview
     about = agent_core.run_builtin(conn, "person_conversations", {"name": "анна"}, None)
     assert "Отчёт к пятнице" in about and "Подготовить отчёт" in about
 

@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people
+from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -55,7 +55,7 @@ def route(text: str, channel: str) -> str:
     if channel == "voice":
         return "fast"  # инструменты доступны и на быстром уровне
     if channel != "voice" and LIFE_WORDS.search(text):
-        return "tools"  # вопросы о жизни владельца — с инструментами (события, люди, расшифровки)
+        return "tools"  # вопросы о жизни пользователя — с инструментами (события, люди, расшифровки)
     return "tools" if TOOL_WORDS.search(text) or len(text) > 160 else "fast"
 
 
@@ -69,10 +69,10 @@ def _fn(name, description, props=None, required=None):
 BUILTIN_TOOLS = [
     _fn("web_search", "Поиск в интернете: свежие факты, новости, цены, погода, справки. Возвращает выжимку с источниками.",
         {"query": {"type": "string", "description": "поисковый запрос"}}, ["query"]),
-    _fn("create_task", "Создать задачу владельцу.",
+    _fn("create_task", "Создать задачу пользователю.",
         {"text": {"type": "string"}, "due": {"type": "string", "description": "срок словами, если назван"},
          "assignee": {"type": "string"}}, ["text"]),
-    _fn("list_tasks", "Список задач владельца.",
+    _fn("list_tasks", "Список задач пользователя.",
         {"status": {"type": "string", "enum": ["open", "done", "all"]}}),
     _fn("complete_task", "Отметить задачу выполненной по её id.", {"id": {"type": "integer"}}, ["id"]),
     _fn("save_memory", "Запомнить важный факт или договорённость надолго.", {"text": {"type": "string"}}, ["text"]),
@@ -83,7 +83,10 @@ BUILTIN_TOOLS = [
         {"minutes": {"type": "integer", "description": "по умолчанию 15"}}),
     _fn("list_conversations", "Список разговоров с итогами за последние дни.",
         {"days": {"type": "integer", "description": "по умолчанию 1"}}),
-    _fn("people", "Люди, которых кулон узнаёт по голосу: имена, сколько и когда разговаривали с владельцем."),
+    _fn("important_conversations", "Важные разговоры: пользователь отметил их двойным нажатием кнопки или "
+        "звёздочкой. Для вопросов «что было важного», «тот важный разговор про …».",
+        {"days": {"type": "integer", "description": "за сколько дней, по умолчанию 90"}}),
+    _fn("people", "Люди, которых кулон узнаёт по голосу: имена, сколько и когда разговаривали с пользователем."),
     _fn("person_conversations", "Разговоры и задачи с конкретным человеком (по имени или подписи «Голос N»).",
         {"name": {"type": "string"}, "days": {"type": "integer", "description": "за сколько дней, по умолчанию 60"}},
         ["name"]),
@@ -93,11 +96,11 @@ BUILTIN_TOOLS = [
         {"id": {"type": "integer"}}, ["id"]),
     _fn("conversation_details", "Всё о разговоре: итог, люди, задачи и расшифровка. id — из списков разговоров.",
         {"id": {"type": "integer"}}, ["id"]),
-    _fn("places", "Где был владелец в этот день (по геолокации) и сколько времени.",
+    _fn("places", "Где был пользователь в этот день (по геолокации) и сколько времени.",
         {"day": {"type": "string", "description": "YYYY-MM-DD, «сегодня» или «вчера»"}}, ["day"]),
     _fn("diary", "Сводка дня из дневника: история дня, настроение, главные моменты.",
         {"day": {"type": "string", "description": "YYYY-MM-DD, «сегодня» или «вчера»"}}, ["day"]),
-    _fn("ask_user", "Задать владельцу один короткий уточняющий вопрос, когда без ответа нельзя ответить точно "
+    _fn("ask_user", "Задать пользователю один короткий уточняющий вопрос, когда без ответа нельзя ответить точно "
         "(подходит несколько событий или людей, неясен период). Не спрашивай то, что можно найти инструментами.",
         {"question": {"type": "string", "description": "вопрос, при возможности с 2–4 вариантами"}}, ["question"]),
 ]
@@ -211,6 +214,15 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
             (datetime.now(timezone.utc) - timedelta(days=days),)).fetchall()
         return "\n".join(f"#{r['id']} {_d(r['started_at'])} {r['title'] or '…'}: {r['summary'] or ''}"
                          for r in rows) or "Разговоров нет."
+    if name == "important_conversations":
+        days = max(1, min(int(args.get("days") or 90), 730))
+        rows = conn.execute(
+            """SELECT id, started_at, title, summary FROM conversations
+               WHERE important_at IS NOT NULL AND trashed_at IS NULL AND started_at > %s
+               ORDER BY started_at DESC LIMIT 40""",
+            (datetime.now(timezone.utc) - timedelta(days=days),)).fetchall()
+        return "\n".join(f"#{r['id']} {_d(r['started_at'])} {r['title'] or '…'}: {r['summary'] or ''}"
+                         for r in rows) or "Важных разговоров нет."
     if name == "people":
         return people.people_overview(conn)
     if name == "person_conversations":
@@ -254,7 +266,7 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
         "deep": "Работай основательно: следуй плану, проверяй факты в нескольких источниках, сделай вывод.",
     }[level]
     return (
-        f"Ты — Mnemo, личный ИИ-агент владельца. Он носит кулон-микрофон: у тебя есть его день, собранный в "
+        f"Ты — Mnemo, личный ИИ-агент пользователя. Он носит кулон-микрофон: у тебя есть его день, собранный в "
         f"события, расшифровки разговоров, люди (узнаны по голосу), места, задачи, память и дневник. "
         f"Сейчас {WEEKDAYS[now.weekday()]}, {now.strftime('%d.%m.%Y %H:%M')}. {i18n.reply_in(lang)} "
         f"Как работать: вопросы о его жизни (что было, с кем говорил, о чём договорились, где был, что обещал) — "
@@ -264,7 +276,8 @@ def system_prompt(level: str, channel: str, lang: str = i18n.DEFAULT) -> str:
         f"называй, откуда это (событие, время, человек). Если вопрос можно понять по-разному и от этого зависит "
         f"ответ — задай один короткий уточняющий вопрос инструментом ask_user (лучше с вариантами); то, что можно "
         f"найти самому, не уточняй. Расшифровки автоматические и могут содержать ошибки; говорящие подписаны "
-        f"«Владелец», по имени или «Голос N». {depth} {style} "
+        f"по имени (сам пользователь — своим именем или «Я») или «Голос N». Обращайся к пользователю на «вы» "
+        f"или по имени; словом «владелец» его не называй. {depth} {style} "
         f"Никогда не выдумывай факты; если не нашёл — так и скажи и предложи, что сделать."
     )
 
@@ -346,21 +359,42 @@ def execute(conn, run_id: int) -> str:
     try:
         ext_rows = conn.execute("SELECT id, manifest, settings FROM extensions WHERE enabled").fetchall()
         ext_specs, ext_index = extensions.tool_specs(ext_rows)
-        # подключённые сервисы (Notion, Linear…) — только если вопрос про них: лишние описания стоят токенов
-        conn_specs, conn_index = connectors.tool_specs(conn, run["question"])
+        hist = history(conn, run_id)
+        # подключённые сервисы (Notion, Linear…): инструменты сразу — если о сервисе речь в вопросе или в последних
+        # сообщениях чата; иначе ассистент подключает их сам (use_service) — лишние описания стоят токенов
+        recent = " ".join(str(m.get("content") or "") for m in hist[-4:])
+        conn_specs, conn_index = connectors.tool_specs(conn, f"{run['question']} {recent}")
+        services = connectors.services(conn)
+        loaded = {v[0] for v in conn_index.values()}
+        later = [sv for sv in services if sv["id"] not in loaded and (sv["read"] or sv["write"])]
         tools = BUILTIN_TOOLS + ext_specs + conn_specs
+        if later:
+            tools.append(_fn("use_service", "Подключить инструменты сервиса пользователя (" + ", ".join(
+                sv["name"] for sv in later) + "): найти, прочитать, создать или изменить там что-то. После вызова "
+                "инструменты сервиса появятся в списке.", {"service": {"type": "string", "enum": [sv["id"] for sv in later]}},
+                ["service"]))
 
         context = build_context(conn, device_id) if device_id else ""
-        messages = [{"role": "system", "content": system_prompt(level, channel, lang)}]
+        messages = [{"role": "system", "content": system_prompt(level, channel, lang) + "\n" + profile.prompt(conn)}]
         if context:
             messages.append({"role": "system", "content": "Контекст:\n" + context})
         # шпаргалка: что было сегодня и вчера (подробности — инструментами)
         messages.append({"role": "system", "content": "Что есть в приложении:\n" + agent_context.overview(conn)})
         about = agent_context.context_block(conn, run.get("context"))
         if about:
-            messages.append({"role": "system", "content": "Владелец открыл чат из этого места приложения — вопросы, "
+            messages.append({"role": "system", "content": "Пользователь открыл чат из этого места приложения — вопросы, "
                              "скорее всего, о нём:\n" + about})
-        messages += history(conn, run_id)
+        if services:
+            def can(sv):
+                parts = (["просматривать (поиск, чтение)"] if sv["read"] else []) + (
+                    ["создавать и изменять (страницы, задачи, комментарии)"] if sv["write"] else [])
+                return ", ".join(parts) or "ничего — доступ выключен"
+            messages.append({"role": "system", "content": "Подключённые сервисы: " + "; ".join(
+                f"{sv['name']} — можно {can(sv)}" for sv in services) + ". Просят найти, прочитать, создать или "
+                "изменить что-то в сервисе — делай это его инструментами сам (нет их в списке — сначала use_service), "
+                "не отправляй делать вручную. Если нужное действие выключено — скажи, что включить его можно в "
+                "приложении: Интеграции → название сервиса."})
+        messages += hist
         messages.append({"role": "user", "content": run["question"]})
 
         if cfg["plan"]:
@@ -392,12 +426,22 @@ def execute(conn, run_id: int) -> str:
                 except ValueError:
                     args = {}
                 if name == "ask_user":
-                    # уточнение: вопрос уходит владельцу ответом, его ответ — следующее сообщение в чате
+                    # уточнение: вопрос уходит пользователю ответом, его ответ — следующее сообщение в чате
                     answer = str(args.get("question") or "").strip()
                     step(conn, run_id, "ask", i18n.t(lang, "tool.ask_user"))
                     break
                 _check(conn, run_id)
-                if name in conn_index:
+                if name == "use_service":
+                    cid = str(args.get("service") or "")
+                    sv = next((x for x in services if x["id"] == cid), None)
+                    specs, idx = connectors.tool_specs(conn, only=cid) if sv else ([], {})
+                    fresh = [x for x in specs if x["function"]["name"] not in conn_index]
+                    tools.extend(fresh)
+                    conn_index.update(idx)
+                    step(conn, run_id, "tool", f"{sv['icon']} {sv['name']}" if sv else name)
+                    result = (f"Инструменты {sv['name']} подключены: " + ", ".join(v[2].split(": ", 1)[-1] for v in idx.values())
+                              if fresh else "Нет доступных инструментов: сервис не подключён или действия выключены.")
+                elif name in conn_index:
                     cid, tool, title = conn_index[name]
                     step(conn, run_id, "tool", title, json.dumps(args, ensure_ascii=False))
                     try:

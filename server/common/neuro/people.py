@@ -22,7 +22,7 @@ SELECT s.id, s.started_at, s.ended_at, s.speaker, s.text, s.conversation_id, s.p
 FROM segments s LEFT JOIN people p ON p.id = s.person_id
 """
 
-OWNER_LABEL = "Владелец"
+OWNER_LABEL = "Я"  # пользователь без имени; с именем — подписан именем (не «пользователь»)
 VOICE_LABEL = "Голос"
 
 
@@ -34,7 +34,7 @@ def speaker_label(s: dict) -> str:
     """Подпись говорящего в расшифровке для модели. «Анна?» — узнана неуверенно."""
     if s.get("person_id"):
         if s.get("person_owner"):
-            base = f"{OWNER_LABEL} ({s['person_name']})" if s.get("person_name") else OWNER_LABEL
+            base = s.get("person_name") or OWNER_LABEL
         else:
             base = s.get("person_name") or f"{VOICE_LABEL} {s.get('person_number')}"
         return base if sure(s.get("voice_score")) else base + "?"
@@ -50,7 +50,8 @@ def labels_map(segs: list[dict]) -> dict[str, int]:
         if s.get("person_id"):
             out[speaker_label(s).rstrip("?").lower()] = s["person_id"]
             if s.get("person_owner"):
-                out[OWNER_LABEL.lower()] = s["person_id"]
+                for word in ("я", "владелец", "пользователь", "me", "owner"):
+                    out[word] = s["person_id"]
                 if s.get("person_name"):
                     out[s["person_name"].lower()] = s["person_id"]
     return out
@@ -66,13 +67,13 @@ def by_name(conn, name: str) -> list[int]:
 
 
 def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
-    """Кто это: подпись из расшифровки, имя известного человека или «я/владелец»."""
+    """Кто это: подпись из расшифровки, имя известного человека или «я/пользователь»."""
     if not who:
         return None
     key = who.strip().rstrip("?").lower()
     if key in labels:
         return labels[key]
-    if key in ("я", "владелец", "me", "owner", "ben", "yo"):
+    if key in ("я", "владелец", "пользователь", "me", "owner", "user", "ben", "yo"):
         row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
         return row["id"] if row else None
     m = re.fullmatch(r"(?:голос|voice|ses|voz)\s*(\d+)", key)
@@ -84,14 +85,14 @@ def resolve(conn, who: str | None, labels: dict[str, int]) -> int | None:
 
 
 # ---------------------------------------------------------------- итоги разговора
-SUMMARY_PEOPLE_RULES = """Говорящие подписаны так: «Владелец» — владелец кулона (в скобках его имя, если известно);
+SUMMARY_PEOPLE_RULES = """Говорящие подписаны так: пользователь (носит кулон) — своим именем или «Я», если имени нет;
 имя — человек, узнанный по голосу; «Голос N» — незнакомый голос; знак «?» — узнан неуверенно; «Спикер N» — голос без отпечатка.
 Кулон слышит всё вокруг: рекламу, объявления, телевизор, радио, видео, песни и чужие разговоры рядом. Итог, задачи
-и факты — только из речи людей, которые участвуют в разговоре с владельцем; фон не пересказывай.
+и факты — только из речи людей, которые участвуют в разговоре с пользователем; фон не пересказывай.
 В задачах исполнителя (assignee) указывай подписью из расшифровки или именем, если оно звучит в разговоре.
-В "speakers" — для подписей «Голос N» и «Владелец» без имени:
+В "speakers" — для подписей «Голос N»:
  kind: "person" — участник разговора; "media" — реклама, объявление, диктор, телевизор, радио, видео, песня;
- "crowd" — посторонние рядом, не разговаривают с владельцем;
+ "crowd" — посторонние рядом, не разговаривают с пользователем;
  name — имя участника, если оно ясно следует из разговора; sure = true, только если к нему прямо обратились
  по имени или он представился (цитата в evidence). Сомневаешься в имени — не пиши. Нечего сказать — пустой список."""
 
@@ -104,7 +105,7 @@ KINDS = ("media", "crowd")
 
 
 def _kind_by_user(conn, pid: int) -> bool:
-    """Владелец сам сказал «это человек» — модель больше не прячет этот голос."""
+    """Пользователь сам сказал «это человек» — модель больше не прячет этот голос."""
     row = conn.execute("SELECT kind_auto, kind FROM people WHERE id = %s", (pid,)).fetchone()
     return bool(row and row["kind"] == "person")
 
@@ -178,7 +179,7 @@ PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.kind, p.number, p.sam
        (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations"""
 
 # Голос, услышанный только в одном разговоре, — «Собеседник»: не показываем в «Людях», «Созвездии» и
-# подсказках, пока он не встретится снова (или пока владелец сам его не назовёт).
+# подсказках, пока он не встретится снова (или пока пользователь сам его не назовёт).
 RECURRING = 2
 VISIBLE_SQL = f"""(p.name IS NOT NULL OR p.is_owner OR (coalesce(p.kind, 'person') = 'person' AND
     (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}))"""
@@ -375,7 +376,7 @@ def participants_sql(alias: str = "c") -> str:
 
 
 def event_people_sql(alias: str = "e") -> str:
-    """Люди события (видимые: названные, владелец или встречавшиеся не один раз)."""
+    """Люди события (видимые: названные, пользователь или встречавшиеся не один раз)."""
     return f"""coalesce((SELECT json_agg(json_build_object('id', p.id, 'name', p.name, 'number', p.number,
                                                      'is_owner', p.is_owner))
                FROM people p WHERE p.id = ANY({alias}.people) AND NOT p.ignored AND {VISIBLE_SQL}), '[]'::json)"""
@@ -438,8 +439,7 @@ def people_overview(conn) -> str:
         return "Кулон пока не различает голоса (никого не запомнил)."
     out = []
     for r in rows:
-        who = (f"Владелец ({r['name']})" if r["name"] else "Владелец") if r["is_owner"] \
-            else (r["name"] or f"Голос {r['number']}")
+        who = f"{r['name'] or 'Я'} — сам пользователь" if r["is_owner"] else (r["name"] or f"Голос {r['number']}")
         last = r["last_seen"].strftime("%d.%m.%Y") if r["last_seen"] else "—"
         out.append(f"- {who}: разговоров {r['conversations']}, говорил(а) {int(r['speech_sec'] // 60)} мин, "
                    f"последний раз {last}" + (f"; заметка: {r['note']}" if r.get("note") else ""))

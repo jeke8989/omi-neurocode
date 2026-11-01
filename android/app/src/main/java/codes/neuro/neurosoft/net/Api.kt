@@ -30,6 +30,8 @@ data class ConversationItem(
     val durationSec: Int = 0,
     val people: List<PersonRef> = emptyList(),
     val topics: List<String> = emptyList(),
+    /** Важный разговор: двойное нажатие кнопки во время разговора или звёздочка. */
+    val important: Boolean = false,
 )
 
 /** Человек, узнанный по голосу: имя или «Голос N»; владелец кулона — «Я». */
@@ -100,6 +102,7 @@ data class EventItem(
 ) {
     val durationSec: Int get() = fragments.sumOf { it.durationSec }
     val tasksCount: Int get() = fragments.sumOf { it.tasksCount }
+    val important: Boolean get() = fragments.any { it.important }
 }
 
 /** Лента дня: события и ещё не разобранные фрагменты (последний час). grouped=false — сервер старый, без событий. */
@@ -220,9 +223,14 @@ data class ExtDraft(val manifest: JSONObject?, val preview: Extension?, val note
 
 data class McpInfo(val enabled: Boolean, val since: String?, val token: String? = null, val url: String)
 
+/** Знакомство: имя, чем занимается, цели; voice — none | waiting | done | failed. */
+data class Profile(val name: String?, val about: String?, val goals: List<String>, val voice: String)
+
 /** Сервис, который подключается одной кнопкой (Notion, Linear): вход через сайт сервиса, без ключей. */
 data class Connector(val id: String, val name: String, val icon: String, val description: String, val status: String,
-                     val account: String?, val error: String?, val tools: List<String>, val tasks: Boolean) {
+                     val account: String?, val error: String?, val tools: List<String>, val tasks: Boolean,
+                     /** Что ассистенту можно: просматривать (поиск, чтение); создавать и изменять. */
+                     val read: Boolean = true, val write: Boolean = true) {
     val connected get() = status == "connected"
 }
 
@@ -689,11 +697,34 @@ object Api {
         call("POST", "/api/extensions/install", JSONObject().put("manifest", manifest))
     }
 
+    // ---------------------------------------------------------------- важные разговоры
+    suspend fun important(): List<ConversationItem> =
+        JSONObject(call("GET", "/api/important")).optJSONArray("items").map { conversation(it) }
+
+    suspend fun setImportant(conversationId: Long, on: Boolean) {
+        call("POST", "/api/conversations/$conversationId/important", JSONObject().put("on", on))
+    }
+
+    // ---------------------------------------------------------------- знакомство
+    suspend fun profile(): Profile = profile(JSONObject(call("GET", "/api/profile")))
+
+    suspend fun saveProfile(name: String, about: String, goals: List<String>): Profile =
+        profile(JSONObject(call("POST", "/api/profile", JSONObject().put("name", name).put("about", about)
+            .put("goals", JSONArray(goals)))))
+
+    /** Прочитал фразы вслух с from до to (мс): голос в этом окне — голос пользователя. */
+    suspend fun profileVoice(from: Long, to: Long) {
+        call("POST", "/api/profile/voice", JSONObject().put("from", from).put("to", to), explain = true)
+    }
+
+    private fun profile(o: JSONObject) = Profile(o.str("name"), o.str("about"), o.optJSONArray("goals").strings(),
+        o.optString("voice", "none"))
+
     // ---------------------------------------------------------------- сервисы одной кнопкой
     private fun connector(o: JSONObject) = Connector(
         o.optString("id"), o.optString("name"), o.optString("icon"), o.optString("description"),
         o.optString("status", "off"), o.str("account"), o.str("error"), o.optJSONArray("tools").strings(),
-        o.optBoolean("tasks"),
+        o.optBoolean("tasks"), o.optBoolean("read", true), o.optBoolean("write", true),
     )
 
     suspend fun connectors(): List<Connector> =
@@ -707,8 +738,9 @@ object Api {
     suspend fun connectorFinish(code: String, state: String): Connector = connector(JSONObject(call("POST",
         "/api/connectors/finish", JSONObject().put("code", code).put("state", state), explain = true)))
 
-    suspend fun setConnectorTasks(id: String, on: Boolean) {
-        call("POST", "/api/connectors/$id", JSONObject().put("tasks", on))
+    /** key: tasks | read | write. */
+    suspend fun setConnector(id: String, key: String, on: Boolean) {
+        call("POST", "/api/connectors/$id", JSONObject().put(key, on))
     }
 
     suspend fun disconnectConnector(id: String) {
@@ -941,6 +973,7 @@ object Api {
         durationSec = o.optInt("duration_sec"),
         people = o.optJSONArray("people").map { personRef(it) },
         topics = o.optJSONArray("topics").strings(),
+        important = o.optBoolean("important"),
     )
 
     private fun task(o: JSONObject) = TaskItem(
