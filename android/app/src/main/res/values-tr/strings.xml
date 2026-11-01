@@ -380,16 +380,22 @@
     <string name="mcp_turn_on">Aç ve anahtar oluştur</string>
     <string name="mcp_url">Adres</string>
     <string name="memory">Hafıza</string>
+    <string name="memory_about_empty">Kendinizden bahsedin</string>
+    <string name="memory_all">Tümü</string>
     <string name="memory_archive">Arşiv</string>
     <string name="memory_archive_empty">Arşiv boş</string>
     <string name="memory_asked">İstedikleriniz</string>
     <string name="memory_asked_empty">Asistana “şunu hatırla…” deyin, burada görünür</string>
+    <string name="memory_edit_title">Hafıza kaydı</string>
     <string name="memory_empty_text">Kolye düğmesine iki kez basın; konuşmanın son dakikası nota dönüşür.</string>
     <string name="memory_empty_title">Henüz boş</string>
+    <string name="memory_facts">Bilgiler</string>
     <string name="memory_footer">Asistan cevap verirken hafızayı kullanır.</string>
     <string name="memory_noticed">Mnemo\'nun fark ettikleri</string>
     <string name="memory_noticed_empty">Henüz bir şey yok</string>
+    <string name="memory_search_hint">Hafızada ara</string>
     <string name="memory_to_archive">Arşivle</string>
+    <string name="memory_updated">güncellendi</string>
     <string name="merge">Birleştir</string>
     <string name="merge_text">Kolye bir kişiyi iki kişi sanmış olabilir: farklı mikrofon, gürültü, soğuk algınlığı. Gerçekte kim olduğunu seçin, sesler birleştirilir.</string>
     <string name="merge_title">%1$s aslında…</string>
@@ -608,6 +614,8 @@
     <string name="server_reconnect">yeni kod gerekli</string>
     <string name="server_reconnect_text">Sunucu erişim anahtarını değiştirdi. Yeniden bağlanmak için yeni kodu girin</string>
     <string name="settings">Ayarlar</string>
+    <string name="settings_app">Uygulama</string>
+    <string name="settings_people_diary">Kişiler ve günlük</string>
     <string name="setup">Kurulum</string>
     <string name="share">Paylaş</string>
     <string name="show">Göster</string>
@@ -833,6 +841,14 @@
     <plurals name="places">
         <item quantity="one">%d yer</item>
         <item quantity="other">%d yer</item>
+    </plurals>
+    <plurals name="rules_count">
+        <item quantity="one">%d kural</item>
+        <item quantity="other">%d kural</item>
+    </plurals>
+    <plurals name="schedules_count">
+        <item quantity="one">%d zamanlanmış görev</item>
+        <item quantity="other">%d zamanlanmış görev</item>
     </plurals>
     <plurals name="steps">
         <item quantity="one">%d adım</item>

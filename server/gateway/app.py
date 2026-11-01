@@ -29,6 +29,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
                    ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, routines, tts, voices)
+from neuro import memory as memorylib
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -744,24 +745,37 @@ async def api_task_update(request: Request):
     return Json({"id": tid, "status": status})
 
 
+MEMORY_SELECT = """SELECT m.id, m.conversation_id, m.text, m.source, m.created_at, m.updated_at,
+                          c.title AS conversation_title
+                   FROM memories m LEFT JOIN conversations c ON c.id = m.conversation_id"""
+
+
 async def api_memories(request: Request):
-    """Память: ?archived=1 — архив (то, что модель сочла лишним; можно вернуть)."""
+    """Память: ?archived=1 — архив (то, что модель сочла лишним; можно вернуть); ?q=… — поиск по смыслу."""
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
     archived = request.query_params.get("archived") == "1"
-    async with await aconnect() as conn:
-        rows = await (await conn.execute(
-            """SELECT m.id, m.conversation_id, m.text, m.source, m.created_at, c.title AS conversation_title
-               FROM memories m LEFT JOIN conversations c ON c.id = m.conversation_id
-               WHERE (m.archived_at IS NOT NULL) = %s
-               ORDER BY coalesce(m.archived_at, m.created_at) DESC LIMIT 300""", (archived,)
-        )).fetchall()
-        n = await (await conn.execute("SELECT count(*) AS n FROM memories WHERE archived_at IS NOT NULL")).fetchone()
-    return Json({"items": rows, "archived": n["n"]})
+    query = (request.query_params.get("q") or "").strip()[:300]
+
+    def work(conn):
+        if query:
+            ids = [h["id"] for h in memorylib.recall(conn, query, k=30, kinds=("memory",))]
+            found = {r["id"]: r for r in conn.execute(MEMORY_SELECT + " WHERE m.id = ANY(%s::bigint[])", (ids,)).fetchall()}
+            rows = [found[i] for i in ids if i in found]
+        else:
+            rows = conn.execute(MEMORY_SELECT + """ WHERE (m.archived_at IS NOT NULL) = %s
+                                ORDER BY coalesce(m.archived_at, m.updated_at, m.created_at) DESC LIMIT 300""",
+                                (archived,)).fetchall()
+        counts = conn.execute("""SELECT count(*) FILTER (WHERE archived_at IS NOT NULL) AS archived,
+                                        count(*) FILTER (WHERE archived_at IS NULL) AS active FROM memories""").fetchone()
+        return {"items": rows, "archived": counts["archived"], "active": counts["active"]}
+
+    return Json(await _sync(work))
 
 
 async def api_memory(request: Request):
-    """Одна запись памяти: POST {"archived": true|false} — в архив / вернуть; DELETE — удалить совсем."""
+    """Одна запись памяти: POST {"archived": true|false} — в архив / вернуть; POST {"text"} — исправить
+    (отпечаток для поиска пересчитается сам); DELETE — удалить совсем."""
     if not _authorized(request.headers, request.query_params):
         return _unauthorized()
     mid = int(request.path_params["id"])
@@ -770,11 +784,19 @@ async def api_memory(request: Request):
             res = await conn.execute("DELETE FROM memories WHERE id = %s", (mid,))
         else:
             body = await _body(request)
-            if body is None or "archived" not in body:
+            text = " ".join(str((body or {}).get("text") or "").split())[:600]
+            if body is not None and "text" in body:
+                if len(text) < 2:
+                    return Json({"error": "text"}, status_code=400)
+                res = await conn.execute(
+                    """UPDATE memories SET text = %s, emb = NULL, updated_at = now(), reviewed = true, archived_at = NULL
+                       WHERE id = %s""", (crypto.seal(text), mid))
+            elif body is None or "archived" not in body:
                 return Json({"error": "archived"}, status_code=400)
-            res = await conn.execute(
-                "UPDATE memories SET archived_at = CASE WHEN %s THEN now() ELSE NULL END WHERE id = %s",
-                (bool(body["archived"]), mid))
+            else:
+                res = await conn.execute(
+                    "UPDATE memories SET archived_at = CASE WHEN %s THEN now() ELSE NULL END WHERE id = %s",
+                    (bool(body["archived"]), mid))
     if res.rowcount == 0:
         return Json({"error": "not found"}, status_code=404)
     return Json({"ok": True})

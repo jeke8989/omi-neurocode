@@ -134,12 +134,10 @@ fun SettingsScreen() {
             }
         }
 
+        // ассистент: что он знает (память — о вас, правила, расписание, факты), как с ним говорить, его инструменты
         Group(stringResource(R.string.assistant)) {
-            // знакомство: имя, занятие, цели и голос — ИИ понимает контекст и называет по имени
-            item { ListRow(stringResource(R.string.about_me), icon = Icons.Person, chevron = true,
-                onClick = { Nav.push(Route.About) }) }
-            item { ListRow(stringResource(R.string.routines_title), icon = Icons.Clock, chevron = true,
-                onClick = { Nav.push(Route.Routines) }) }
+            item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
+                onClick = { Nav.push(Route.Memories) }) }
             item { ListRow(stringResource(R.string.voice_and_button), icon = Icons.Speaker, chevron = true,
                 onClick = { Nav.push(Route.Voice) }) }
             item { ListRow(stringResource(R.string.integrations), icon = Icons.Puzzle, chevron = true,
@@ -153,12 +151,9 @@ fun SettingsScreen() {
             }
         }
 
-        Group(stringResource(R.string.tab_people)) {
+        Group(stringResource(R.string.settings_people_diary)) {
             item { ListRow(stringResource(R.string.voices_title), icon = Icons.People, chevron = true,
                 onClick = { Nav.push(Route.VoicesSettings) }) }
-        }
-
-        Group(stringResource(R.string.tab_diary)) {
             item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Book, chevron = true,
                 value = features.data?.let { stringResource(if (it.diary) R.string.on else R.string.off) },
                 onClick = { Nav.push(Route.DiarySettings) }) }
@@ -171,9 +166,16 @@ fun SettingsScreen() {
             }
         }
 
-        Group(stringResource(R.string.appearance)) {
+        Group(stringResource(R.string.settings_app)) {
             item { ListRow(stringResource(R.string.theme), icon = Icons.Moon, chevron = true,
                 value = themeTitle(ThemeMode.state.value), onClick = { Nav.push(Route.Theme) }) }
+            val code = Lang.code(Core.prefs)
+            item { ListRow(stringResource(R.string.app_language), icon = Icons.Globe, chevron = true,
+                value = if (Core.prefs.language.isBlank()) stringResource(R.string.lang_system)
+                else Lang.supported.firstOrNull { it.first == code }?.second,
+                onClick = { Nav.push(Route.Language) }) }
+            item { ListRow(stringResource(R.string.speech_language), icon = Icons.Translate, chevron = true,
+                value = sttChoiceTitle(features.data?.sttLanguage ?: "app"), onClick = { Nav.push(Route.SttLanguage) }) }
         }
 
         val bioAvailable = codes.neuro.neurosoft.AppLock.biometricAvailable(LocalContext.current)
@@ -214,24 +216,12 @@ fun SettingsScreen() {
             }
         }
 
-        Group(stringResource(R.string.language)) {
-            val code = Lang.code(Core.prefs)
-            item { ListRow(stringResource(R.string.app_language), icon = Icons.Globe, chevron = true,
-                value = if (Core.prefs.language.isBlank()) stringResource(R.string.lang_system)
-                else Lang.supported.firstOrNull { it.first == code }?.second,
-                onClick = { Nav.push(Route.Language) }) }
-            item { ListRow(stringResource(R.string.speech_language), icon = Icons.Translate, chevron = true,
-                value = sttChoiceTitle(features.data?.sttLanguage ?: "app"), onClick = { Nav.push(Route.SttLanguage) }) }
-        }
-
         Group(stringResource(R.string.data)) {
-            item { ListRow(stringResource(R.string.memory), icon = Icons.Bookmark, chevron = true,
-                onClick = { Nav.push(Route.Memories) }) }
-            item { ListRow(stringResource(R.string.trash), icon = Icons.Trash, chevron = true,
-                onClick = { Nav.push(Route.Trash) }) }
             item { ListRow(stringResource(R.string.audio_keep), icon = Icons.Wave, chevron = true,
                 value = features.data?.let { audioKeepTitle(it.audioKeepDays) },
                 onClick = { Nav.push(Route.AudioKeep) }) }
+            item { ListRow(stringResource(R.string.trash), icon = Icons.Trash, chevron = true,
+                onClick = { Nav.push(Route.Trash) }) }
         }
 
         Group(stringResource(R.string.background)) {
@@ -634,76 +624,6 @@ fun AudioKeepScreen() {
 }
 
 // ======================================================================= память
-@Composable
-fun MemoriesScreen() {
-    // 0 — вы просили запомнить (кнопка), 1 — заметил Mnemo, 2 — архив (лишнее, можно вернуть)
-    var tab by rememberSaveable { mutableStateOf(0) }
-    var state by remember { mutableStateOf<Res<Pair<List<MemoryItem>, Int>>>(Res(loading = true)) }
-    val scope = rememberCoroutineScope()
-    val fmt = rememberFmt()
-    val c = Mn.c
-    fun reload() {
-        scope.launch {
-            state = try {
-                Res(Api.memories(archived = tab == 2))
-            } catch (e: Exception) {
-                Res(error = e)
-            }
-        }
-    }
-    LaunchedEffect(tab) { reload() }
-    fun act(m: MemoryItem, block: suspend () -> Unit) {
-        state = state.data?.let { (list, n) -> Res(list.filter { it.id != m.id } to n) } ?: state
-        scope.launch {
-            try {
-                block()
-            } catch (_: Exception) {
-            }
-            reload()
-        }
-    }
-    SettingsPage(stringResource(R.string.memory)) {
-        val archivedCount = state.data?.second ?: 0
-        LazyRowChips(listOf(stringResource(R.string.memory_asked), stringResource(R.string.memory_noticed),
-            stringResource(R.string.memory_archive) + if (archivedCount > 0) " $archivedCount" else ""), tab) { tab = it }
-        val all = state.data?.first
-        val items = all?.filter { m ->
-            when (tab) {
-                0 -> m.source == "button" || m.source == "agent"  // попросили сами: «запомни, что…»
-                1 -> m.source != "button" && m.source != "agent"
-                else -> true
-            }
-        }
-        when {
-            items == null && state.error != null -> ErrorBlock(state.error, { reload() })
-            items == null -> LoadingBlock()
-            items.isEmpty() -> EmptyBlock(Icons.Bookmark, stringResource(when (tab) {
-                0 -> R.string.memory_asked_empty
-                1 -> R.string.memory_noticed_empty
-                else -> R.string.memory_archive_empty
-            }), "")
-            else -> Group(inset = 56.dp) {
-                items.forEach { m ->
-                    item {
-                        ListRow(m.text, subtitle = listOfNotNull(
-                            fmt.dayShortTitle(fmt.dayOf(m.createdAt)), m.conversationTitle,
-                        ).joinToString(", "), icon = if (m.source == "button") Icons.Tap else Icons.Bookmark) {
-                            if (tab == 2) {
-                                Txt(stringResource(R.string.trash_restore), T.smallStrong, c.lens,
-                                    Modifier.quietTap { act(m) { Api.archiveMemory(m.id, false) } }.padding(8.dp))
-                            } else {
-                                IconCircle(Icons.Close, stringResource(R.string.memory_to_archive),
-                                    { act(m) { Api.archiveMemory(m.id, true) } }, size = 32.dp,
-                                    background = c.raised, tint = c.graphite)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** Ряд переключателей-чипов (вкладки внутри страницы настроек). */
 @Composable
 fun LazyRowChips(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {

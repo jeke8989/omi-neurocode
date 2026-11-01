@@ -380,16 +380,22 @@
     <string name="mcp_turn_on">Включить и выдать ключ</string>
     <string name="mcp_url">Адрес</string>
     <string name="memory">Память</string>
+    <string name="memory_about_empty">Расскажите о себе</string>
+    <string name="memory_all">Все</string>
     <string name="memory_archive">Архив</string>
     <string name="memory_archive_empty">Архив пуст</string>
     <string name="memory_asked">Вы просили</string>
     <string name="memory_asked_empty">Скажите ассистенту «запомни, что…» — это появится здесь</string>
+    <string name="memory_edit_title">Запись памяти</string>
     <string name="memory_empty_text">Дважды нажмите кнопку на кулоне, и последняя минута разговора станет заметкой.</string>
     <string name="memory_empty_title">Пока пусто</string>
+    <string name="memory_facts">Факты</string>
     <string name="memory_footer">Ассистент учитывает память, когда отвечает.</string>
     <string name="memory_noticed">Заметил Mnemo</string>
     <string name="memory_noticed_empty">Пока ничего</string>
+    <string name="memory_search_hint">Найти в памяти</string>
     <string name="memory_to_archive">В архив</string>
+    <string name="memory_updated">уточнено</string>
     <string name="merge">Объединить</string>
     <string name="merge_text">Кулон мог принять одного человека за двоих: другой микрофон, шум, простуда. Выберите, кто это на самом деле, и голоса объединятся.</string>
     <string name="merge_title">%1$s — это…</string>
@@ -608,6 +614,8 @@
     <string name="server_reconnect">нужен новый код</string>
     <string name="server_reconnect_text">Сервер сменил ключ доступа. Введите новый код, чтобы снова подключиться</string>
     <string name="settings">Настройки</string>
+    <string name="settings_app">Приложение</string>
+    <string name="settings_people_diary">Люди и дневник</string>
     <string name="setup">Настройка</string>
     <string name="share">Поделиться</string>
     <string name="show">Показать</string>
@@ -849,6 +857,18 @@
         <item quantity="few">%d места</item>
         <item quantity="many">%d мест</item>
         <item quantity="other">%d места</item>
+    </plurals>
+    <plurals name="rules_count">
+        <item quantity="one">%d правило</item>
+        <item quantity="few">%d правила</item>
+        <item quantity="many">%d правил</item>
+        <item quantity="other">%d правила</item>
+    </plurals>
+    <plurals name="schedules_count">
+        <item quantity="one">%d задание</item>
+        <item quantity="few">%d задания</item>
+        <item quantity="many">%d заданий</item>
+        <item quantity="other">%d задания</item>
     </plurals>
     <plurals name="steps">
         <item quantity="one">%d шаг</item>

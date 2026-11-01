@@ -157,7 +157,15 @@ data class MemoryItem(
     val source: String,
     val createdAt: String,
     val conversationTitle: String?,
-)
+    /** Запись уточнялась: новый факт объединён со старым или исправлена вручную. */
+    val updatedAt: String? = null,
+) {
+    /** Пользователь сам попросил запомнить (кнопкой раньше или «запомни, что…» ассистенту). */
+    val asked: Boolean get() = source == "button" || source == "agent"
+}
+
+/** Память: записи, сколько активных и в архиве. */
+data class MemoryList(val items: List<MemoryItem>, val active: Int, val archived: Int)
 
 data class ConversationDetail(
     val item: ConversationItem,
@@ -562,9 +570,20 @@ object Api {
         call("POST", "/api/tasks/$id", JSONObject().put("status", status))
     }
 
-    suspend fun memories(archived: Boolean = false): Pair<List<MemoryItem>, Int> {
-        val o = JSONObject(call("GET", "/api/memories" + if (archived) "?archived=1" else ""))
-        return o.getJSONArray("items").map { memory(it) } to o.optInt("archived")
+    /** query — поиск по смыслу («что любит мама»), самое близкое первым. */
+    suspend fun memories(archived: Boolean = false, query: String? = null): MemoryList {
+        val q = when {
+            !query.isNullOrBlank() -> "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
+            archived -> "?archived=1"
+            else -> ""
+        }
+        val o = JSONObject(call("GET", "/api/memories$q"))
+        return MemoryList(o.getJSONArray("items").map { memory(it) }, o.optInt("active"), o.optInt("archived"))
+    }
+
+    /** Исправить запись памяти. */
+    suspend fun editMemory(id: Long, text: String) {
+        call("POST", "/api/memories/$id", JSONObject().put("text", text))
     }
 
     /** В архив / вернуть из архива. */
@@ -1043,6 +1062,7 @@ object Api {
         source = o.optString("source"),
         createdAt = o.optString("created_at"),
         conversationTitle = o.str("conversation_title"),
+        updatedAt = o.str("updated_at"),
     )
 }
 

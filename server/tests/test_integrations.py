@@ -400,6 +400,18 @@ def test_memory_recall_and_merge(conn, monkeypatch):  # noqa: F811
     assert hits[0]["text"].startswith("Мама любит кофе")
     assert all("кошк" not in h["text"] for h in hits)
 
+    # в приложении: поиск по смыслу и исправление записи (отпечаток пересчитается)
+    client = Asgi(_gw().app)
+    from urllib.parse import quote
+    found = client.get("/api/memories?q=" + quote("кофе для мамы")).json()
+    assert found["items"][0]["text"].startswith("Мама любит кофе") and found["active"] == 2
+    mid = found["items"][0]["id"]
+    assert client.post(f"/api/memories/{mid}", json={"text": "Мама пьёт кофе без сахара и с корицей"}).json()["ok"]
+    row = conn.execute("SELECT text, emb, updated_at FROM memories WHERE id = %s", (mid,)).fetchone()
+    assert row["text"].endswith("с корицей") and row["emb"] is None and row["updated_at"]
+    assert memory.embed_tick(conn) >= 1
+    assert client.post(f"/api/memories/{mid}", json={"text": " "}).status_code == 400
+
 
 def test_rules_and_schedules(conn, monkeypatch):  # noqa: F811
     """Правила и расписание агента: записать, увидеть в каждом запросе, выполнить в срок, удалить по просьбе."""

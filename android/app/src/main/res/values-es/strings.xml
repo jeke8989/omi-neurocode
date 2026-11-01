@@ -380,16 +380,22 @@
     <string name="mcp_turn_on">Activar y crear una clave</string>
     <string name="mcp_url">Dirección</string>
     <string name="memory">Memoria</string>
+    <string name="memory_about_empty">Cuéntanos sobre ti</string>
+    <string name="memory_all">Todo</string>
     <string name="memory_archive">Archivo</string>
     <string name="memory_archive_empty">El archivo está vacío</string>
     <string name="memory_asked">Lo que pediste</string>
     <string name="memory_asked_empty">Dile al asistente «recuerda que…» y aparecerá aquí</string>
+    <string name="memory_edit_title">Recuerdo</string>
     <string name="memory_empty_text">Pulsa dos veces el botón del colgante y el último minuto se convertirá en una nota.</string>
     <string name="memory_empty_title">Nada todavía</string>
+    <string name="memory_facts">Datos</string>
     <string name="memory_footer">El asistente usa la memoria al responder.</string>
     <string name="memory_noticed">Lo que notó Mnemo</string>
     <string name="memory_noticed_empty">Nada todavía</string>
+    <string name="memory_search_hint">Buscar en la memoria</string>
     <string name="memory_to_archive">Archivar</string>
+    <string name="memory_updated">actualizado</string>
     <string name="merge">Unir</string>
     <string name="merge_text">El colgante pudo confundir a una persona con dos: otro micrófono, ruido, un resfriado. Elige quién es en realidad y las voces se unirán.</string>
     <string name="merge_title">%1$s es…</string>
@@ -608,6 +614,8 @@
     <string name="server_reconnect">necesita un código nuevo</string>
     <string name="server_reconnect_text">El servidor cambió su clave de acceso. Introduce un código nuevo para volver a conectar</string>
     <string name="settings">Ajustes</string>
+    <string name="settings_app">Aplicación</string>
+    <string name="settings_people_diary">Personas y diario</string>
     <string name="setup">Configuración</string>
     <string name="share">Compartir</string>
     <string name="show">Mostrar</string>
@@ -833,6 +841,14 @@
     <plurals name="places">
         <item quantity="one">%d lugar</item>
         <item quantity="other">%d lugares</item>
+    </plurals>
+    <plurals name="rules_count">
+        <item quantity="one">%d regla</item>
+        <item quantity="other">%d reglas</item>
+    </plurals>
+    <plurals name="schedules_count">
+        <item quantity="one">%d tarea programada</item>
+        <item quantity="other">%d tareas programadas</item>
     </plurals>
     <plurals name="steps">
         <item quantity="one">%d paso</item>

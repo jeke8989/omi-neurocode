@@ -87,7 +87,7 @@ private fun Screen(route: Route) {
         Route.Extensions -> ExtensionsScreen()
         is Route.Extension -> ExtensionScreen(route.id)
         is Route.Connector -> ConnectorScreen(route.id)
-        Route.Memories -> MemoriesScreen()
+        Route.Memories -> MemoryScreen()
         is Route.Person -> PersonScreen(route.id)
         Route.VoicesSettings -> VoicesSettingsScreen()
         Route.AudioKeep -> AudioKeepScreen()

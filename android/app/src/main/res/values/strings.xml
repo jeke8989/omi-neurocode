@@ -381,16 +381,22 @@
     <string name="mcp_turn_on">Turn on and issue a key</string>
     <string name="mcp_url">Address</string>
     <string name="memory">Memory</string>
+    <string name="memory_about_empty">Tell about yourself</string>
+    <string name="memory_all">All</string>
     <string name="memory_archive">Archive</string>
     <string name="memory_archive_empty">The archive is empty</string>
     <string name="memory_asked">You asked</string>
     <string name="memory_asked_empty">Tell the assistant “remember that…” and it will show up here</string>
+    <string name="memory_edit_title">Memory</string>
     <string name="memory_empty_text">Press the pendant button twice and the last minute of conversation becomes a note.</string>
     <string name="memory_empty_title">Nothing yet</string>
+    <string name="memory_facts">Facts</string>
     <string name="memory_footer">The assistant uses memory when answering.</string>
     <string name="memory_noticed">Noticed by Mnemo</string>
     <string name="memory_noticed_empty">Nothing yet</string>
+    <string name="memory_search_hint">Search memory</string>
     <string name="memory_to_archive">Archive</string>
+    <string name="memory_updated">updated</string>
     <string name="merge">Merge</string>
     <string name="merge_text">The pendant may have taken one person for two: a different mic, noise, a cold. Pick who it really is and the voices will be merged.</string>
     <string name="merge_title">%1$s is…</string>
@@ -609,6 +615,8 @@
     <string name="server_reconnect">needs a new code</string>
     <string name="server_reconnect_text">The server changed its access key. Enter a new code to reconnect</string>
     <string name="settings">Settings</string>
+    <string name="settings_app">App</string>
+    <string name="settings_people_diary">People and diary</string>
     <string name="setup">Setup</string>
     <string name="share">Share</string>
     <string name="show">Show</string>
@@ -834,6 +842,14 @@
     <plurals name="places">
         <item quantity="one">%d place</item>
         <item quantity="other">%d places</item>
+    </plurals>
+    <plurals name="rules_count">
+        <item quantity="one">%d rule</item>
+        <item quantity="other">%d rules</item>
+    </plurals>
+    <plurals name="schedules_count">
+        <item quantity="one">%d scheduled task</item>
+        <item quantity="other">%d scheduled tasks</item>
     </plurals>
     <plurals name="steps">
         <item quantity="one">%d step</item>
