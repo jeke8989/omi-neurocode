@@ -220,6 +220,12 @@ data class ExtDraft(val manifest: JSONObject?, val preview: Extension?, val note
 
 data class McpInfo(val enabled: Boolean, val since: String?, val token: String? = null, val url: String)
 
+/** Сервис, который подключается одной кнопкой (Notion, Linear): вход через сайт сервиса, без ключей. */
+data class Connector(val id: String, val name: String, val icon: String, val description: String, val status: String,
+                     val account: String?, val error: String?, val tools: List<String>, val tasks: Boolean) {
+    val connected get() = status == "connected"
+}
+
 data class Features(val diary: Boolean, val photoStyle: Boolean, val photoAi: Boolean = true, val style: String, val photosPerDay: Int,
                     val styles: List<Pair<String, String>>, val language: String = "ru",
                     val sttLanguage: String = "app", val audioKeepDays: Int = 3,
@@ -258,7 +264,8 @@ object Api {
         .build()
     private val json = "application/json; charset=utf-8".toMediaType()
 
-    private suspend fun call(method: String, path: String, body: JSONObject? = null): String =
+    /** explain — при ошибке показать текст сервера («вход устарел…»), а не код ответа. */
+    private suspend fun call(method: String, path: String, body: JSONObject? = null, explain: Boolean = false): String =
         withContext(Dispatchers.IO) {
             val prefs = Core.prefs
             if (!prefs.serverConfigured) throw ApiException(ApiException.Kind.NOT_CONFIGURED)
@@ -278,7 +285,9 @@ object Api {
                         r.code == 401 || r.code == 403 -> throw ApiException(ApiException.Kind.AUTH)
                         r.code == 404 -> throw ApiException(ApiException.Kind.NOT_FOUND)
                         r.code == 409 -> throw ApiException(ApiException.Kind.DIARY_OFF)
-                        !r.isSuccessful -> throw ApiException(ApiException.Kind.SERVER, "${r.code}")
+                        !r.isSuccessful -> throw ApiException(ApiException.Kind.SERVER,
+                            (if (explain) runCatching { JSONObject(text).optString("error") }.getOrNull() else null)
+                                ?.takeIf { it.isNotBlank() } ?: "${r.code}")
                     }
                     text
                 }
@@ -678,6 +687,32 @@ object Api {
 
     suspend fun installManifest(manifest: JSONObject) {
         call("POST", "/api/extensions/install", JSONObject().put("manifest", manifest))
+    }
+
+    // ---------------------------------------------------------------- сервисы одной кнопкой
+    private fun connector(o: JSONObject) = Connector(
+        o.optString("id"), o.optString("name"), o.optString("icon"), o.optString("description"),
+        o.optString("status", "off"), o.str("account"), o.str("error"), o.optJSONArray("tools").strings(),
+        o.optBoolean("tasks"),
+    )
+
+    suspend fun connectors(): List<Connector> =
+        JSONObject(call("GET", "/api/connectors")).optJSONArray("items").map { connector(it) }
+
+    /** Ссылка на вход в сервис. Адрес сервера — запасной адрес возврата, если сервис не умеет в приложение. */
+    suspend fun connectorStart(id: String): String = JSONObject(call("POST", "/api/connectors/$id/start",
+        JSONObject().put("server_url", Core.prefs.serverUrl), explain = true)).getString("url")
+
+    /** Код из сервиса (вернулся в приложение) -> сервер меняет его на доступ. */
+    suspend fun connectorFinish(code: String, state: String): Connector = connector(JSONObject(call("POST",
+        "/api/connectors/finish", JSONObject().put("code", code).put("state", state), explain = true)))
+
+    suspend fun setConnectorTasks(id: String, on: Boolean) {
+        call("POST", "/api/connectors/$id", JSONObject().put("tasks", on))
+    }
+
+    suspend fun disconnectConnector(id: String) {
+        call("DELETE", "/api/connectors/$id")
     }
 
     // ---------------------------------------------------------------- Mnemo в других программах (MCP)

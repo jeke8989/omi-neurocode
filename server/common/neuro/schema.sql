@@ -407,3 +407,24 @@ UPDATE settings SET value = '0' WHERE key = 'feature.photo_style'
   AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'models.auto_v1');
 INSERT INTO settings (key, value) VALUES ('models.auto_v1', '1') ON CONFLICT (key) DO NOTHING;
 DELETE FROM diary_days WHERE title IS NULL AND status <> 'failed';
+
+-- Подключения «одной кнопкой» (Notion, Linear…): OAuth-клиент и токены зашифрованы, инструменты сервиса — списком
+CREATE TABLE IF NOT EXISTS connections (
+    id            TEXT PRIMARY KEY,
+    status        TEXT NOT NULL DEFAULT 'off',
+    client        JSONB,
+    tokens        JSONB,
+    account       TEXT,
+    tools         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    settings      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error         TEXT,
+    connected_at  TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state         TEXT PRIMARY KEY,
+    connector     TEXT NOT NULL,
+    verifier      TEXT NOT NULL,
+    redirect_uri  TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);

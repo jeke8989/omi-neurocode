@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import agent_context, config, crypto, extensions, i18n, llm, people
+from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
 
 log = logging.getLogger("neuro.agent_core")
@@ -346,7 +346,9 @@ def execute(conn, run_id: int) -> str:
     try:
         ext_rows = conn.execute("SELECT id, manifest, settings FROM extensions WHERE enabled").fetchall()
         ext_specs, ext_index = extensions.tool_specs(ext_rows)
-        tools = BUILTIN_TOOLS + ext_specs
+        # подключённые сервисы (Notion, Linear…) — только если вопрос про них: лишние описания стоят токенов
+        conn_specs, conn_index = connectors.tool_specs(conn, run["question"])
+        tools = BUILTIN_TOOLS + ext_specs + conn_specs
 
         context = build_context(conn, device_id) if device_id else ""
         messages = [{"role": "system", "content": system_prompt(level, channel, lang)}]
@@ -395,7 +397,14 @@ def execute(conn, run_id: int) -> str:
                     step(conn, run_id, "ask", i18n.t(lang, "tool.ask_user"))
                     break
                 _check(conn, run_id)
-                if name in ext_index:
+                if name in conn_index:
+                    cid, tool, title = conn_index[name]
+                    step(conn, run_id, "tool", title, json.dumps(args, ensure_ascii=False))
+                    try:
+                        result = connectors.call_tool(conn, cid, tool, args)
+                    except connectors.ConnectorError as exc:
+                        result = f"Ошибка сервиса: {exc}"
+                elif name in ext_index:
                     row, tool = ext_index[name]
                     shown = extensions.localize(row["manifest"], lang)
                     title = next((t.get("title") for t in shown["tools"] if t["name"] == tool["name"]), None)

@@ -632,6 +632,17 @@
     <string name="suggest_is_it">¿%1$s es %2$s?</string>
     <string name="suggest_is_you">¿%1$s eres tú?</string>
     <string name="summary">Resumen</string>
+    <string name="svc_assistant">Asistente</string>
+    <string name="svc_assistant_sub">Pregunta: «busca en %1$s…»</string>
+    <string name="svc_connected_toast">%1$s conectado</string>
+    <string name="svc_denied">No se concedió acceso</string>
+    <string name="svc_disconnect">Desconectar</string>
+    <string name="svc_disconnect_q">¿Desconectar %1$s?</string>
+    <string name="svc_no_browser">No se encontró un navegador para iniciar sesión</string>
+    <string name="svc_reconnect">Volver a conectar</string>
+    <string name="svc_tasks">Nuevas tareas a %1$s</string>
+    <string name="svc_tasks_sub">Las tareas de tus conversaciones aparecerán allí solas</string>
+    <string name="svc_title">Servicios</string>
     <string name="tab_diary">Diario</string>
     <string name="tab_home">Inicio</string>
     <string name="tab_people">Personas</string>

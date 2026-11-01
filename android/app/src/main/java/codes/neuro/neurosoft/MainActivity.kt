@@ -43,12 +43,14 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
                 codes.neuro.neurosoft.ui.HomeState.page.value = 1
             }
             open == "wake" -> Core.wakeFromStandby(this, fromBackground = false)  // «Кулон снова рядом»
+            open == "oauth" -> codes.neuro.neurosoft.ui.Connectors.returned.value = intent.getStringExtra("oauth")
             open.startsWith("day:") -> {  // утренняя сводка — сразу вчерашний день
                 Nav.reset(Route.Home)
                 Nav.push(Route.Day(open.removePrefix("day:")))
             }
         }
         intent?.removeExtra("open")
+        intent?.removeExtra("oauth")
     }
 
     override fun onStart() {
@@ -62,6 +64,7 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
         // под защитой — в списке недавних приложений вместо экрана пустая карточка
         if (android.os.Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(!AppLock.enabled)
         Core.syncPhotosNow()
+        codes.neuro.neurosoft.ui.Connectors.version.intValue++  // вернулись из браузера — свежий статус сервисов
     }
 
     override fun onStop() {

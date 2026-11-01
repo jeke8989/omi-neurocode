@@ -632,6 +632,17 @@
     <string name="suggest_is_it">%1$s — это %2$s?</string>
     <string name="suggest_is_you">%1$s — это вы?</string>
     <string name="summary">Итог</string>
+    <string name="svc_assistant">Ассистент</string>
+    <string name="svc_assistant_sub">Спросите: «найди в %1$s…»</string>
+    <string name="svc_connected_toast">%1$s подключён</string>
+    <string name="svc_denied">Доступ не выдан</string>
+    <string name="svc_disconnect">Отключить</string>
+    <string name="svc_disconnect_q">Отключить %1$s?</string>
+    <string name="svc_no_browser">Не нашёл браузер для входа</string>
+    <string name="svc_reconnect">Подключить заново</string>
+    <string name="svc_tasks">Новые задачи — в %1$s</string>
+    <string name="svc_tasks_sub">Задачи из разговоров появятся там сами</string>
+    <string name="svc_title">Сервисы</string>
     <string name="tab_diary">Дневник</string>
     <string name="tab_home">Главная</string>
     <string name="tab_people">Люди</string>

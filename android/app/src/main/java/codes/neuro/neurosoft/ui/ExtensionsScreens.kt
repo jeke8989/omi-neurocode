@@ -94,6 +94,7 @@ fun ExtensionsScreen() {
             data == null -> LoadingBlock()
             else -> {
                 val (mine, available) = data
+                ConnectorsGroup { note = it }
                 if (mine.isNotEmpty()) {
                     val subtitles = mine.map { e ->
                         when {

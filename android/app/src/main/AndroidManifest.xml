@@ -51,6 +51,22 @@
             </intent-filter>
         </activity>
 
+        <!-- Возврат из Notion, Linear и других сервисов после входа: codes.neuro.mnemo://oauth?code=… -->
+        <activity
+            android:name=".OAuthRedirectActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="codes.neuro.mnemo" android:host="oauth" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".OmiService"
             android:exported="false"

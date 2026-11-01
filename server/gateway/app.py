@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+from html import escape as html_escape
 import json
 import logging
 import re
@@ -26,7 +27,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from neuro import (agent_context, agent_core, assistant, cleanup, config, crypto, db, diary, extensions,
+from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
                    ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, retention, tts, voices)
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
@@ -1161,7 +1162,7 @@ async def api_extensions(request: Request):
     ids = {e["id"] for e in installed}
     available = [{k: v for k, v in extensions.localize(e, lang).items()
                   if not k.startswith("_") and k not in ("manifest", "i18n")}
-                 for e in reg if e["id"] not in ids]
+                 for e in reg if e["id"] not in ids and e["id"] not in connectors.CATALOG]  # Notion, Linear — одной кнопкой
     return Json({"installed": installed, "available": available})
 
 
@@ -1194,6 +1195,94 @@ async def api_extension_install(request: Request):
             (manifest["id"], json.dumps(manifest, ensure_ascii=False), src),
         )
     return Json({"installed": extensions.public_manifest(manifest)})
+
+
+async def api_connectors(request: Request):
+    """Подключения одной кнопкой: GET — список (Notion, Linear…) со статусом."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+
+    def work(conn):
+        return connectors.listing(conn, i18n.lang(conn))
+
+    return Json({"items": await _sync(work)})
+
+
+async def api_connector_start(request: Request):
+    """«Подключить»: ссылка на вход в сервис (браузер). server_url — адрес сервера, как его видит телефон."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request) or {}
+    cid = request.path_params["id"]
+    server_url = str(body.get("server_url") or "").strip() or None
+
+    def work(conn):
+        return connectors.start(conn, cid, server_url)
+
+    try:
+        return Json({"url": await _sync(work)})
+    except connectors.ConnectorError as exc:
+        return Json({"error": str(exc)}, status_code=400)
+
+
+async def api_connector_finish(request: Request):
+    """Приложение получило код из сервиса (codes.neuro.mnemo://oauth) — меняем на токены."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request) or {}
+
+    def work(conn):
+        return connectors.finish(conn, str(body.get("state") or ""), str(body.get("code") or ""))
+
+    try:
+        return Json(await _sync(work))
+    except connectors.ConnectorError as exc:
+        return Json({"error": str(exc)}, status_code=400)
+
+
+async def oauth_callback(request: Request):
+    """Сервис вернул код на сервер (если приложение как адрес возврата не подошло). Проверка — по state."""
+    q = request.query_params
+    if q.get("error"):
+        text = "Доступ не выдан. Вернитесь в Mnemo."
+    else:
+        def work(conn):
+            return connectors.finish(conn, str(q.get("state") or ""), str(q.get("code") or ""))
+
+        try:
+            card = await _sync(work)
+            text = f"{card['name']} подключён. Вернитесь в Mnemo."
+        except connectors.ConnectorError as exc:
+            text = f"Не получилось: {exc}"
+    html = (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+            f"<body style='font-family:sans-serif;padding:32px;font-size:20px'>{html_escape(text)}"
+            f"<p><a href='{connectors.APP_REDIRECT}/done'>Открыть Mnemo</a></body>")
+    return Response(html, media_type="text/html")
+
+
+async def api_connector(request: Request):
+    """POST {"tasks": true|false} — новые задачи в сервис; DELETE — отключить."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    cid = request.path_params["id"]
+    if request.method == "DELETE":
+        await _sync(lambda conn: connectors.disconnect(conn, cid))
+        return Json({"ok": True})
+    body = await _body(request) or {}
+
+    def work(conn):
+        row = conn.execute("SELECT settings FROM connections WHERE id = %s", (cid,)).fetchone()
+        if row is None:
+            return False
+        st = dict(row["settings"] or {})
+        if "tasks" in body:
+            st["tasks"] = bool(body["tasks"])
+        conn.execute("UPDATE connections SET settings = %s::jsonb WHERE id = %s", (json.dumps(st), cid))
+        return True
+
+    if not await _sync(work):
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"ok": True})
 
 
 async def api_extension_draft(request: Request):
@@ -1764,6 +1853,11 @@ app = Starlette(
         Route("/api/extensions", api_extensions),
         Route("/api/extensions/install", api_extension_install, methods=["POST"]),
         Route("/api/extensions/draft", api_extension_draft, methods=["POST"]),
+        Route("/api/connectors", api_connectors),
+        Route("/api/connectors/finish", api_connector_finish, methods=["POST"]),
+        Route("/api/connectors/{id}/start", api_connector_start, methods=["POST"]),
+        Route("/api/connectors/{id}", api_connector, methods=["POST", "DELETE"]),
+        Route("/oauth/callback", oauth_callback),
         Route("/api/extensions/{id}", api_extension, methods=["POST", "DELETE"]),
         Route("/api/features", api_features, methods=["GET", "POST"]),
         Route("/api/diary", api_diary),

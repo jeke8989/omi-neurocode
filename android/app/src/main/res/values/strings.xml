@@ -633,6 +633,17 @@
     <string name="suggest_is_it">Is %1$s %2$s?</string>
     <string name="suggest_is_you">Is %1$s you?</string>
     <string name="summary">Summary</string>
+    <string name="svc_assistant">Assistant</string>
+    <string name="svc_assistant_sub">Ask: “find in %1$s…”</string>
+    <string name="svc_connected_toast">%1$s connected</string>
+    <string name="svc_denied">Access wasn\'t granted</string>
+    <string name="svc_disconnect">Disconnect</string>
+    <string name="svc_disconnect_q">Disconnect %1$s?</string>
+    <string name="svc_no_browser">No browser found to sign in</string>
+    <string name="svc_reconnect">Reconnect</string>
+    <string name="svc_tasks">New tasks to %1$s</string>
+    <string name="svc_tasks_sub">Tasks from conversations appear there automatically</string>
+    <string name="svc_title">Services</string>
     <string name="tab_diary">Diary</string>
     <string name="tab_home">Home</string>
     <string name="tab_people">People</string>

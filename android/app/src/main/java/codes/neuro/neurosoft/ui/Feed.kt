@@ -101,6 +101,7 @@ sealed interface Route {
     data object SttLanguage : Route
     data object Extensions : Route
     data class Extension(val id: String) : Route
+    data class Connector(val id: String) : Route
     data object Memories : Route
     data class Person(val id: Long) : Route
     data object VoicesSettings : Route

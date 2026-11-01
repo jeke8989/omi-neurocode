@@ -146,3 +146,110 @@ def test_memory_without_junk(conn, monkeypatch):  # noqa: F811
     assert client.get("/api/memories").json()["archived"] == 0
     assert client.delete(f"/api/memories/{gone[0]['id']}").json()["ok"]
     assert client.delete(f"/api/memories/{gone[0]['id']}").status_code == 404
+
+
+def test_connect_notion_with_one_tap(conn, monkeypatch):  # noqa: F811
+    """«Подключить Notion»: поиск адресов входа, регистрация Mnemo, вход с PKCE, токены, инструменты сервиса
+    для ассистента (только когда вопрос про Notion), обновление токена, отключение."""
+    import time as _time
+    from urllib.parse import parse_qs, urlparse
+
+    from neuro import connectors
+    gw = _gw()
+    conn.execute("DELETE FROM connections")
+    seen = {"posts": [], "token_forms": []}
+
+    class R:
+        def __init__(self, status=200, data=None, headers=None, text=None):
+            self.status_code, self._data = status, data
+            self.headers = headers or {"Content-Type": "application/json"}
+            self.text = text if text is not None else json.dumps(data or {})
+
+        def json(self):
+            return self._data
+
+    def fake_get(url, **kw):
+        if url == "https://mcp.notion.com/.well-known/oauth-protected-resource/mcp":
+            return R(data={"resource": "https://mcp.notion.com/mcp", "authorization_servers": ["https://mcp.notion.com"]})
+        if url == "https://mcp.notion.com/.well-known/oauth-authorization-server":
+            return R(data={"authorization_endpoint": "https://mcp.notion.com/authorize",
+                           "token_endpoint": "https://mcp.notion.com/token",
+                           "registration_endpoint": "https://mcp.notion.com/register"})
+        return R(404, {})
+
+    def fake_post(url, json=None, data=None, headers=None, timeout=None):  # noqa: A002
+        seen["posts"].append((url, json, data, headers))
+        if url == "https://mcp.notion.com/register":
+            return R(201, {"client_id": "cid-1"})
+        if url == "https://mcp.notion.com/token":
+            seen["token_forms"].append(data)
+            if data["grant_type"] == "authorization_code":
+                return R(data={"access_token": "at-1", "refresh_token": "rt-1", "expires_in": 3600,
+                               "workspace_name": "Мой Notion"})
+            return R(data={"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600})
+        if url == "https://mcp.notion.com/mcp":
+            auth = (headers or {}).get("Authorization")
+            if not auth:
+                return R(401, {}, {"WWW-Authenticate": 'Bearer resource_metadata="https://mcp.notion.com/.well-known/oauth-protected-resource/mcp"'})
+            method = (json or {}).get("method")
+            if method == "initialize":
+                return R(data={"jsonrpc": "2.0", "id": 1, "result": {}}, headers={"Mcp-Session-Id": "s1",
+                                                                              "Content-Type": "application/json"})
+            if method == "notifications/initialized":
+                return R(202, {})
+            if method == "tools/list":
+                body = {"jsonrpc": "2.0", "id": 2, "result": {"tools": [
+                    {"name": "notion-search", "description": "Search Notion", "inputSchema": {
+                        "type": "object", "properties": {"query": {"type": "string"}}}}]}}
+                return R(data=None, headers={"Content-Type": "text/event-stream"},
+                         text="event: message\ndata: " + __import__("json").dumps(body) + "\n\n")
+            if method == "tools/call":
+                return R(data={"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "Страница: План"}]}})
+        return R(404, {})
+
+    monkeypatch.setattr(connectors.requests, "get", fake_get)
+    monkeypatch.setattr(connectors.requests, "post", fake_post)
+    client = Asgi(gw.app)
+    items = client.get("/api/connectors").json()["items"]
+    assert {i["id"] for i in items} >= {"notion", "linear"} and items[0]["status"] == "off"
+
+    url = client.post("/api/connectors/notion/start", json={"server_url": "http://1.2.3.4:8090"}).json()["url"]
+    q = parse_qs(urlparse(url).query)
+    assert url.startswith("https://mcp.notion.com/authorize?")
+    assert q["client_id"] == ["cid-1"] and q["redirect_uri"] == ["codes.neuro.mnemo://oauth"]
+    assert q["code_challenge_method"] == ["S256"] and len(q["code_challenge"][0]) >= 43
+    reg = next(p for p in seen["posts"] if p[0].endswith("/register"))
+    assert reg[1]["token_endpoint_auth_method"] == "none" and reg[1]["redirect_uris"] == ["codes.neuro.mnemo://oauth"]
+
+    assert client.post("/api/connectors/finish", json={"state": "bad", "code": "x"}).status_code == 400
+    card = client.post("/api/connectors/finish", json={"state": q["state"][0], "code": "code-1"}).json()
+    assert card["status"] == "connected" and card["account"] == "Мой Notion" and card["tools"] == ["notion-search"]
+    form = seen["token_forms"][0]
+    assert form["redirect_uri"] == "codes.neuro.mnemo://oauth" and form["code"] == "code-1"
+    import base64 as _b64
+    digest = _b64.urlsafe_b64encode(hashlib.sha256(form["code_verifier"].encode()).digest()).rstrip(b"=").decode()
+    assert digest == q["code_challenge"][0]  # PKCE: сервис получает тот же секрет, что был в ссылке
+    row = conn.execute("SELECT tokens::text AS t FROM connections WHERE id = 'notion'").fetchone()
+    assert "at-1" not in row["t"]  # токены в базе зашифрованы
+
+    # ассистент видит инструменты Notion, только когда вопрос про Notion
+    assert connectors.tool_specs(conn, "какая погода")[0] == []
+    specs, index = connectors.tool_specs(conn, "найди в notion план")
+    assert specs[0]["function"]["name"] == "c_notion__notion_search"
+    assert connectors.call_tool(conn, "notion", "notion-search", {"query": "план"}) == "Страница: План"
+
+    # токен истёк — обновляется сам (новый refresh-токен сохраняется)
+    tokens = conn.execute("SELECT tokens FROM connections WHERE id = 'notion'").fetchone()["tokens"]
+    tokens["expires_at"] = _time.time() - 10
+    connectors._save(conn, "notion", tokens=tokens)
+    connectors.call_tool(conn, "notion", "notion-search", {"query": "x"})
+    assert seen["token_forms"][-1]["grant_type"] == "refresh_token" and seen["token_forms"][-1]["refresh_token"] == "rt-1"
+    assert conn.execute("SELECT tokens FROM connections WHERE id = 'notion'").fetchone()["tokens"]["refresh_token"] == "rt-2"
+
+    # возврат кода на сервер: страница без HTML-инъекций
+    page = client.get("/oauth/callback?state=<b>x</b>&code=1", auth=False)
+    assert page.status_code == 200 and "<b>x</b>" not in page.content.decode()
+
+    assert client.post("/api/connectors/notion", json={"tasks": False}).json()["ok"]
+    assert client.delete("/api/connectors/notion").json()["ok"]
+    assert next(i for i in client.get("/api/connectors").json()["items"] if i["id"] == "notion")["status"] == "off"

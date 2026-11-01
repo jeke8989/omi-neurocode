@@ -632,6 +632,17 @@
     <string name="suggest_is_it">%1$s, %2$s mi?</string>
     <string name="suggest_is_you">%1$s siz misiniz?</string>
     <string name="summary">Özet</string>
+    <string name="svc_assistant">Asistan</string>
+    <string name="svc_assistant_sub">Sorun: “%1$s içinde bul…”</string>
+    <string name="svc_connected_toast">%1$s bağlandı</string>
+    <string name="svc_denied">Erişim verilmedi</string>
+    <string name="svc_disconnect">Bağlantıyı kes</string>
+    <string name="svc_disconnect_q">%1$s bağlantısı kesilsin mi?</string>
+    <string name="svc_no_browser">Giriş için tarayıcı bulunamadı</string>
+    <string name="svc_reconnect">Yeniden bağla</string>
+    <string name="svc_tasks">Yeni görevler: %1$s</string>
+    <string name="svc_tasks_sub">Konuşmalardaki görevler orada kendiliğinden görünür</string>
+    <string name="svc_title">Servisler</string>
     <string name="tab_diary">Günlük</string>
     <string name="tab_home">Ana sayfa</string>
     <string name="tab_people">Kişiler</string>

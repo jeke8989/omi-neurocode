@@ -40,6 +40,7 @@ fun AppRoot() {
     val top = Nav.stack.last()
     val holder = rememberSaveableStateHolder()
     PairRequestDialog()
+    ConnectorReturnEffect()
     BackHandler(enabled = Nav.stack.size > 1) { Nav.pop() }
     Box(Modifier.fillMaxSize().background(Mn.c.fog)) {
         AnimatedContent(
@@ -82,6 +83,7 @@ private fun Screen(route: Route) {
         Route.SttLanguage -> SttLanguageScreen()
         Route.Extensions -> ExtensionsScreen()
         is Route.Extension -> ExtensionScreen(route.id)
+        is Route.Connector -> ConnectorScreen(route.id)
         Route.Memories -> MemoriesScreen()
         is Route.Person -> PersonScreen(route.id)
         Route.VoicesSettings -> VoicesSettingsScreen()

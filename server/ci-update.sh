@@ -189,8 +189,9 @@ diag() {
      FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY task, model ORDER BY sum(cost) DESC NULLS LAST LIMIT 15"
   local ai_tasks ai_days ai_total
   ai_tasks=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
-  q="SELECT to_char(created_at AT TIME ZONE 'Europe/Moscow', 'MM-DD') || ' $' || round(sum(cost)::numeric, 3)
-     || ' (' || count(*) || ')' FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1 ORDER BY 1"
+  q="SELECT to_char(d, 'DD.MM') || ' $' || round(s::numeric, 3) || ' (' || n || ')'
+     FROM (SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS d, coalesce(sum(cost), 0) AS s, count(*) AS n
+           FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1) x ORDER BY d"
   ai_days=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
   q="SELECT 'всего с ' || to_char(min(created_at) AT TIME ZONE 'Europe/Moscow', 'DD.MM HH24:MI') || ': $'
      || round(coalesce(sum(cost), 0)::numeric, 3) || ' за ' || round(extract(epoch FROM now() - min(created_at)) / 86400.0, 1)
@@ -239,7 +240,11 @@ diag() {
      || ', памяти ' || (SELECT count(*) FROM memories WHERE text NOT LIKE 'enc_:%%')
      || ', точек ' || (SELECT count(*) FROM locations WHERE lat IS NOT NULL)
      || ', людей ' || (SELECT count(*) FROM people WHERE name NOT LIKE 'enc_:%%')"
-  echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true)"
+  # сервисы одной кнопкой: только статус (имена аккаунтов и токены не печатаем — логи CI публичные)
+  local svc
+  svc=$(docker compose exec -T db psql -U neuro -d neuro -tAc "SELECT string_agg(id || '=' || status
+        || CASE WHEN error IS NOT NULL THEN '(ошибка)' ELSE '' END, ',') FROM connections" 2>/dev/null | tr '\n' ' ' || true)
+  echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true) | сервисы: ${svc:-нет}"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 
