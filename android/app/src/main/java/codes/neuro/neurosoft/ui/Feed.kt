@@ -151,4 +151,10 @@ object HomeState {
     val page = mutableStateOf(0)
     val day = mutableStateOf(todayIso())
     val skyMode = mutableStateOf(0)
+    /** «Другой срок» из уведомления: id обещания, у которого открыть выбор срока. */
+    val dueTask = mutableStateOf<Long?>(null)
+    /** «Напомнить ему» из уведомления о сроке: id обещания, по которому подготовить сообщение. */
+    val nudgeTask = mutableStateOf<Long?>(null)
+    /** «Личное»: 0 — дневник, 1 — люди. */
+    val personal = mutableStateOf(0)
 }

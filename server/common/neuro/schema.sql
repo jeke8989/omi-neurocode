@@ -491,3 +491,8 @@ CREATE TABLE IF NOT EXISTS calendar_commands (
     done_at     TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS calendar_commands_pending_idx ON calendar_commands (id) WHERE status = 'pending';
+
+-- Обещания: с кем договорённость (кому я обещал / кто обещал мне), когда подтвердил и когда выполнил
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS counterpart TEXT;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ;

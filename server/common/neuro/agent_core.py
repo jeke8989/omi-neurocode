@@ -74,7 +74,8 @@ BUILTIN_TOOLS = [
     _fn("create_task", "Создать задачу пользователю.",
         {"text": {"type": "string"}, "due": {"type": "string", "description": "срок словами, если назван"},
          "assignee": {"type": "string"}}, ["text"]),
-    _fn("list_tasks", "Список задач пользователя.",
+    _fn("list_tasks", "Обещания и задачи пользователя: что он пообещал (кому, к какому сроку), что обещали ему, "
+        "напоминания. Для вопросов «что я обещал», «кто мне что должен», «что горит».",
         {"status": {"type": "string", "enum": ["open", "done", "all"]}}),
     _fn("complete_task", "Отметить задачу выполненной по её id.", {"id": {"type": "integer"}}, ["id"]),
     _fn("save_memory", "Запомнить факт о жизни пользователя надолго (предпочтение, договорённость, важное о людях). "
@@ -203,10 +204,24 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
     if name == "list_tasks":
         status = args.get("status") or "open"
         rows = conn.execute(
-            """SELECT id, text, due, status FROM tasks WHERE (%s = 'all' OR status = %s)
-               ORDER BY created_at DESC LIMIT 30""", (status, status)).fetchall()
-        return "\n".join(f"#{r['id']} [{r['status']}] {r['text']}" + (f" (срок: {r['due']})" if r["due"] else "")
-                         for r in rows) or "Задач нет."
+            """SELECT id, text, due, due_at, status, kind, assignee, counterpart FROM tasks
+               WHERE (%s = 'all' AND status <> 'dismissed' OR status = %s)
+               ORDER BY coalesce(due_at, created_at + interval '30 days'), created_at DESC LIMIT 40""",
+            (status, status)).fetchall()
+
+        def who(r):
+            mate = r["counterpart"] or (r["assignee"] if r["kind"] == "waiting" else None)
+            if r["kind"] == "waiting":
+                return f"обещали мне{': ' + mate if mate else ''}"
+            if r["kind"] == "reminder":
+                return "напоминание себе"
+            return f"я обещал{' ' + mate if mate else ''}"
+
+        def when(r):
+            if r["due_at"]:
+                return f", срок {_d(r['due_at'])}"
+            return f", срок: {r['due']}" if r["due"] else ""
+        return "\n".join(f"#{r['id']} [{r['status']}; {who(r)}{when(r)}] {r['text']}" for r in rows) or "Обещаний нет."
     if name == "complete_task":
         res = conn.execute("UPDATE tasks SET status = 'done', updated_at = now() WHERE id = %s", (int(args["id"]),))
         return "Готово." if res.rowcount else "Такой задачи нет."

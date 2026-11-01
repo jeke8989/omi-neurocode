@@ -28,6 +28,7 @@ SCHEMA = (
     '{"text": "конкретное действие, коротко", '
     '"kind": "mine — делает пользователь | waiting — пользователю должен сделать другой | reminder — пользователь попросил напомнить", '
     '"who": "кто делает: «Я» (сам пользователь) или подпись говорящего/имя", '
+    '"with": "с кем договорённость: кому пользователь обещал (для mine) или кто обещал ему — имя или подпись, иначе null", '
     '"due": "срок словами, если назван, иначе null", '
     '"due_at": "срок как дата-время ISO 8601 (YYYY-MM-DDTHH:MM), если его можно вычислить, иначе null", '
     '"confidence": "0..1 — насколько это точно договорённость", '
@@ -130,6 +131,16 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
                 kind = "waiting"  # делает другой — для пользователя это «жду от…»
         if kind == "waiting" and not (assignee or person_id):
             conf = min(conf, 0.6)  # от кого ждём — непонятно
+        # с кем договорённость: «вы обещали Ивану», «Иван обещал вам»
+        counterpart = assignee if kind == "waiting" else None
+        mate = " ".join(str(t.get("with") or "").split()).strip(" ?")
+        if not counterpart and mate and mate.lower() not in OWNER_WORDS and mate.lower() not in ("null", "none"):
+            pid = resolve(conn, mate, labels)
+            if pid and not (owner and pid == owner["id"]):
+                row = conn.execute("SELECT name FROM people WHERE id = %s", (pid,)).fetchone()
+                counterpart = row["name"] if row and row["name"] else None
+            elif not pid and not GENERIC.match(mate):
+                counterpart = mate[:80]
         if owner_spoke is False:
             conf = min(conf, 0.65)  # пользователь в разговоре не говорил — только предложение
         if conf < SUGGEST:
@@ -140,7 +151,7 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
         except (TypeError, ValueError):
             same = None
         out.append({
-            "text": text, "kind": kind, "person_id": person_id, "assignee": assignee,
+            "text": text, "kind": kind, "person_id": person_id, "assignee": assignee, "counterpart": counterpart,
             "due": (str(t.get("due")).strip()[:120] if t.get("due") not in (None, "", "null") else None),
             "due_at": parse_due(t.get("due_at")), "confidence": round(conf, 2), "evidence": evidence,
             "status": "open" if conf >= ACCEPT else "suggested", "same_as": same,
@@ -186,10 +197,11 @@ def save(conn, conv_id: int | None, tasks: list[dict], source: str) -> dict:
                 continue
         conn.execute(
             """INSERT INTO tasks (conversation_id, text, due, due_at, assignee, person_id, kind, confidence, evidence,
-                                  target, source, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  target, source, status, counterpart)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (conv_id, crypto.seal(t["text"]), crypto.seal(t["due"]), t["due_at"], crypto.seal(t["assignee"]),
-             t["person_id"], t["kind"], t["confidence"], crypto.seal(t["evidence"]), t["target"], source, t["status"]))
+             t["person_id"], t["kind"], t["confidence"], crypto.seal(t["evidence"]), t["target"], source, t["status"],
+             crypto.seal(t.get("counterpart"))))
         created += 1
     return {"created": created, "updated": updated}
 

@@ -136,7 +136,7 @@ private fun open(n: Inbox.Item) {
     when {
         to == "tasks" -> {
             Nav.reset(Route.Home)
-            HomeState.page.value = 1
+            HomeState.page.value = 0
         }
         to.startsWith("day:") -> Nav.push(Route.Day(to.removePrefix("day:")))
         to == "chat" -> Nav.push(Route.Chat())

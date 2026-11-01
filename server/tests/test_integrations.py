@@ -559,3 +559,47 @@ def test_phone_calendar(conn, monkeypatch):  # noqa: F811
     assert client.delete("/api/calendar").json()["ok"]
     assert client.get("/api/calendar").json()["connected"] is False
     assert conn.execute("SELECT count(*) AS n FROM calendar_events").fetchone()["n"] == 0
+
+
+def test_promises_loop(conn, monkeypatch):  # noqa: F811
+    """Обещания: с кем договорённость, «Да» / другой срок / выполнено, черновик напоминания и письма по итогам."""
+    from neuro import llm
+    from neuro import tasks as tasklib
+    conn.execute("DELETE FROM tasks")
+    client = Asgi(_gw().app)
+    # модель: «я пришлю Ивану КП до пятницы», «Иван пришлёт договор»
+    out = tasklib.classify(conn, [
+        {"text": "Отправить КП", "kind": "mine", "who": "Я", "with": "Иван", "confidence": 0.9,
+         "evidence": "пришлю тебе КП до пятницы", "due_at": "2026-11-06T10:00"},
+        {"text": "Прислать договор", "kind": "waiting", "who": "Иван", "confidence": 0.9, "evidence": "договор пришлю"},
+    ], {}, None)
+    assert [(t["kind"], t["counterpart"]) for t in out] == [("mine", "Иван"), ("waiting", "Иван")]
+    cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status, title, summary)
+                          VALUES ('d', now() - interval '1 hour', now(), 'done', 'Встреча с Иваном', 'Обсудили КП')
+                          RETURNING id""").fetchone()["id"]
+    tasklib.save(conn, cid, out, "conversation")
+    items = {t["text"]: t for t in client.get("/api/tasks?status=all").json()["items"]}
+    kp, contract = items["Отправить КП"], items["Прислать договор"]
+    assert kp["counterpart"] == "Иван" and kp["confirmed_at"] is None
+    # «Да» — подтверждено; «Другой срок» — новое время; выполнено — время выполнения
+    client.post(f"/api/tasks/{kp['id']}", json={"status": "open"})
+    client.post(f"/api/tasks/{kp['id']}", json={"due_at": "2026-11-07T15:00"})
+    client.post(f"/api/tasks/{kp['id']}", json={"status": "done"})
+    row = conn.execute("SELECT confirmed_at, done_at, due_at FROM tasks WHERE id = %s", (kp["id"],)).fetchone()
+    assert row["confirmed_at"] and row["done_at"] and row["due_at"].isoformat().startswith("2026-11-07T")
+    assert client.post(f"/api/tasks/{kp['id']}", json={"due_at": "когда-нибудь"}).status_code == 400
+    # напомнить Ивану: черновик сообщения
+    monkeypatch.setattr(llm, "chat", lambda conn_, task, messages, **kw: {
+        "content": "Иван, привет! Как там договор?" if "Прислать договор" in messages[-1]["content"] else "?"})
+    assert client.post(f"/api/tasks/{contract['id']}/nudge").json()["text"].startswith("Иван, привет")
+    # письмо по итогам
+    seen = {}
+
+    def fake_json(conn_, task, system, user, **kw):
+        seen["user"] = user
+        return {"subject": "Итоги встречи", "body": "Иван, спасибо!\n- я: КП до 07.11"}
+
+    monkeypatch.setattr(llm, "chat_json", fake_json)
+    mail = client.post(f"/api/conversations/{cid}/followup").json()
+    assert mail["subject"] == "Итоги встречи" and "Отправить КП" in seen["user"] and "Прислать договор" in seen["user"]
+    assert client.post("/api/conversations/999999/followup").status_code == 404

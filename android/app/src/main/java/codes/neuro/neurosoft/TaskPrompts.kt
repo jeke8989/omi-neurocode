@@ -38,10 +38,14 @@ object TaskPrompts {
         return nm
     }
 
-    /** Свежий список задач с сервера: спросить про новые предложенные, убрать уведомления о решённых. */
+    /** Обещание ждёт ответа: предложенное (не уверены) или новое из разговора, ещё не подтверждённое «Да». */
+    private fun pending(t: TaskItem) = t.status == "suggested" ||
+        (t.status == "open" && t.confirmedAt == null && t.source == "conversation")
+
+    /** Свежий список с сервера: карточка на каждое новое обещание, убрать уведомления о решённых. */
     fun onTasks(context: Context, tasks: List<TaskItem>) {
         val prefs = Core.prefs
-        val suggested = tasks.filter { it.status == "suggested" }
+        val suggested = tasks.filter { pending(it) }
         val asked = prefs.askedTasks
         val nm = channel(context) ?: return
         // ответили в приложении или ночная проверка решила сама — уведомление больше не нужно
@@ -68,32 +72,53 @@ object TaskPrompts {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun show(context: Context, nm: NotificationManager, t: TaskItem, title: Int = R.string.task_prompt_title) {
+    /** «Вы пообещали Ивану», «Иван обещал вам», «Напомнить вам». */
+    private fun headline(t: TaskItem): String {
+        val r = Core.res()
+        val mate = t.mate
+        return when {
+            t.kind == "reminder" -> r.getString(R.string.promise_card_reminder)
+            t.theirs -> r.getString(R.string.promise_card_theirs, mate ?: r.getString(R.string.promise_someone))
+            mate != null -> r.getString(R.string.promise_card_mine_to, mate)
+            else -> r.getString(R.string.promise_card_mine)
+        }
+    }
+
+    private fun dueText(t: TaskItem): String? {
+        val ms = t.dueMillis() ?: return t.due?.takeIf { it.isNotBlank() }
+        val at = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
+        return at.format(java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm", java.util.Locale.getDefault()))
+    }
+
+    private fun show(context: Context, nm: NotificationManager, t: TaskItem, title: Int? = null) {
         val r = Core.res()
         val open = PendingIntent.getActivity(context, 3, Intent(context, MainActivity::class.java)
             .putExtra("open", "tasks"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val due = PendingIntent.getActivity(context, notificationId(t.id) * 2 + 7, Intent(context, MainActivity::class.java)
+            .putExtra("open", "due:${t.id}"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val details = listOfNotNull(
+            dueText(t)?.let { r.getString(R.string.task_prompt_due, it) },
             t.evidence?.takeIf { it.isNotBlank() }?.let { r.getString(R.string.quoted, it) },
-            t.due?.takeIf { it.isNotBlank() }?.let { r.getString(R.string.task_prompt_due, it) },
             t.conversationTitle?.takeIf { it.isNotBlank() },
         )
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_neuro)
-            .setContentTitle(r.getString(title))
+            .setContentTitle(title?.let { r.getString(it) } ?: headline(t))
             .setContentText(t.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText((listOf(t.text) + details).joinToString("\n")))
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setGroup(CHANNEL)
             .setAutoCancel(true)
             .setContentIntent(open)
-            .addAction(0, r.getString(R.string.task_accept), action(context, ACCEPT, t))
-            .addAction(0, r.getString(R.string.task_dismiss), action(context, DISMISS, t))
+            .addAction(0, r.getString(R.string.promise_yes), action(context, ACCEPT, t))
+            .addAction(0, r.getString(R.string.promise_no), action(context, DISMISS, t))
+            .addAction(0, r.getString(R.string.promise_other_due), due)
             .build()
         try {
             nm.notify(notificationId(t.id), n)
         } catch (_: SecurityException) {
         }
-        Inbox.add("task", "task:${t.id}", r.getString(R.string.task_prompt_title), t.text, "tasks", t.id)
+        Inbox.add("task", "task:${t.id}", headline(t), t.text, "tasks", t.id)
     }
 
     /** Ответ принят — коротко подтверждаем на месте уведомления. Нет связи — вопрос остаётся с кнопками. */

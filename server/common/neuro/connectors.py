@@ -38,6 +38,19 @@ CATALOG = {
                         "tr": "Notion'da arama, sayfalar ve görevler", "es": "Busca en tu Notion, páginas y tareas"},
         "keywords": ["notion", "ноушн", "ношн", "ношен", "нотион", "ноушен", "ноушин", "ноцион"],
     },
+    # CRM с официальным MCP-сервером и входом без регистрации приложения
+    "attio": {
+        "name": "Attio", "icon": "🤝", "mcp": "https://mcp.attio.com/mcp",
+        "description": {"ru": "CRM: контакты, сделки, заметки о встречах", "en": "CRM: contacts, deals, meeting notes",
+                        "tr": "CRM: kişiler, anlaşmalar, toplantı notları", "es": "CRM: contactos, tratos, notas de reuniones"},
+        "keywords": ["attio", "аттио", "crm", "црм", "срм", "сделк", "клиент"],
+    },
+    "pipedrive": {
+        "name": "Pipedrive", "icon": "💼", "mcp": "https://mcp.pipedrive.ai/mcp",
+        "description": {"ru": "CRM: сделки, контакты, дела", "en": "CRM: deals, contacts, activities",
+                        "tr": "CRM: anlaşmalar, kişiler, etkinlikler", "es": "CRM: tratos, contactos, actividades"},
+        "keywords": ["pipedrive", "пайпдрайв", "crm", "црм", "срм", "сделк", "клиент"],
+    },
     "linear": {
         "name": "Linear", "icon": "📐", "mcp": "https://mcp.linear.app/mcp",
         "description": {"ru": "Задачи и проекты в Linear", "en": "Issues and projects in Linear",

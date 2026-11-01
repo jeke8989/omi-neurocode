@@ -33,7 +33,6 @@ import kotlinx.coroutines.launch
 
 // Агенты чата: Mnemo — свой агент (события, люди, расшифровки, задачи, память, расширения), модель выбирается
 // сама по сложности вопроса; Claude и GPT — тот же агент с теми же инструментами на моделях Anthropic и OpenAI.
-private val AGENTS = listOf("mnemo", "claude", "gpt")
 
 @Composable
 private fun agentTitle(agent: String): String = when (agent) {
@@ -47,7 +46,8 @@ private fun agentTitle(agent: String): String = when (agent) {
 fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? = null) {
     val res by Repo.chat.state.collectAsState()
     var input by rememberSaveable { mutableStateOf("") }
-    var agent by rememberSaveable { mutableStateOf(Core.prefs.chatAgent.takeIf { it in AGENTS } ?: "mnemo") }
+    // модель ассистент выбирает сам (под каждый вопрос — подходящую); выбора агентов в чате нет
+    val agent = "mnemo"
     // с какого экрана открыт чат: агент видит это событие/день; можно убрать крестиком
     var about by rememberSaveable { mutableStateOf(context) }
     var sending by remember { mutableStateOf(false) }
@@ -122,10 +122,6 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
         TopBar(stringResource(R.string.assistant), { Nav.pop() }) {
             if (count > 0) IconCircle(Icons.Trash, stringResource(R.string.clear_chat), { confirmClear = true }, size = 40.dp)
         }
-        AgentSwitch(agent) {
-            agent = it
-            Core.prefs.chatAgent = it
-        }
         Box(Modifier.weight(1f)) {
             val chat = res.data
             when {
@@ -156,32 +152,6 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
 }
 
 /** Переключатель агентов: Mnemo, Claude, GPT. */
-@Composable
-private fun AgentSwitch(agent: String, onAgent: (String) -> Unit) {
-    val c = Mn.c
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.paper).padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            AGENTS.forEach { a ->
-                val on = a == agent
-                Row(
-                    Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(19.dp))
-                        .background(if (on) c.ink else c.paper).tap({ onAgent(a) }),
-                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (a == "mnemo") {
-                        Icon(Icons.Sparkle, null, tint = if (on) c.onInk else c.lens, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(5.dp))
-                    }
-                    Txt(agentTitle(a), T.smallStrong, if (on) c.onInk else c.ink, maxLines = 1)
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun ChatEmpty(onPick: (String) -> Unit) {
     val c = Mn.c

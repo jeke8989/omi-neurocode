@@ -50,7 +50,7 @@ fun Markdown(text: String, style: TextStyle = T.body, modifier: Modifier = Modif
             url.startsWith("day:") -> Nav.push(Route.Day(url.removePrefix("day:")))
             url.startsWith("task:") -> {
                 Nav.reset(Route.Home)
-                HomeState.page.value = 1
+                HomeState.page.value = 0
             }
             url.startsWith("http://") || url.startsWith("https://") -> try {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))

@@ -63,6 +63,39 @@ fun TasksTab() {
         }
     }
 
+    var expanded by rememberSaveable { mutableStateOf<Long?>(null) }
+    var dueFor by remember { mutableStateOf<TaskItem?>(null) }
+    // «Напомнить ему»: черновик сообщения (null — готовится)
+    var nudgeFor by remember { mutableStateOf<TaskItem?>(null) }
+    var nudgeText by remember { mutableStateOf<String?>(null) }
+    var nudgeError by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // «Другой срок» из уведомления: открыть выбор срока у этого обещания
+    val askDue = HomeState.dueTask.value
+    LaunchedEffect(askDue, res.data) {
+        val id = askDue ?: return@LaunchedEffect
+        res.data?.firstOrNull { it.id == id }?.let {
+            dueFor = it
+            HomeState.dueTask.value = null
+        }
+    }
+
+    val askNudge = HomeState.nudgeTask.value
+    LaunchedEffect(askNudge, res.data) {
+        val id = askNudge ?: return@LaunchedEffect
+        res.data?.firstOrNull { it.id == id }?.let {
+            HomeState.nudgeTask.value = null
+            nudgeFor = it
+            nudgeText = null
+            nudgeError = false
+            try {
+                nudgeText = Api.nudge(it.id)
+            } catch (e: Exception) {
+                nudgeError = true
+            }
+        }
+    }
+
     // удалённая свайпом задача: несколько секунд можно вернуть
     var removed by remember { mutableStateOf<TaskItem?>(null) }
     LaunchedEffect(removed) {
@@ -112,6 +145,40 @@ fun TasksTab() {
         }
     }
 
+    fun setDue(t: TaskItem, ms: Long?) {
+        val iso = ms?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString() }
+        Repo.tasks.edit { list -> list.map { if (it.id == t.id) it.copy(dueAt = iso, due = null) else it } }
+        scope.launch {
+            try {
+                Api.setTaskDue(t.id, ms)
+            } catch (e: Exception) {
+                Repo.tasks.refresh()
+            }
+        }
+    }
+
+    fun nudge(t: TaskItem) {
+        nudgeFor = t
+        nudgeText = null
+        nudgeError = false
+        scope.launch {
+            try {
+                nudgeText = Api.nudge(t.id)
+            } catch (e: Exception) {
+                nudgeError = true
+            }
+        }
+    }
+
+    dueFor?.let { t -> DueDialog(t, onDismiss = { dueFor = null }, onPick = { ms -> dueFor = null; setDue(t, ms) }) }
+    nudgeFor?.let { t ->
+        DraftDialog(stringResource(R.string.promise_nudge_title, t.mate ?: stringResource(R.string.promise_someone)), null,
+            nudgeText, nudgeError, onDismiss = { nudgeFor = null })
+    }
+    val actions = PromiseRowActions(
+        onDue = { dueFor = it }, onCalendar = { PromiseActions.toCalendar(context, it) }, onNudge = { nudge(it) },
+    )
+
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = { scope.launch { refreshing = true; Repo.tasks.refresh(); refreshing = false } },
@@ -124,25 +191,36 @@ fun TasksTab() {
                 all == null && res.error != null -> item { ErrorBlock(res.error, { scope.launch { Repo.tasks.refresh() } }) }
                 all == null -> item { LoadingBlock() }
                 else -> {
+                    val now = System.currentTimeMillis()
                     val open = all.filter { it.status == "open" }
                     val done = all.filter { it.status == "done" }
                     val suggested = all.filter { it.status == "suggested" }
+                    val overdue = open.filter { (it.dueMillis() ?: Long.MAX_VALUE) < now }
+                    val mine = open.filter { !it.theirs && it !in overdue }
+                    val theirs = open.filter { it.theirs && it !in overdue }
                     item { StaleNote(res.error) }
-                    item {
-                        SectionTitle(if (open.isEmpty()) stringResource(R.string.tasks_all_done)
-                        else plural(R.plurals.tasks_open, open.size))
-                    }
-                    if (open.isEmpty()) {
+                    item(key = "stats") { PromiseStats(all) }
+                    if (open.isEmpty() && suggested.isEmpty()) {
                         item {
-                            EmptyBlock(Icons.Tasks, stringResource(R.string.tasks_empty_title),
-                                stringResource(R.string.tasks_empty_text))
+                            EmptyBlock(Icons.Tasks, stringResource(R.string.promises_empty_title),
+                                stringResource(R.string.promises_empty_text))
                         }
                     }
-                    itemsIndexed(open, key = { _, t -> t.id }) { i, t ->
-                        Grouped(i, open.size, inset = 50.dp) { SwipeToDelete({ confirm = t }) { TaskRow(t, { toggle(t) }) } }
+                    for ((title, list) in listOf(R.string.promises_overdue to overdue, R.string.promises_mine to mine,
+                        R.string.promises_theirs to theirs)) {
+                        if (list.isEmpty()) continue
+                        item(key = "title-$title") { SectionTitle(stringResource(title) + "  " + list.size) }
+                        itemsIndexed(list, key = { _, t -> t.id }) { i, t ->
+                            Grouped(i, list.size, inset = 50.dp) {
+                                SwipeToDelete({ confirm = t }) {
+                                    PromiseRow(t, expanded == t.id, { expanded = if (expanded == t.id) null else t.id },
+                                        { toggle(t) }, actions)
+                                }
+                            }
+                        }
                     }
                     if (suggested.isNotEmpty()) {
-                        item(key = "suggested-title") { SectionTitle(stringResource(R.string.tasks_suggested)) }
+                        item(key = "suggested-title") { SectionTitle(stringResource(R.string.promises_check)) }
                         itemsIndexed(suggested, key = { _, t -> "s" + t.id }) { i, t ->
                             Grouped(i, suggested.size, inset = 16.dp) {
                                 SwipeToDelete({ confirm = t }) { SuggestedTaskRow(t, onAnswer = { accept ->
@@ -162,7 +240,7 @@ fun TasksTab() {
                     }
                     if (done.isNotEmpty()) {
                         item {
-                            SectionTitle(stringResource(R.string.tasks_done_count, done.size),
+                            SectionTitle(stringResource(R.string.promises_done_count, done.size),
                                 Modifier.quietTap { showDone = !showDone }) {
                                 Icon(if (showDone) Icons.ChevronDown else Icons.Chevron, null, tint = Mn.c.graphite,
                                     modifier = Modifier.size(20.dp))
@@ -172,7 +250,10 @@ fun TasksTab() {
                             val shown = done.take(50)
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
                                 Grouped(i, shown.size, inset = 50.dp) {
-                                    SwipeToDelete({ confirm = t }) { TaskRow(t, { toggle(t) }) }
+                                    SwipeToDelete({ confirm = t }) {
+                                        PromiseRow(t, expanded == t.id, { expanded = if (expanded == t.id) null else t.id },
+                                            { toggle(t) }, actions)
+                                    }
                                 }
                             }
                         }
@@ -378,6 +459,7 @@ private fun SuggestedTaskRow(t: TaskItem, onAnswer: (Boolean) -> Unit) {
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Txt(t.text, T.body, maxLines = 4)
+            promiseWho(t)?.let { Txt(it, T.caption, c.graphite, Modifier.padding(top = 3.dp), maxLines = 1) }
             t.evidence?.let {
                 Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
                     Modifier.padding(top = 3.dp), maxLines = 2)
@@ -405,5 +487,119 @@ private fun RemovedTaskRow(t: TaskItem, onRestore: () -> Unit) {
         }
         Txt(stringResource(R.string.trash_restore), T.smallStrong, c.lens, maxLines = 1,
             modifier = Modifier.clip(RoundedCornerShape(12.dp)).quietTap(onRestore).padding(horizontal = 10.dp, vertical = 8.dp))
+    }
+}
+
+// ======================================================================= обещания
+class PromiseRowActions(val onDue: (TaskItem) -> Unit, val onCalendar: (TaskItem) -> Unit, val onNudge: (TaskItem) -> Unit)
+
+/** Кто и кому: «Ивану», «Иван обещал вам», «Напоминание себе». */
+@Composable
+fun promiseWho(t: TaskItem): String? = when {
+    t.kind == "reminder" -> stringResource(R.string.task_reminder)
+    t.theirs -> stringResource(R.string.promise_from, t.mate ?: stringResource(R.string.promise_someone))
+    t.mate != null -> stringResource(R.string.promise_to, t.mate!!)
+    else -> null
+}
+
+/**
+ * Обещание: что, кому (или кто вам), к какому сроку. Нажатие раскрывает цитату из разговора и действия:
+ * другой срок, в календарь, напомнить тому, кто обещал, открыть разговор.
+ */
+@Composable
+fun PromiseRow(t: TaskItem, expanded: Boolean, onExpand: () -> Unit, onToggle: () -> Unit, actions: PromiseRowActions) {
+    val c = Mn.c
+    val done = t.status == "done"
+    val overdue = !done && (t.dueMillis() ?: Long.MAX_VALUE) < System.currentTimeMillis()
+    Row(
+        Modifier.fillMaxWidth().animateContentSize().quietTap(onExpand).padding(start = 6.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RoundCheck(done, onToggle, stringResource(if (done) R.string.cd_task_done else R.string.cd_task_open))
+        Column(Modifier.weight(1f).padding(top = 10.dp)) {
+            Txt(t.text, if (done) T.body.copy(textDecoration = TextDecoration.LineThrough) else T.body,
+                if (done) c.graphite else c.ink, maxLines = if (expanded) 8 else 3)
+            val who = promiseWho(t)
+            val due = taskDue(t)
+            if (who != null || due != null) {
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (who != null) {
+                        Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null, tint = c.graphite,
+                            modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Txt(who, T.caption, c.graphite, maxLines = 1)
+                        if (due != null) Spacer(Modifier.width(12.dp))
+                    }
+                    due?.let {
+                        Icon(Icons.Clock, null, tint = if (overdue) c.red else c.amber, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Txt(it, T.caption, if (overdue) c.red else c.graphite, maxLines = 1)
+                    }
+                }
+            }
+            if (expanded) {
+                t.evidence?.takeIf { it.isNotBlank() }?.let {
+                    Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
+                        Modifier.padding(top = 6.dp), maxLines = 4)
+                }
+                Wrap(spacing = 6.dp, modifier = Modifier.padding(top = 10.dp)) {
+                    if (!done) {
+                        Chip(stringResource(R.string.promise_due), false, { actions.onDue(t) }, leading = {
+                            Icon(Icons.Clock, null, tint = c.ink, modifier = Modifier.size(16.dp))
+                        })
+                        Chip(stringResource(R.string.promise_calendar), false, { actions.onCalendar(t) }, leading = {
+                            Icon(Icons.Calendar, null, tint = c.ink, modifier = Modifier.size(16.dp))
+                        })
+                        if (t.theirs) {
+                            Chip(stringResource(R.string.promise_nudge), false, { actions.onNudge(t) }, leading = {
+                                Icon(Icons.Share, null, tint = c.ink, modifier = Modifier.size(16.dp))
+                            })
+                        }
+                    }
+                    val convId = t.conversationId
+                    if (convId != null) {
+                        Chip(stringResource(R.string.promise_conversation), false, { Nav.push(Route.Conversation(convId)) }, leading = {
+                            Icon(Icons.Wave, null, tint = c.ink, modifier = Modifier.size(16.dp))
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Итог: сколько пообещали сегодня и сколько выполнено за неделю — измеримая польза. */
+@Composable
+private fun PromiseStats(all: List<TaskItem>) {
+    val c = Mn.c
+    val now = System.currentTimeMillis()
+    fun created(t: TaskItem) = try {
+        java.time.OffsetDateTime.parse(t.createdAt).toInstant().toEpochMilli()
+    } catch (_: Exception) {
+        0L
+    }
+    val startOfDay = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val counted = all.filter { it.status == "open" || it.status == "done" }
+    val today = counted.count { created(it) >= startOfDay && !it.theirs }
+    val week = counted.filter { created(it) >= now - 7 * 24 * 3600_000L }
+    val weekDone = week.count { it.status == "done" }
+    if (week.isEmpty() && today == 0) return
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
+        .background(c.paper).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Txt(stringResource(R.string.promises_today, today), T.bodyStrong)
+            Txt(stringResource(R.string.promises_week, weekDone, week.size), T.caption, c.graphite)
+        }
+        // кольцо выполнения за неделю
+        val share = if (week.isEmpty()) 0f else weekDone.toFloat() / week.size
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 5.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawArc(c.line, 0f, 360f, false, style = stroke)
+                drawArc(c.lens, -90f, 360f * share, false, style = stroke)
+            }
+            Txt("${(share * 100).toInt()}%", T.tiny, c.ink)
+        }
     }
 }

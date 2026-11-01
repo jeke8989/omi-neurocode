@@ -28,9 +28,10 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
-                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, retention, routines, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, promises, retention, routines, tts, voices)
 from neuro import calendar as calendarlib
 from neuro import memory as memorylib
+from neuro import tasks as tasklib
 from neuro.models import CATALOG, TASK_KEYS, TASKS, localized_model, localized_task
 from neuro.audio import (
     BYTES_PER_MS,
@@ -752,7 +753,7 @@ async def api_tasks(request: Request):
     async with await aconnect() as conn:
         rows = await (await conn.execute(
             """SELECT t.id, t.conversation_id, t.text, t.due, t.due_at, t.assignee, t.person_id, t.kind, t.confidence,
-                      t.evidence, t.target, t.status, t.source,
+                      t.evidence, t.target, t.status, t.source, t.counterpart, t.confirmed_at, t.done_at,
                       t.exported_at, t.export_ref, t.created_at, c.title AS conversation_title,
                       coalesce((SELECT json_agg(json_build_object(
                                     'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref,
@@ -777,15 +778,65 @@ async def api_task_update(request: Request):
     except ValueError:
         return Json({"error": "bad json"}, status_code=400)
     status = body.get("status")
-    if status not in ("open", "done", "dismissed"):
+    if status is not None and status not in ("open", "done", "dismissed"):
         return Json({"error": "status must be open, done or dismissed"}, status_code=400)
+    sets, args = [], []
+    if status is not None:
+        # «Да» в карточке — обещание подтверждено; выполнено — когда (для счётчика «выполнено N из M»)
+        sets += ["status = %s", "confirmed_at = CASE WHEN %s = 'open' THEN coalesce(confirmed_at, now()) ELSE confirmed_at END",
+                 "done_at = CASE WHEN %s = 'done' THEN coalesce(done_at, now()) WHEN %s = 'open' THEN NULL ELSE done_at END"]
+        args += [status, status, status, status]
+    if "due_at" in body:  # «Другой срок»: ISO-время или null — без срока
+        due_at = tasklib.parse_due(body["due_at"]) if body["due_at"] else None
+        if body["due_at"] and due_at is None:
+            return Json({"error": "due_at: ISO 8601"}, status_code=400)
+        sets += ["due_at = %s", "due = NULL"]
+        args.append(due_at)
+    if str(body.get("text") or "").strip():
+        sets.append("text = %s")
+        args.append(crypto.seal(" ".join(str(body["text"]).split())[:1000]))
+    if not sets:
+        return Json({"error": "nothing to change"}, status_code=400)
     async with await aconnect() as conn:
-        res = await conn.execute(
-            "UPDATE tasks SET status = %s, updated_at = now() WHERE id = %s", (status, tid)
-        )
+        res = await conn.execute(f"UPDATE tasks SET {', '.join(sets)}, updated_at = now() WHERE id = %s",  # noqa: S608
+                                 (*args, tid))
     if res.rowcount == 0:
         return Json({"error": "not found"}, status_code=404)
     return Json({"id": tid, "status": status})
+
+
+async def api_task_nudge(request: Request):
+    """«Напомнить ему»: черновик короткого сообщения тому, кто обещал (пользователь отправит сам)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    tid = request.path_params["id"]
+
+    def work(conn):
+        t = conn.execute("SELECT * FROM tasks WHERE id = %s", (tid,)).fetchone()
+        return promises.nudge(conn, t) if t else None
+
+    try:
+        text = await _sync(work)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("nudge failed: %s", exc)
+        return Json({"error": "llm"}, status_code=502)
+    if text is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json({"text": text})
+
+
+async def api_conversation_followup(request: Request):
+    """Письмо по итогам встречи: тема и текст (пользователь правит и отправляет сам)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    cid = int(request.path_params["id"])
+    try:
+        return Json(await _sync(lambda conn: promises.followup(conn, cid)))
+    except ValueError:
+        return Json({"error": "not found"}, status_code=404)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("followup failed: %s", exc)
+        return Json({"error": "llm"}, status_code=502)
 
 
 MEMORY_SELECT = """SELECT m.id, m.conversation_id, m.text, m.source, m.created_at, m.updated_at,
@@ -2024,6 +2075,8 @@ app = Starlette(
         Route("/api/conversations/{id:int}/reprocess", api_conversation_reprocess, methods=["POST"]),
         Route("/api/conversations/{id:int}/important", api_conversation_important, methods=["POST"]),
         Route("/api/important", api_important),
+        Route("/api/tasks/{id:int}/nudge", api_task_nudge, methods=["POST"]),
+        Route("/api/conversations/{id:int}/followup", api_conversation_followup, methods=["POST"]),
         Route("/api/agent/routines", api_routines),
         Route("/api/calendar", api_calendar, methods=["GET", "POST", "DELETE"]),
         Route("/api/calendar/sync", api_calendar_sync, methods=["POST"]),

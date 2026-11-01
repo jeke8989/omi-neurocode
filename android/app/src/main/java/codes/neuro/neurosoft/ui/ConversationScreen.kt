@@ -41,6 +41,13 @@ fun ConversationScreen(id: Long) {
     var who by remember { mutableStateOf<Segment?>(null) }
     var original by remember(id) { mutableStateOf(false) }
     var showBackground by remember(id) { mutableStateOf(false) }
+    var followupOpen by remember(id) { mutableStateOf(false) }
+    var followup by remember(id) { mutableStateOf<Pair<String, String>?>(null) }
+    var followupError by remember(id) { mutableStateOf(false) }
+    if (followupOpen) {
+        DraftDialog(stringResource(R.string.followup_title), followup?.first, followup?.second, followupError,
+            onDismiss = { followupOpen = false })
+    }
 
     fun reload() {
         scope.launch {
@@ -177,9 +184,22 @@ fun ConversationScreen(id: Long) {
                 d.item.summary?.let { summary ->
                     SectionTitle(stringResource(R.string.summary))
                     Card(Modifier.padding(horizontal = 16.dp)) { Txt(summary, T.body) }
+                    // письмо по итогам встречи: спасибо, кто что к какому сроку, следующий шаг
+                    SecondaryButton(stringResource(R.string.followup_button), {
+                        followupOpen = true
+                        followup = null
+                        followupError = false
+                        scope.launch {
+                            try {
+                                followup = Api.followup(id)
+                            } catch (e: Exception) {
+                                followupError = true
+                            }
+                        }
+                    }, Modifier.padding(start = 16.dp, top = 10.dp), icon = Icons.Share, small = true)
                 }
                 if (d.tasks.isNotEmpty()) {
-                    SectionTitle(stringResource(R.string.tab_tasks))
+                    SectionTitle(stringResource(R.string.tab_promises))
                     d.tasks.forEachIndexed { i, t ->
                         var task by remember(t.id) { mutableStateOf(t) }
                         Grouped(i, d.tasks.size, inset = 50.dp) {

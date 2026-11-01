@@ -104,6 +104,15 @@ class Prefs(context: Context) {
         get() = sp.getString("chat_agent", null) ?: if (chatLevel.startsWith("claude")) "claude" else "mnemo"
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
+    /** Вечером в 21:00 — «что вы пообещали сегодня». */
+    var eveningDigest: Boolean
+        get() = sp.getBoolean("evening_digest", true)
+        set(value) = sp.edit().putBoolean("evening_digest", value).apply()
+
+    var eveningShown: String?
+        get() = sp.getString("evening_shown", null)
+        set(value) = sp.edit().putString("evening_shown", value).apply()
+
     /** Календарь телефона подключён к Mnemo (события уходят на сервер, ассистент может менять встречи). */
     var calendarOn: Boolean
         get() = sp.getBoolean("calendar_on", false)

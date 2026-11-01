@@ -54,7 +54,8 @@ import java.time.LocalDate
 
 @Composable
 fun HomeScreen() {
-    val pager = rememberPagerState(initialPage = HomeState.page.value) { 4 }
+    // главное — обещания; день — лента событий; личное — дневник, люди, созвездие
+    val pager = rememberPagerState(initialPage = HomeState.page.value.coerceIn(0, 2)) { 3 }
     val scope = rememberCoroutineScope()
     var calendar by remember { mutableStateOf(false) }
     LaunchedEffect(pager.currentPage) { HomeState.page.value = pager.currentPage }
@@ -62,16 +63,18 @@ fun HomeScreen() {
     Column(Modifier.fillMaxSize()) {
         HomeTopBar(onCalendar = { calendar = true })
         TextTabs(
-            listOf(stringResource(R.string.tab_home), stringResource(R.string.tab_tasks), stringResource(R.string.tab_people),
-                stringResource(R.string.tab_diary)),
+            listOf(stringResource(R.string.tab_promises), stringResource(R.string.tab_day), stringResource(R.string.tab_personal)),
             pager.currentPage,
         ) { scope.launch { pager.animateScrollToPage(it) } }
+        // страницу меняют и снаружи (уведомление «Обещания», ссылка на задачу в чате)
+        LaunchedEffect(HomeState.page.value) {
+            if (pager.currentPage != HomeState.page.value) pager.scrollToPage(HomeState.page.value.coerceIn(0, 2))
+        }
         HorizontalPager(pager, Modifier.weight(1f)) { page ->
             when (page) {
-                0 -> HomeTab()
-                1 -> TasksTab()
-                2 -> PeopleTab()
-                else -> DiaryTab()
+                0 -> TasksTab()
+                1 -> HomeTab()
+                else -> PersonalTab()
             }
         }
         BottomAskBar()
@@ -83,9 +86,21 @@ fun HomeScreen() {
             onPick = {
                 HomeState.day.value = it
                 calendar = false
-                scope.launch { pager.animateScrollToPage(0) }
+                scope.launch { pager.animateScrollToPage(1) }
             },
         )
+    }
+}
+
+/** «Личное»: дневник жизни и люди (с созвездием) — второй слой, всё под одной вкладкой. */
+@Composable
+fun PersonalTab() {
+    var section by HomeState.personal
+    Column(Modifier.fillMaxSize()) {
+        LazyRowChips(listOf(stringResource(R.string.tab_diary), stringResource(R.string.tab_people)), section) { section = it }
+        Box(Modifier.weight(1f)) {
+            if (section == 0) DiaryTab() else PeopleTab()
+        }
     }
 }
 

@@ -145,6 +145,11 @@ object PhoneCalendar {
         sync(context, force = true)
     }
 
+    /** Обещание -> встреча в календаре прямо с телефона (календарь подключён). Возвращает id встречи. */
+    fun addEvent(context: Context, title: String, begin: Long, end: Long, notes: String?): String =
+        execute(context, "create", JSONObject().put("title", title).put("begin", begin).put("end", end)
+            .put("notes", notes ?: ""))
+
     private fun execute(context: Context, op: String, p: JSONObject): String {
         val cr = context.contentResolver
         return when (op) {

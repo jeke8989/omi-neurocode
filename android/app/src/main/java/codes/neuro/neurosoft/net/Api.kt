@@ -149,7 +149,26 @@ data class TaskItem(
     /** Срок как время (ISO) — по нему приходит напоминание. */
     val dueAt: String? = null,
     val evidence: String? = null,
-)
+    /** С кем договорённость: кому я обещал или кто обещал мне. */
+    val counterpart: String? = null,
+    /** Подтверждено «Да» в карточке. */
+    val confirmedAt: String? = null,
+    /** Когда выполнено — для счётчика «выполнено N из M». */
+    val doneAt: String? = null,
+) {
+    /** «Мне обещали» — ждём от другого; иначе обещал я (или напоминание себе). */
+    val theirs: Boolean get() = kind == "waiting"
+
+    /** С кем: имя собеседника (служебные подписи модели не показываем). */
+    val mate: String? get() = (counterpart ?: if (theirs) assignee else null)
+        ?.takeUnless { Regex("^(владелец|пользователь|спикер|голос|неизвестн|owner|user|speaker|voice|unknown)", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+
+    fun dueMillis(): Long? = try {
+        dueAt?.let { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }
+    } catch (_: Exception) {
+        null
+    }
+}
 
 data class MemoryItem(
     val id: Long,
@@ -298,7 +317,11 @@ object Api {
     private val json = "application/json; charset=utf-8".toMediaType()
 
     /** explain — при ошибке показать текст сервера («вход устарел…»), а не код ответа. */
-    private suspend fun call(method: String, path: String, body: JSONObject? = null, explain: Boolean = false): String =
+    /** Для ответов, которые готовит модель (письмо по итогам): до двух минут. */
+    private val slowClient by lazy { client.newBuilder().readTimeout(120, TimeUnit.SECONDS).build() }
+
+    private suspend fun call(method: String, path: String, body: JSONObject? = null, explain: Boolean = false,
+                             slow: Boolean = false): String =
         withContext(Dispatchers.IO) {
             val prefs = Core.prefs
             if (!prefs.serverConfigured) throw ApiException(ApiException.Kind.NOT_CONFIGURED)
@@ -312,7 +335,7 @@ object Api {
                 throw ApiException(ApiException.Kind.NOT_CONFIGURED, e.message)
             }
             try {
-                client.newCall(request).execute().use { r ->
+                (if (slow) slowClient else client).newCall(request).execute().use { r ->
                     val text = r.body?.string().orEmpty()
                     when {
                         r.code == 401 || r.code == 403 -> throw ApiException(ApiException.Kind.AUTH)
@@ -573,6 +596,22 @@ object Api {
 
     suspend fun setTaskStatus(id: Long, status: String) {
         call("POST", "/api/tasks/$id", JSONObject().put("status", status))
+    }
+
+    /** Другой срок обещания: время (мс) или null — без срока. */
+    suspend fun setTaskDue(id: Long, dueAtMs: Long?) {
+        val iso = dueAtMs?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime().toString() }
+        call("POST", "/api/tasks/$id", JSONObject().put("due_at", iso ?: JSONObject.NULL))
+    }
+
+    /** Черновик напоминания тому, кто обещал. */
+    suspend fun nudge(taskId: Long): String =
+        JSONObject(call("POST", "/api/tasks/$taskId/nudge", JSONObject(), slow = true)).optString("text")
+
+    /** Письмо по итогам встречи: тема и текст. */
+    suspend fun followup(conversationId: Long): Pair<String, String> {
+        val o = JSONObject(call("POST", "/api/conversations/$conversationId/followup", JSONObject(), slow = true))
+        return o.optString("subject") to o.optString("body")
     }
 
     /** query — поиск по смыслу («что любит мама»), самое близкое первым. */
@@ -1092,6 +1131,9 @@ object Api {
         kind = o.optString("kind", "mine").ifBlank { "mine" },
         dueAt = o.str("due_at"),
         evidence = o.str("evidence"),
+        counterpart = o.str("counterpart"),
+        confirmedAt = o.str("confirmed_at"),
+        doneAt = o.str("done_at"),
     )
 
     private fun memory(o: JSONObject) = MemoryItem(

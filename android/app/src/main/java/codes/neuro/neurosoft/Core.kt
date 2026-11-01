@@ -285,6 +285,10 @@ object Core {
             TaskPrompts.onTasks(app, tasks)
         } catch (_: Exception) {
         }
+        try {
+            EveningDigest.check(app, tasks)
+        } catch (_: Exception) {
+        }
     }
 
     // ------------------------------------------------------------------ подключение без кода

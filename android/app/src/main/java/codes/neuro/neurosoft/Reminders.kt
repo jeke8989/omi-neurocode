@@ -31,64 +31,97 @@ object Reminders {
         context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
     }
 
-    private fun intent(context: Context, id: Long, text: String? = null) =
+    // напоминаний на одно обещание несколько: в срок, утром в день срока, вечером накануне
+    private const val AT_DUE = 0
+    private const val MORNING = 1
+    private const val EVENING_BEFORE = 2
+
+    private fun intent(context: Context, key: Long, t: TaskItem? = null, stage: Int = 0) =
         PendingIntent.getBroadcast(
-            context, (id % Int.MAX_VALUE).toInt(),
-            Intent(context, ReminderReceiver::class.java).setAction(ACTION).putExtra("id", id).putExtra("text", text ?: ""),
+            context, (key % Int.MAX_VALUE).toInt(),
+            Intent(context, ReminderReceiver::class.java).setAction(ACTION).putExtra("id", key / 4).putExtra("stage", stage)
+                .putExtra("text", t?.text ?: "").putExtra("kind", t?.kind ?: "mine").putExtra("mate", t?.mate ?: ""),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /** Поставить будильники по открытым задачам со сроком (на неделю вперёд), снять лишние. */
+    private fun local(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
+
+    /** Когда напомнить об обещании: (этап, время). */
+    private fun stages(t: TaskItem, due: Long, now: Long): List<Pair<Int, Long>> {
+        val out = mutableListOf(AT_DUE to due)
+        if (t.theirs || t.kind == "reminder") return out
+        val d = local(due)
+        val morning = d.toLocalDate().atTime(9, 0).atZone(d.zone).toInstant().toEpochMilli()
+        if (d.toLocalTime().hour >= 11 && morning > now) out += MORNING to morning
+        val evening = d.toLocalDate().minusDays(1).atTime(19, 0).atZone(d.zone).toInstant().toEpochMilli()
+        if (evening > now && due - evening > 12 * 3600_000L) out += EVENING_BEFORE to evening
+        return out
+    }
+
+    /** Поставить будильники по открытым обещаниям со сроком (на неделю вперёд), снять лишние. */
     fun schedule(context: Context, tasks: List<TaskItem>) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()
-        val wanted = tasks.filter { it.status == "open" && it.dueAt != null }.mapNotNull { t ->
-            val at = try {
-                OffsetDateTime.parse(t.dueAt).toInstant().toEpochMilli()
-            } catch (e: Exception) {
-                return@mapNotNull null
-            }
-            if (at in (now - 60_000)..(now + WEEK)) Triple(t.id, at, t.text) else null
+        val wanted = ArrayList<Triple<Long, Long, Pair<TaskItem, Int>>>()
+        for (t in tasks) {
+            if (t.status != "open") continue
+            val due = t.dueMillis() ?: continue
+            if (due !in (now - 60_000)..(now + WEEK)) continue
+            for ((stage, at) in stages(t, due, now)) wanted += Triple(t.id * 4 + stage, at, t to stage)
         }
         val before = Core.prefs.reminders
         val after = HashMap<Long, Long>()
-        for ((id, at, text) in wanted) {
-            if (before[id] != at) {
+        for ((key, at, ts) in wanted) {
+            if (before[key] != at) {
                 try {
                     // без точных будильников (разрешение не нужно): Android может сдвинуть на несколько минут
-                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.coerceAtLeast(now + 5_000), intent(context, id, text))
+                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.coerceAtLeast(now + 5_000),
+                        intent(context, key, ts.first, ts.second))
                 } catch (e: Exception) {
                     Log.w("Mnemo", "cannot set reminder", e)
                     continue
                 }
             }
-            after[id] = at
+            after[key] = at
         }
-        for (id in before.keys - after.keys) alarms.cancel(intent(context, id))
+        for (key in before.keys - after.keys) alarms.cancel(intent(context, key))
         Core.prefs.reminders = after
     }
 
-    fun show(context: Context, id: Long, text: String) {
+    fun show(context: Context, id: Long, text: String, stage: Int = AT_DUE, kind: String = "mine", mate: String = "") {
         channel(context)
+        val r = Core.res()
+        val theirs = kind == "waiting"
+        val title = when {
+            stage == EVENING_BEFORE -> r.getString(R.string.promise_due_tomorrow)
+            stage == MORNING -> r.getString(R.string.promise_due_today)
+            kind == "reminder" -> r.getString(R.string.reminder_title)
+            theirs -> r.getString(R.string.promise_due_theirs, mate.ifBlank { r.getString(R.string.promise_someone) })
+            else -> r.getString(R.string.promise_due_now)
+        }
         val open = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java)
             .putExtra("open", "tasks"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(context, CHANNEL)
+        val b = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_neuro)
-            .setContentTitle(Core.res().getString(R.string.reminder_title))
+            .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setContentIntent(open)
-            .build()
+        if (theirs && stage == AT_DUE) {  // «Иван обещал договор — сегодня срок»: напомнить ему готовым сообщением
+            val nudge = PendingIntent.getActivity(context, 5000 + (id % 100_000).toInt(), Intent(context, MainActivity::class.java)
+                .putExtra("open", "nudge:$id"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            b.addAction(0, r.getString(R.string.promise_nudge), nudge)
+        }
         try {
-            context.getSystemService(NotificationManager::class.java)?.notify(1000 + (id % 100_000).toInt(), n)
+            context.getSystemService(NotificationManager::class.java)?.notify(1000 + ((id * 4 + stage) % 100_000).toInt(), b.build())
         } catch (_: SecurityException) {
         }
-        Core.reminderBuzz()
-        Core.prefs.reminders = Core.prefs.reminders - id
-        Inbox.add("reminder", "reminder:$id", Core.res().getString(R.string.reminder_title), text, "tasks", id)
+        if (stage == AT_DUE) Core.reminderBuzz()
+        Core.prefs.reminders = Core.prefs.reminders - (id * 4 + stage)
+        Inbox.add("reminder", "reminder:$id:$stage", title, text, "tasks", id)
     }
 }
 
@@ -142,6 +175,7 @@ object Morning {
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Core.init(context)
-        Reminders.show(context, intent.getLongExtra("id", 0), intent.getStringExtra("text").orEmpty())
+        Reminders.show(context, intent.getLongExtra("id", 0), intent.getStringExtra("text").orEmpty(),
+            intent.getIntExtra("stage", 0), intent.getStringExtra("kind") ?: "mine", intent.getStringExtra("mate").orEmpty())
     }
 }

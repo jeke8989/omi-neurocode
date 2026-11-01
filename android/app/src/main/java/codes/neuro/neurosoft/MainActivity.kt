@@ -40,7 +40,17 @@ class MainActivity : FragmentActivity() {  // FragmentActivity — для окн
         when {
             open == "tasks" -> {
                 Nav.reset(Route.Home)
-                codes.neuro.neurosoft.ui.HomeState.page.value = 1
+                codes.neuro.neurosoft.ui.HomeState.page.value = 0  // «Обещания»
+            }
+            open.startsWith("due:") -> {  // «Другой срок» из карточки обещания
+                Nav.reset(Route.Home)
+                codes.neuro.neurosoft.ui.HomeState.page.value = 0
+                codes.neuro.neurosoft.ui.HomeState.dueTask.value = open.removePrefix("due:").toLongOrNull()
+            }
+            open.startsWith("nudge:") -> {  // «Напомнить ему» из напоминания о сроке
+                Nav.reset(Route.Home)
+                codes.neuro.neurosoft.ui.HomeState.page.value = 0
+                codes.neuro.neurosoft.ui.HomeState.nudgeTask.value = open.removePrefix("nudge:").toLongOrNull()
             }
             open == "wake" -> Core.wakeFromStandby(this, fromBackground = false)  // «Кулон снова рядом»
             open == "chat" -> Nav.push(Route.Chat())  // ответ задания по расписанию

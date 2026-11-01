@@ -149,6 +149,13 @@ fun SettingsScreen() {
                     Core.prefs.taskPrompts = it
                 }, icon = Icons.Tasks)
             }
+            item {
+                var evening by remember { mutableStateOf(Core.prefs.eveningDigest) }
+                ToggleRow(stringResource(R.string.evening_setting), evening, {
+                    evening = it
+                    Core.prefs.eveningDigest = it
+                }, icon = Icons.Moon)
+            }
         }
 
         Group(stringResource(R.string.settings_people_diary)) {

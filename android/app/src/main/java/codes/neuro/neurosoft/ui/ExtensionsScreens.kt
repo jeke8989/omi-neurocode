@@ -127,16 +127,6 @@ fun ExtensionsScreen() {
                         }
                     }
                 }
-                Group(stringResource(R.string.ext_add)) {
-                    item {
-                        ListRow(stringResource(R.string.ext_build),
-                            icon = Icons.Sparkle, accent = true, chevron = true, onClick = { Nav.push(Route.ExtensionBuilder) })
-                    }
-                    item {
-                        ListRow(stringResource(R.string.mcp_title),
-                            icon = Icons.Link, chevron = true, onClick = { Nav.push(Route.McpAccess) })
-                    }
-                }
                 if (available.isNotEmpty()) {
                     SectionTitle(stringResource(R.string.marketplace))
                     available.forEach { e ->
@@ -155,13 +145,21 @@ fun ExtensionsScreen() {
                         }
                     }
                 }
-                // для разработчиков: свой manifest.json по ссылке — свёрнуто
+                // для разработчиков: собрать интеграцию с ассистентом, Mnemo в Claude/Cursor, свой manifest.json — свёрнуто
                 Group {
                     item {
-                        ListRow(stringResource(R.string.own_extension), icon = Icons.Code, chevron = true,
+                        ListRow(stringResource(R.string.ext_developers), icon = Icons.Code, chevron = true,
                             onClick = { byLink = !byLink })
                     }
                     if (byLink) {
+                        item {
+                            ListRow(stringResource(R.string.ext_build), icon = Icons.Sparkle, chevron = true,
+                                onClick = { Nav.push(Route.ExtensionBuilder) })
+                        }
+                        item {
+                            ListRow(stringResource(R.string.mcp_title), icon = Icons.Link, chevron = true,
+                                onClick = { Nav.push(Route.McpAccess) })
+                        }
                         item { FieldRow(stringResource(R.string.manifest_link), manifestUrl, { manifestUrl = it },
                             "https://…/manifest.json", keyboard = KeyboardType.Uri) }
                         item { ListRow(stringResource(R.string.install_by_link), icon = Icons.Check, accent = true,
