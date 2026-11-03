@@ -94,6 +94,7 @@ THRESHOLDS = {
 }
 
 MAX_AUTO_PRINTS = 40              # дообученных без подтверждения отпечатков на человека (свежие)
+MAX_CLUSTER_UNITS = 2000          # фраз на кластеризацию разговора (матрица сходств ~16 МБ)
 CLEAN_KEY = "voices.cleaned_v2"   # разовая уборка чужих отпечатков
 RECHECK_KEY = "voices.recheck"    # разговоры, которые после уборки подписываем заново
 
@@ -621,6 +622,25 @@ def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict
     Матрица сходств считается один раз, после слияния пересчитывается только строка нового голоса:
     разговор на 1500 фраз — секунды (раньше перебор всех пар на каждом шаге занимал десятки минут
     и держал расшифровку)."""
+    if len(units) > MAX_CLUSTER_UNITS:
+        # очень длинная «беседа» (весь день без пауз): голоса — по самым длинным фразам, остальные — к
+        # ближайшему из найденных голосов (память и время не растут квадратично)
+        ranked = sorted(range(len(units)), key=lambda k: -units[k][1])
+        keep = set(ranked[:MAX_CLUSTER_UNITS])
+        clusters = _cluster([u for k, u in enumerate(units) if k in keep], th, pinned)
+        cents = np.stack([c.centroid for c in clusters]) if clusters else np.zeros((0, len(units[0][2])))
+        for k, (sid, sec, emb) in enumerate(units):
+            if k in keep:
+                continue
+            sims = cents @ _norm(np.asarray(emb, dtype=np.float32)) if len(cents) else np.zeros(0)
+            best = int(np.argmax(sims)) if len(sims) else -1
+            if best >= 0 and sims[best] >= th:
+                clusters[best].add(sid, sec, emb)
+            else:
+                c = _Cluster()
+                c.add(sid, sec, emb)
+                clusters.append(c)
+        return clusters
     n = len(units)
     if n == 0:
         return []
@@ -629,7 +649,7 @@ def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict
     members: list[list[int]] = [[i] for i in range(n)]
     owners: list[set[int]] = [{pinned[sid]} if sid in pinned else set() for sid, _, _ in units]
     active = np.ones(n, dtype=bool)
-    sims = cents @ cents.T
+    sims = (cents @ cents.T).astype(np.float32)
     np.fill_diagonal(sims, -np.inf)
     marked = [i for i in range(n) if owners[i]]
     for x in marked:  # подписанные пользователем разными людьми — никогда в один голос

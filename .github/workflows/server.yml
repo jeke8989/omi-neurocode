@@ -115,4 +115,5 @@ jobs:
         run: |
           [ -f ~/.ssh/deploy ] || exit 0
           sleep 60   # фоновая работа после перезапуска (шифрование старых данных) успевает пройти
-          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "root@$HOST" status || true
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "root@$HOST" status || true

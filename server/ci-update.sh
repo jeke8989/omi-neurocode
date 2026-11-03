@@ -160,13 +160,16 @@ drop_prev() {
 # состояние сервера строками ::notice:: — без логов и секретов
 diag() {
   trap - ERR
+  # каждая команда — с ограничением по времени: зависший docker или база не держат статус (и SSH) вечно
+  dc() { timeout 60 docker compose "$@"; }
+  echo "статус: $(date -u +%H:%M:%S) UTC"
   local ps cs ex mem
-  ps=$(docker compose ps -a --format '{{.Service}}: {{.Status}}' 2>/dev/null | tr '\n' ';' || true)
-  cs=$(for c in $(docker compose ps -aq 2>/dev/null || true); do
-         docker inspect -f '{{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$c" 2>/dev/null || true
+  ps=$(dc ps -a --format '{{.Service}}: {{.Status}}' 2>/dev/null | tr '\n' ';' || true)
+  cs=$(for c in $(dc ps -aq 2>/dev/null || true); do
+         timeout 20 docker inspect -f '{{.Name}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}' "$c" 2>/dev/null || true
        done | tr '\n' ';')
   ex=$(for s in gateway stt agent db; do
-         printf '%s: %s; ' "$s" "$(docker compose logs "$s" --tail 300 2>&1 \
+         printf '%s: %s; ' "$s" "$(dc logs "$s" --tail 300 2>&1 \
            | grep -oE '[A-Za-z]+(Error|Exception)|No space left on device|Illegal instruction|out of memory|Killed|PANIC' \
            | sort | uniq -c | sort -rn | head -5 | awk '{print $2"x"$1}' | tr '\n' ' ' || true)"
        done)
@@ -178,7 +181,7 @@ diag() {
   # где именно падает (файл, строка, тип ошибки) — без содержимого
   local tb
   tb=$(for sv in gateway stt agent; do
-         docker compose logs "$sv" --tail 400 2>&1 | grep -E '^\S+\s+\|\s+(  File "/app/[^"]+", line [0-9]+, in \w+|(Attribute|Type|Key|Name|Index|Value)Error: )' \
+         dc logs "$sv" --tail 400 2>&1 | grep -E '^\S+\s+\|\s+(  File "/app/[^"]+", line [0-9]+, in \w+|(Attribute|Type|Key|Name|Index|Value)Error: )' \
            | sed -E 's/^\S+\s+\|\s+//; s/(Error: .{0,90}).*/\1/' | tail -4 | sed "s/^/$sv: /" || true
        done | tr '\n' ' ' | cut -c1-900 || true)
   if [ -n "$tb" ]; then echo "::notice title=Последняя ошибка::$tb"; fi
@@ -188,15 +191,15 @@ diag() {
      || ' выход=' || coalesce(sum(completion_tokens),0) || ' $=' || round(coalesce(sum(cost),0)::numeric, 3)
      FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY task, model ORDER BY sum(cost) DESC NULLS LAST LIMIT 15"
   local ai_tasks ai_days ai_total
-  ai_tasks=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
+  ai_tasks=$(dc exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
   q="SELECT to_char(d, 'DD.MM') || ' $' || round(s::numeric, 3) || ' (' || n || ')'
      FROM (SELECT (created_at AT TIME ZONE 'Europe/Moscow')::date AS d, coalesce(sum(cost), 0) AS s, count(*) AS n
            FROM llm_usage WHERE created_at > now() - interval '7 days' GROUP BY 1) x ORDER BY d"
-  ai_days=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
+  ai_days=$(dc exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ';' || true)
   q="SELECT 'всего с ' || to_char(min(created_at) AT TIME ZONE 'Europe/Moscow', 'DD.MM HH24:MI') || ': $'
      || round(coalesce(sum(cost), 0)::numeric, 3) || ' за ' || round(extract(epoch FROM now() - min(created_at)) / 86400.0, 1)
      || ' дн.' FROM llm_usage"
-  ai_total=$(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)
+  ai_total=$(dc exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)
   echo "::notice title=ИИ::$ai_total | по дням: $ai_days | по задачам за 7 дней: $ai_tasks"
   local vol
   vol="SELECT 'разговоров=' || count(*) || ' фраз=' || (SELECT count(*) FROM segments WHERE started_at > now() - interval '7 days')
@@ -205,11 +208,11 @@ diag() {
      FROM conversations WHERE started_at > now() - interval '7 days'"
   # вопросы с кнопки: как заканчивались, сколько ждали ответа (только счётчики, без текста)
   local asks lat
-  asks=$(docker compose logs gateway --since 168h 2>&1 \
+  asks=$(dc logs gateway --since 168h 2>&1 \
     | grep -oE 'ask from [^ ]+ [0-9.]+s audio, end=[a-z]+|ask answered in [0-9]+ms \([a-z_]+\)( pending)?( cancelled)?|ask failed|ask transcription failed|phone left before the answer|ask cancelled while listening' \
     | sed -E 's/ask from [^ ]+ [0-9.]+s audio, end=/конец=/; s/ask answered in [0-9]+ms \(([a-z_]+)\)/ответ-\1/; s/ /_/g' \
     | sort | uniq -c | sort -rn | awk '{print $2"x"$1}' | tr '\n' ' ' || true)
-  lat=$(docker compose logs gateway --since 168h 2>&1 | grep -oE 'ask answered in [0-9]+ms' | grep -oE '[0-9]+' \
+  lat=$(dc logs gateway --since 168h 2>&1 | grep -oE 'ask answered in [0-9]+ms' | grep -oE '[0-9]+' \
     | awk '{n++; s+=$1; if ($1>m) m=$1} END {if (n) printf "ждали в среднем %.1f с, максимум %.1f с", s/n/1000, m/1000}' || true)
   q="SELECT status || '=' || count(*) FROM agent_runs WHERE channel = 'voice' AND created_at > now() - interval '7 days'
      GROUP BY status ORDER BY 1"
@@ -222,7 +225,7 @@ diag() {
      || ', из памяти кулона всего ' || (SELECT count(*) FROM audio_chunks WHERE offline)
      FROM audio_chunks WHERE status IN ('pending', 'processing')"
   # GitHub показывает не больше 10 заметок на шаг: очередь и кнопка — одной строкой
-  echo "::notice title=Очередь и кнопка::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qq" 2>/dev/null | tr '\n' ' ' || true) | кнопка за 7 дней: $asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
+  echo "::notice title=Очередь и кнопка::$(dc exec -T db psql -U neuro -d neuro -tAc "$qq" 2>/dev/null | tr '\n' ' ' || true) | кнопка за 7 дней: $asks; $lat; запуски: $(dc exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   # голоса и память: сколько спрятано в фон и в архив (только счётчики)
   local qp
   qp="SELECT 'людей ' || count(*) FILTER (WHERE kind IS NULL OR kind = 'person') || ', фон: реклама/ТВ '
@@ -247,9 +250,9 @@ diag() {
      || ' (последнее: ' || coalesce((SELECT split_part(last_status, ':', 1) FROM agent_schedules WHERE last_run_at IS NOT NULL
                                      ORDER BY last_run_at DESC LIMIT 1), 'нет') || ')'
      FROM people"
-  echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
+  echo "::notice title=Голоса и память::$(dc exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   # узнавание голосов: только номера людей и числа (имён и текста нет — логи CI публичные)
-  echo "::notice title=Узнавание голосов::$(timeout 90 docker compose exec -T stt python -c 'from neuro import db, voices
+  echo "::notice title=Узнавание голосов::$(dc exec -T stt python -c 'from neuro import db, voices
 with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cut -c1-1800 || true)"
   # обещания: сколько найдено за 7 дней, как распределились, сколько отклонено — только счётчики
   local qt
@@ -266,7 +269,7 @@ with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cu
      || ' | отклонено по уверенности: <0.7 ' || count(*) FILTER (WHERE status = 'dismissed' AND confidence < 0.7)
      || ', ≥0.85 ' || count(*) FILTER (WHERE status = 'dismissed' AND confidence >= 0.85)
      FROM tasks WHERE created_at > now() - interval '7 days'"
-  echo "::notice title=Обещания::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qt" 2>/dev/null | tr '\n' ' ' || true)"
+  echo "::notice title=Обещания::$(dc exec -T db psql -U neuro -d neuro -tAc "$qt" 2>/dev/null | tr '\n' ' ' || true)"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
   q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')
      || ' из ' || (SELECT count(*) FROM segments)
@@ -277,11 +280,11 @@ with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cu
      || ', людей ' || (SELECT count(*) FROM people WHERE name NOT LIKE 'enc_:%%')"
   # сервисы одной кнопкой: только статус (имена аккаунтов и токены не печатаем — логи CI публичные)
   local svc
-  svc=$(docker compose exec -T db psql -U neuro -d neuro -tAc "SELECT string_agg(id || '=' || status
+  svc=$(dc exec -T db psql -U neuro -d neuro -tAc "SELECT string_agg(id || '=' || status
         || ' инструментов ' || coalesce(jsonb_array_length(tools), 0)
         || ' чтение ' || coalesce(settings->>'read', 'true') || ' изменение ' || coalesce(settings->>'write', 'true')
         || CASE WHEN error IS NOT NULL THEN ' (ошибка)' ELSE '' END, ', ') FROM connections" 2>/dev/null | tr -d '\n' || true)
-  echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true) | сервисы: ${svc:-нет}"
+  echo "::notice title=Данные::шифрование $(grep -qE '^DATA_KEY=.+' .env 2>/dev/null && echo включено || echo выключено); $(dc exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true) | за 7 дней: $(dc exec -T db psql -U neuro -d neuro -tAc "$vol" 2>/dev/null | tr '\n' ';' || true) | сервисы: ${svc:-нет}"
   trap 'echo "::error title=Обновление сервера::Команда упала (строка $LINENO): $BASH_COMMAND"' ERR
 }
 
