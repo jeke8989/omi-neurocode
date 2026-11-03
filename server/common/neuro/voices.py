@@ -616,30 +616,56 @@ class _Cluster:
 
 def _cluster(units: list[tuple[int, float, np.ndarray]], th: float, pinned: dict[int, int]) -> list[_Cluster]:
     """Агломеративная кластеризация отрезков по голосу (центроидная связь). Отрезки, которые пользователь
-    подписал разными людьми, в один голос не склеиваются."""
-    clusters: list[_Cluster] = []
-    owners: list[set[int]] = []
-    for sid, sec, emb in units:
-        c = _Cluster()
-        c.add(sid, sec, emb)
-        clusters.append(c)
-        owners.append({pinned[sid]} if sid in pinned else set())
-    while len(clusters) > 1:
-        best, bi, bj = -1.0, -1, -1
-        cents = [c.centroid for c in clusters]
-        for i in range(len(clusters)):
-            for j in range(i + 1, len(clusters)):
-                if owners[i] and owners[j] and owners[i] != owners[j]:
-                    continue
-                sim = float(cents[i] @ cents[j])
-                if sim > best:
-                    best, bi, bj = sim, i, j
-        if best < th:
+    подписал разными людьми, в один голос не склеиваются.
+
+    Матрица сходств считается один раз, после слияния пересчитывается только строка нового голоса:
+    разговор на 1500 фраз — секунды (раньше перебор всех пар на каждом шаге занимал десятки минут
+    и держал расшифровку)."""
+    n = len(units)
+    if n == 0:
+        return []
+    totals = np.stack([np.asarray(emb, dtype=np.float64) * max(sec, 0.5) for _, sec, emb in units])
+    cents = totals / (np.linalg.norm(totals, axis=1, keepdims=True) + 1e-9)
+    members: list[list[int]] = [[i] for i in range(n)]
+    owners: list[set[int]] = [{pinned[sid]} if sid in pinned else set() for sid, _, _ in units]
+    active = np.ones(n, dtype=bool)
+    sims = cents @ cents.T
+    np.fill_diagonal(sims, -np.inf)
+    marked = [i for i in range(n) if owners[i]]
+    for x in marked:  # подписанные пользователем разными людьми — никогда в один голос
+        for y in marked:
+            if owners[x] != owners[y]:
+                sims[x, y] = -np.inf
+    while active.sum() > 1:
+        flat = int(np.argmax(sims))
+        i, j = divmod(flat, n)
+        if not np.isfinite(sims[i, j]) or sims[i, j] < th:
             break
-        for sid, sec, emb in clusters[bj].segs:
-            clusters[bi].add(sid, sec, emb)
-        owners[bi] |= owners[bj]
-        del clusters[bj], owners[bj]
+        if j < i:
+            i, j = j, i
+        totals[i] += totals[j]
+        members[i] += members[j]
+        owners[i] |= owners[j]
+        active[j] = False
+        sims[j, :] = -np.inf
+        sims[:, j] = -np.inf
+        cents[i] = totals[i] / (np.linalg.norm(totals[i]) + 1e-9)
+        row = cents @ cents[i]
+        row[~active] = -np.inf
+        row[i] = -np.inf
+        if owners[i]:
+            for k in np.flatnonzero(active):
+                if owners[k] and owners[k] != owners[i]:
+                    row[k] = -np.inf
+        sims[i, :] = row
+        sims[:, i] = row
+    clusters: list[_Cluster] = []
+    for i in np.flatnonzero(active):
+        c = _Cluster()
+        for m in members[i]:
+            sid, sec, emb = units[m]
+            c.add(sid, sec, emb)
+        clusters.append(c)
     return clusters
 
 

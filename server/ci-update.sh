@@ -249,7 +249,7 @@ diag() {
      FROM people"
   echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   # узнавание голосов: только номера людей и числа (имён и текста нет — логи CI публичные)
-  echo "::notice title=Узнавание голосов::$(docker compose exec -T stt python -c 'from neuro import db, voices
+  echo "::notice title=Узнавание голосов::$(timeout 90 docker compose exec -T stt python -c 'from neuro import db, voices
 with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cut -c1-1800 || true)"
   # обещания: сколько найдено за 7 дней, как распределились, сколько отклонено — только счётчики
   local qt
