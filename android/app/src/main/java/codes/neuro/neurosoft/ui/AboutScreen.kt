@@ -26,7 +26,7 @@ import org.json.JSONObject
  * Имя и занятие помогают итогам, задачам и ассистенту (называют по имени, понимают контекст работы),
  * а фразы, прочитанные в кулон, дают точный отпечаток голоса: «вы» в расшифровках подписаны с первого дня.
  */
-private val GOALS = listOf(R.string.goal_commitments, R.string.goal_people, R.string.goal_meetings, R.string.goal_diary,
+private val GOALS = listOf(R.string.goal_commitments, R.string.goal_people, R.string.goal_meetings,
     R.string.goal_ideas, R.string.goal_family, R.string.goal_health)
 
 private val PHRASES = listOf(R.string.intro_phrase_1, R.string.intro_phrase_2, R.string.intro_phrase_3,

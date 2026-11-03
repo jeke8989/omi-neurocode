@@ -146,7 +146,7 @@
     <string name="device_settings">Kolye</string>
     <string name="diagnostics">Tanılama</string>
     <string name="diagnostics_show">Ayrıntıları göster</string>
-    <string name="diary_and_photos">Günlük ve fotoğraflar</string>
+    <string name="diary_and_photos">Konum ve fotoğraflar</string>
     <string name="diary_build">Günün hikâyesini oluştur</string>
     <string name="diary_build_today">Bugünü oluştur</string>
     <string name="diary_empty_text">Asistan her gün bir hikâye oluşturur: nereye gittiniz, ne konuştunuz, neye karar verdiniz. Olaylarla ilgili fotoğraflar seçtiğiniz stilde düzenlenir.</string>
@@ -697,7 +697,7 @@
     <string name="server_reconnect_text">Sunucu erişim anahtarını değiştirdi. Yeniden bağlanmak için yeni kodu girin</string>
     <string name="settings">Ayarlar</string>
     <string name="settings_app">Uygulama</string>
-    <string name="settings_people_diary">Kişiler ve günlük</string>
+    <string name="settings_people_diary">Kişiler ve yerler</string>
     <string name="setup">Kurulum</string>
     <string name="share">Paylaş</string>
     <string name="show">Göster</string>

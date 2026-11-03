@@ -501,3 +501,8 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS counterpart_id BIGINT REFERENCES peop
 -- обещание в календаре телефона: id встречи и её длительность (минуты)
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS calendar_event_id BIGINT;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS calendar_minutes INTEGER;
+-- дневник убран из приложения (проще): один раз выключаем его сводки, чтобы не тратить ИИ
+UPDATE settings SET value = '0', updated_at = now() WHERE key = 'feature.diary'
+    AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'feature.diary_off_v1');
+INSERT INTO settings (key, value) VALUES ('feature.diary', '0') ON CONFLICT (key) DO NOTHING;
+INSERT INTO settings (key, value) VALUES ('feature.diary_off_v1', '1') ON CONFLICT (key) DO NOTHING;

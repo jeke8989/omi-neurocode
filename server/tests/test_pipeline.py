@@ -152,7 +152,7 @@ def test_full_pipeline(conn, monkeypatch):
             return {"title": "Отчёт к пятнице", "summary": "Договорились подготовить отчёт.",
                     "tasks": [{"text": "Подготовить отчёт", "due": "пятница", "who": "Владелец", "kind": "mine",
                                "confidence": 0.9, "evidence": "подготовлю отчёт к пятнице", "target": "notion"},
-                              {"text": "Починить синхронизацию", "due": "null", "target": "github", "confidence": 0.8,
+                              {"text": "Починить синхронизацию", "due": "null", "target": "github", "confidence": 0.9,
                                "evidence": "починю синхронизацию"},
                               # обсуждение, а не договорённость — не задача
                               {"text": "Посмотреть билеты", "confidence": 0.3, "evidence": "может, посмотрим билеты"},

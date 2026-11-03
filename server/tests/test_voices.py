@@ -527,3 +527,51 @@ def test_background_voices_are_not_people(clean, monkeypatch):
     assert conn.execute("SELECT kind FROM people WHERE id = %s", (noise,)).fetchone()["kind"] == "crowd"
     assert conn.execute("SELECT kind FROM people WHERE id = %s", (anna_id,)).fetchone()["kind"] is None
     assert voices.prune_background(conn) == 0  # только один раз
+
+
+def test_frequent_voice_does_not_take_other_voices(clean):
+    """Самый частый собеседник с кучей образцов (среди них — чужие, попавшие при дообучении) не «забирает»
+    чужой голос; голос посередине между двумя людьми остаётся без подписи; разовая уборка выкидывает
+    чужие образцы и подписывает свежие разговоры заново — без двойного учёта речи."""
+    conn = clean
+    from neuro import voices
+    m = voices.model()
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5), (OWNER, 2.0), (ANNA, 2.5))
+    rows = run_chunk(conn, pcm, Timed(spans), minutes_ago=30)
+    anna = rows[1]["person_id"]
+    conn.execute("DELETE FROM voiceprints WHERE person_id = %s", (anna,))
+    for s in range(20):
+        voices.add_voiceprint(conn, anna, m.embed(synth(**ANNA, sec=3, seed=400 + s)), 3.0, confirmed=s < 5)
+    for k in range(4):  # чужой голос среди дообученных образцов Анны
+        conn.execute("""INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed, segment_id)
+                        VALUES (%s, %s, 3, %s, false, %s)""",
+                     (anna, voices.vec(m.embed(synth(**BORIS, sec=3, seed=200 + k))), voices.backend_name(), 9000 + k))
+    voices.recompute_centroid(conn, anna)
+
+    boris = m.embed(synth(**BORIS, sec=3, seed=300))
+    assert voices.decide(voices.rank_people(conn, boris), 3.0)[0] is None  # Борис — не Анна
+    anna_again = m.embed(synth(**ANNA, sec=3, seed=301))
+    assert voices.decide(voices.rank_people(conn, anna_again), 3.0)[0]["id"] == anna
+
+    # два кандидата почти одинаково похожи — не подписываем никого
+    th = voices.thresholds()
+    a, b = {"id": 1}, {"id": 2}
+    assert voices.decide([(a, th.match + th.margin / 2), (b, th.match)], 5.0)[0] is None
+    assert voices.decide([(a, th.match + 2 * th.margin), (b, th.match - th.margin)], 5.0)[0] is a
+    assert voices.decide([(a, th.sure), (b, th.sure - 0.001)], 5.0)[0] is a  # очень похож — неважно, кто второй
+
+    speech = conn.execute("SELECT speech_sec FROM people WHERE id = %s", (anna,)).fetchone()["speech_sec"]
+    res = voices.clean_prints(conn)
+    assert res["removed"] >= 4 and res["recheck"] == 1
+    assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s AND segment_id >= 9000",
+                        (anna,)).fetchone()["n"] == 0
+    assert voices.clean_prints(conn)["removed"] == 0  # только один раз
+    conv = conn.execute("SELECT conversation_id FROM segments WHERE id = %s", (rows[0]["id"],)).fetchone()
+    assert voices.pending_conversations(conn, 0) == [conv["conversation_id"]]
+    voices.finalize_conversation(conn, conv["conversation_id"])
+    again = conn.execute("SELECT person_id FROM segments WHERE conversation_id = %s ORDER BY started_at",
+                         (conv["conversation_id"],)).fetchall()
+    assert [r["person_id"] for r in again] == [r["person_id"] for r in rows]
+    assert conn.execute("SELECT speech_sec FROM people WHERE id = %s", (anna,)).fetchone()["speech_sec"] == speech
+    assert voices._recheck_ids(conn) == set()
+    assert "фраз за 7 дней" in voices.diagnostics(conn)

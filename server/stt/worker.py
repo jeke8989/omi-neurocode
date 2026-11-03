@@ -381,6 +381,7 @@ def main():
     voices.warm_up()
     migrated = False
     pruned = False
+    cleaned = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -405,6 +406,15 @@ def main():
                             log.info("voices: owner voice updated from button questions")
                     except Exception:  # noqa: BLE001
                         log.exception("voices: owner enrollment failed")
+                    if not cleaned:
+                        cleaned = True
+                        try:
+                            res = voices.clean_prints(conn)
+                            if res["removed"] or res["recheck"]:
+                                log.info("voices: removed %d foreign voiceprints of %d people, %d conversations "
+                                         "to sign again", res["removed"], res["people"], res["recheck"])
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: voiceprint cleanup failed")
                     finalize_voices(conn)
                     if not pruned:
                         pruned = True

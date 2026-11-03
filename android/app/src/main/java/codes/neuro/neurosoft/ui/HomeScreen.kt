@@ -46,7 +46,6 @@ import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.ble.ConnState
 import codes.neuro.neurosoft.ble.OfflineSync
 import codes.neuro.neurosoft.net.ConversationItem
-import codes.neuro.neurosoft.net.DiaryDay
 import codes.neuro.neurosoft.voice.VoiceAssistant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,7 +53,7 @@ import java.time.LocalDate
 
 @Composable
 fun HomeScreen() {
-    // главное — обещания; день — лента событий; личное — дневник, люди, созвездие
+    // главное — обещания; день — лента событий; люди — кого узнаём по голосу
     val pager = rememberPagerState(initialPage = HomeState.page.value.coerceIn(0, 2)) { 3 }
     val scope = rememberCoroutineScope()
     var calendar by remember { mutableStateOf(false) }
@@ -63,7 +62,7 @@ fun HomeScreen() {
     Column(Modifier.fillMaxSize()) {
         HomeTopBar(onCalendar = { calendar = true })
         TextTabs(
-            listOf(stringResource(R.string.tab_promises), stringResource(R.string.tab_day), stringResource(R.string.tab_personal)),
+            listOf(stringResource(R.string.tab_promises), stringResource(R.string.tab_day), stringResource(R.string.tab_people)),
             pager.currentPage,
         ) { scope.launch { pager.animateScrollToPage(it) } }
         // страницу меняют и снаружи (уведомление «Обещания», ссылка на задачу в чате)
@@ -74,7 +73,7 @@ fun HomeScreen() {
             when (page) {
                 0 -> TasksTab()
                 1 -> HomeTab()
-                else -> PersonalTab()
+                else -> PeopleTab()
             }
         }
         BottomAskBar()
@@ -89,18 +88,6 @@ fun HomeScreen() {
                 scope.launch { pager.animateScrollToPage(1) }
             },
         )
-    }
-}
-
-/** «Личное»: дневник жизни и люди (с созвездием) — второй слой, всё под одной вкладкой. */
-@Composable
-fun PersonalTab() {
-    var section by HomeState.personal
-    Column(Modifier.fillMaxSize()) {
-        LazyRowChips(listOf(stringResource(R.string.tab_diary), stringResource(R.string.tab_people)), section) { section = it }
-        Box(Modifier.weight(1f)) {
-            if (section == 0) DiaryTab() else PeopleTab()
-        }
     }
 }
 
@@ -261,16 +248,13 @@ fun HomeTab() {
     val today = todayIso()
     val daysRes by Repo.days.state.collectAsState()
     val feedRes by Repo.events(day).state.collectAsState()
-    val diaryRes by Repo.diary.state.collectAsState()
     val fmt = rememberFmt()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(day) {
-        var n = 0
         while (true) {
             Repo.refreshAll(day)
-            if (n++ % 6 == 0) Repo.diary.refresh()
             delay(if (day == todayIso()) 20_000 else 120_000)
         }
     }
@@ -281,7 +265,6 @@ fun HomeTab() {
             scope.launch {
                 refreshing = true
                 Repo.refreshAll(day)
-                Repo.diary.refresh()
                 refreshing = false
             }
         },
@@ -292,11 +275,6 @@ fun HomeTab() {
             item(key = "days") { DayStrip(daysRes.data?.map { it.day } ?: emptyList(), day) { HomeState.day.value = it } }
             if (day == today) {
                 item(key = "answer") { AssistantCard() }
-                val summaries = diaryRes.data?.days?.filter { it.status == "done" && !it.title.isNullOrBlank() }.orEmpty()
-                if (summaries.isNotEmpty()) {
-                    item(key = "summaries-title") { SectionTitle(stringResource(R.string.day_summaries)) }
-                    item(key = "summaries") { SummariesCarousel(summaries) }
-                }
             }
             val feed = feedRes.data
             item(key = "day-title") {
@@ -558,35 +536,6 @@ private fun AssistantCard() {
         if (voice.pending && final == null) {
             Spacer(Modifier.height(10.dp))
             Txt(stringResource(R.string.answer_in_chat), T.smallStrong, c.lens)
-        }
-    }
-}
-
-// ======================================================================= сводки дня
-@Composable
-private fun SummariesCarousel(days: List<DiaryDay>) {
-    val fmt = rememberFmt()
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(days.take(10), key = { it.day }) { d ->
-            Column(
-                Modifier.width(264.dp).clip(RoundedCornerShape(22.dp)).background(Mn.c.paper)
-                    .tap({ Nav.push(Route.Day(d.day)) }),
-            ) {
-                DayCover(d, Modifier.fillMaxWidth().height(132.dp))
-                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp)) {
-                    Txt(d.title ?: "", T.bodyStrong, maxLines = 1)
-                    Spacer(Modifier.height(2.dp))
-                    val n = d.stats["conversations"] ?: 0
-                    val minutes = d.stats["minutes"] ?: 0
-                    Txt(listOfNotNull(fmt.dayShortTitle(d.day),
-                        if (n > 0) plural(R.plurals.conversations, n) else null,
-                        if (minutes > 0) fmt.duration(minutes * 60L) else null).joinToString(", "),
-                        T.caption, Mn.c.graphite, maxLines = 1)
-                }
-            }
         }
     }
 }

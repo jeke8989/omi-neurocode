@@ -161,16 +161,8 @@ fun SettingsScreen() {
         Group(stringResource(R.string.settings_people_diary)) {
             item { ListRow(stringResource(R.string.voices_title), icon = Icons.People, chevron = true,
                 onClick = { Nav.push(Route.VoicesSettings) }) }
-            item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Book, chevron = true,
-                value = features.data?.let { stringResource(if (it.diary) R.string.on else R.string.off) },
+            item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Pin, chevron = true,
                 onClick = { Nav.push(Route.DiarySettings) }) }
-            item {
-                var morning by remember { mutableStateOf(Core.prefs.morningSummary) }
-                ToggleRow(stringResource(R.string.morning_setting), morning, {
-                    morning = it
-                    Core.prefs.morningSummary = it
-                }, icon = Icons.Bell)
-            }
         }
 
         Group(stringResource(R.string.settings_app)) {
@@ -397,28 +389,12 @@ fun VoiceSettingsScreen() {
     }
 }
 
-// ======================================================================= дневник и фото
+// ======================================================================= место и фото (дневник убран — проще)
 @Composable
 fun DiarySettingsScreen() {
     val context = LocalContext.current
-    val res by Repo.features.state.collectAsState()
-    val scope = rememberCoroutineScope()
     var location by remember { mutableStateOf(Core.prefs.locationEnabled) }
     var photoAuto by remember { mutableStateOf(Core.prefs.photoAutoImport) }
-    var error by remember { mutableStateOf<Throwable?>(null) }
-    LaunchedEffect(Unit) { Repo.features.refresh() }
-
-    fun set(changes: Map<String, Any>) {
-        scope.launch {
-            try {
-                Api.setFeatures(changes)
-                Repo.features.refresh()
-                error = null
-            } catch (e: Exception) {
-                error = e
-            }
-        }
-    }
     val locationPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val ok = Core.locationPermissionGranted()
         location = ok
@@ -431,13 +407,8 @@ fun DiarySettingsScreen() {
         Core.prefs.photoAutoImport = ok
         if (ok) Core.syncPhotosNow()
     }
-    val f = res.data
-
     SettingsPage(stringResource(R.string.diary_and_photos)) {
-        error?.let { StaleNote(it) }
         Group {
-            item { ToggleRow(stringResource(R.string.day_feed), f?.diary ?: true, { set(mapOf("diary" to it)) },
-                icon = Icons.Book, enabled = f != null) }
             item {
                 ToggleRow(stringResource(R.string.location_while_recording), location, { on ->
                     if (on && !Core.locationPermissionGranted()) locationPerm.launch(Permissions.location())

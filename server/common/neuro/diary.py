@@ -38,7 +38,7 @@ STYLE_SUFFIX = (" Keep the composition, people, places and objects recognizable.
                 " watermarks or logos.")
 
 # стилизация фото выключена: ~$0.07 за картинку при почти нулевой пользе (дневник показывает оригиналы)
-DEFAULTS = {"feature.diary": "1", "feature.photo_ai": "1", "feature.photo_style": "0", "diary.style": "watercolor",
+DEFAULTS = {"feature.diary": "0", "feature.photo_ai": "1", "feature.photo_style": "0", "diary.style": "watercolor",
             "diary.photos_per_day": "3"}
 
 
@@ -407,10 +407,10 @@ def generate_day(conn, day: date, force: bool = False) -> bool:
 
 # ---------------------------------------------------------------- работа по расписанию (агент)
 def tick(conn):
-    if not enabled(conn, "feature.diary"):
-        return
-    # 1) новые фото: с ИИ — подпись и отбор (дёшево), без ИИ — только время и место (бесплатно)
-    use_ai = enabled(conn, "feature.photo_ai")
+    diary_on = enabled(conn, "feature.diary")
+    # 1) новые фото: с ИИ — подпись и отбор (дёшево), без ИИ — только время и место (бесплатно).
+    # Дневник выключен (по умолчанию) — фото нужны только событиям дня: время и место, без ИИ
+    use_ai = diary_on and enabled(conn, "feature.photo_ai")
     for p in conn.execute("SELECT * FROM photos WHERE status = 'pending' ORDER BY id LIMIT %s",
                           (3 if use_ai else 20,)).fetchall():
         try:
@@ -421,6 +421,8 @@ def tick(conn):
         except Exception as exc:  # noqa: BLE001
             log.warning("photo %s analyze failed: %s", p["id"], exc)
             conn.execute("UPDATE photos SET status = 'failed', error = %s WHERE id = %s", (str(exc)[:300], p["id"]))
+    if not diary_on:
+        return
     # 2) стилизация только выбранных дневником — по одному за проход
     if enabled(conn, "feature.photo_style"):
         style = get_setting(conn, "diary.style")

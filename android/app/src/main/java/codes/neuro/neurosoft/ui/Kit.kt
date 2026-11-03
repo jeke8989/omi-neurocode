@@ -142,8 +142,13 @@ fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
 @Composable
 fun RoundCheck(checked: Boolean, onClick: () -> Unit, description: String) {
     val c = Mn.c
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // крупная зона нажатия (48 dp) и отклик пальцу — понятно, что галочка поставлена с первого раза
     Box(
-        Modifier.size(44.dp).clip(CircleShape).tap(onClick, role = Role.Checkbox),
+        Modifier.size(48.dp).clip(CircleShape).tap({
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+            onClick()
+        }, role = Role.Checkbox),
         contentAlignment = Alignment.Center,
     ) {
         Box(

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import threading
@@ -59,7 +60,6 @@ MIN_MATCH_SEC = 3.0               # «похоже, но не уверены» �
 # отвечают — им «Голос N» не заводим.
 REPLY_GAP_SEC = 4.0
 MIN_REPLIES = 2
-TOP_K = 3                         # сравнение с лучшими образцами человека
 
 
 @dataclass
@@ -70,20 +70,32 @@ class Thresholds:
     learn: float     # достаточно уверенно, чтобы дообучить отпечаток
     merge: float     # два безымянных голоса — один человек (склеиваем сами)
     suggest: float   # безымянный похож на названного — спрашиваем
+    margin: float = 0.05  # насколько лучший кандидат должен обгонять второго
+    sure: float = 0.58    # так похоже, что второй кандидат уже не важен
+    alien: float = 0.35   # образец так далёк от среднего голоса человека, что это чужой голос
+    keep: float = 0.45    # дообученный образец ниже этого — уборка его убирает
+    spread: float = 0.15  # средний голос — без образцов, которые хуже медианы на столько
 
 
 THRESHOLDS = {
     # один человек 0.50–0.77, разные — не выше 0.36 (ResNet34, записи людей)
-    "wespeaker_en_voxceleb_resnet34_LM": Thresholds(same=0.45, match=0.50, maybe=0.40, learn=0.60, merge=0.62,
-                                                     suggest=0.48),
-    # ResNet152: один человек ≥ 0.54 (3 с) и 0.59 (целиком), разные — до 0.30
-    "wespeaker_en_voxceleb_resnet152_LM": Thresholds(same=0.40, match=0.47, maybe=0.37, learn=0.55, merge=0.60,
-                                                      suggest=0.44),
-    "wespeaker_en_voxceleb_resnet293_LM": Thresholds(same=0.40, match=0.47, maybe=0.37, learn=0.55, merge=0.60,
-                                                      suggest=0.44),
+    "wespeaker_en_voxceleb_resnet34_LM": Thresholds(same=0.45, match=0.50, maybe=0.42, learn=0.60, merge=0.62,
+                                                     suggest=0.52, sure=0.60),
+    # ResNet152: один человек ≥ 0.54 (3 с) и 0.59 (целиком), разные — до 0.30 в тишине, но в шуме и через
+    # кулон чужие голоса доходили до 0.40+: «Голос N» подписывался самым частым собеседником. Поэтому
+    # «похоже» — не ниже 0.42 и только с отрывом от второго кандидата.
+    "wespeaker_en_voxceleb_resnet152_LM": Thresholds(same=0.43, match=0.50, maybe=0.42, learn=0.58, merge=0.62,
+                                                      suggest=0.52),
+    "wespeaker_en_voxceleb_resnet293_LM": Thresholds(same=0.43, match=0.50, maybe=0.42, learn=0.58, merge=0.62,
+                                                      suggest=0.52),
     # запасной MFCC-отпечаток (тесты): один голос ≥ 0.998, разные синтетические — не выше 0.95
-    "spectral": Thresholds(same=0.975, match=0.975, maybe=0.96, learn=0.985, merge=0.99, suggest=0.97),
+    "spectral": Thresholds(same=0.975, match=0.975, maybe=0.96, learn=0.985, merge=0.99, suggest=0.97,
+                           margin=0.01, sure=0.99, alien=0.97, keep=0.975, spread=0.015),
 }
+
+MAX_AUTO_PRINTS = 40              # дообученных без подтверждения отпечатков на человека (свежие)
+CLEAN_KEY = "voices.cleaned_v2"   # разовая уборка чужих отпечатков
+RECHECK_KEY = "voices.recheck"    # разговоры, которые после уборки подписываем заново
 
 
 # ======================================================================= признаки (kaldi fbank)
@@ -408,45 +420,86 @@ def _prints(conn, person_id: int, limit: int = 60) -> list[np.ndarray]:
     return [np.asarray(r["embedding"], dtype=np.float32) for r in rows]
 
 
+def _top_mean(sims: list[float]) -> float:
+    """Среднее лучших 20% сходств (не меньше двух). Раньше брали «три лучших» из шестидесяти образцов —
+    у самого частого собеседника среди них почти всегда находились случайно похожие на кого угодно,
+    и он «забирал» чужие голоса."""
+    sims = sorted(sims, reverse=True)
+    k = min(len(sims), max(2, -(-len(sims) // 5)))
+    return float(np.mean(sims[:k]))
+
+
 def score_person(conn, emb: np.ndarray, person: dict) -> float:
-    """Похожесть голоса на человека: лучшее из «со средним отпечатком» и «с 3 самыми похожими образцами»."""
-    sim = cosine(emb, person["centroid"])
-    prints = _prints(conn, person["id"])
-    if prints:
-        sims = sorted((cosine(emb, p) for p in prints), reverse=True)[:TOP_K]
-        sim = max(sim, float(np.mean(sims)))
+    """Похожесть голоса на человека: лучшее из «со средним отпечатком» и «с самыми похожими образцами».
+    Образцы, далёкие от его же среднего (чужой голос, попавший при дообучении), не учитываются."""
+    centroid = np.asarray(person["centroid"], dtype=np.float32)
+    sim = cosine(emb, centroid)
+    floor = thresholds().alien
+    prints = [p for p in _prints(conn, person["id"]) if cosine(p, centroid) >= floor]
+    if len(prints) >= 2:
+        sim = max(sim, _top_mean([cosine(emb, p) for p in prints]))
     return sim
+
+
+def rank_people(conn, emb: np.ndarray, people: list[dict] | None = None, limit: int = 5) -> list[tuple[dict, float]]:
+    """Люди по убыванию похожести на голос (образцы смотрим у пяти лучших по среднему отпечатку)."""
+    cands = [p for p in (people if people is not None else people_vectors(conn)) if len(p["centroid"]) == len(emb)]
+    top = sorted(cands, key=lambda p: cosine(emb, p["centroid"]), reverse=True)[:limit]
+    return sorted(((p, score_person(conn, emb, p)) for p in top), key=lambda t: -t[1])
+
+
+def decide(ranked: list[tuple[dict, float]], seconds: float, th: Thresholds | None = None) -> tuple[dict | None, float, float]:
+    """Кто это — или никто: (человек, сходство, отрыв от второго). Подписываем, только если лучший заметно
+    обгоняет второго: голос «посередине» между двумя людьми честнее оставить без подписи, чем подписать
+    чужим именем."""
+    th = th or thresholds()
+    if not ranked:
+        return None, 0.0, 0.0
+    best, s1 = ranked[0]
+    gap = s1 - (ranked[1][1] if len(ranked) > 1 else 0.0)
+    if s1 >= th.sure or s1 >= th.match and gap >= th.margin \
+            or s1 >= th.maybe and seconds >= MIN_MATCH_SEC and gap >= 2 * th.margin:
+        return best, s1, gap
+    return None, s1, gap
 
 
 def match_person(conn, emb: np.ndarray, exclude: set[int] | frozenset = frozenset(),
                  people: list[dict] | None = None) -> tuple[dict | None, float]:
-    """Самый похожий человек. Образцы смотрим у трёх лучших по среднему отпечатку — быстро и точно."""
-    cands = [p for p in (people if people is not None else people_vectors(conn))
-             if p["id"] not in exclude and len(p["centroid"]) == len(emb)]
-    if not cands:
-        return None, -1.0
-    top = sorted(cands, key=lambda p: cosine(emb, p["centroid"]), reverse=True)[:3]
-    best, best_sim = None, -1.0
-    for p in top:
-        sim = score_person(conn, emb, p)
-        if sim > best_sim:
-            best, best_sim = p, sim
-    return best, best_sim
+    """Самый похожий человек (без решения «он ли это» — для подсказок и уборки дублей)."""
+    ranked = [(p, s) for p, s in rank_people(conn, emb, people) if p["id"] not in exclude]
+    return ranked[0] if ranked else (None, -1.0)
 
 
 def best_person(conn, emb: np.ndarray) -> tuple[dict | None, float]:
     return match_person(conn, emb)
 
 
+def _robust_centroid(embs: list[np.ndarray], weights: list[float]) -> tuple[np.ndarray, np.ndarray]:
+    """Средний отпечаток без выбросов: образцы, сильно непохожие на остальные (чужой голос, шум),
+    в среднее не идут. Возвращает (центр, какие образцы учтены)."""
+    E = np.stack([_norm(np.asarray(e, dtype=np.float32)) for e in embs])
+    w = np.asarray(weights, dtype=np.float32)
+    keep = np.ones(len(E), dtype=bool)
+    th = thresholds()
+    for _ in range(2):
+        c = _norm((E[keep] * w[keep, None]).sum(axis=0))
+        sims = E @ c
+        new = sims >= max(th.alien, float(np.median(sims[keep])) - th.spread)
+        if new.sum() < max(1, (len(E) + 1) // 2):  # выбросами оказалось большинство — разброс естественный
+            break
+        keep = new
+    return _norm((E[keep] * w[keep, None]).sum(axis=0)), keep
+
+
 def recompute_centroid(conn, person_id: int):
     rows = conn.execute(
-        """SELECT embedding FROM voiceprints WHERE person_id = %s AND backend = %s
+        """SELECT embedding, confirmed FROM voiceprints WHERE person_id = %s AND backend = %s
            ORDER BY confirmed DESC, id DESC LIMIT 60""", (person_id, backend_name())).fetchall()
     if not rows:
         conn.execute("UPDATE people SET centroid = NULL, samples = 0 WHERE id = %s", (person_id,))
         return
-    c = np.mean([np.asarray(r["embedding"], dtype=np.float32) for r in rows], axis=0)
-    c = c / (np.linalg.norm(c) + 1e-9)
+    # подтверждённые пользователем образцы весят вдвое больше дообученных
+    c, _ = _robust_centroid([r["embedding"] for r in rows], [2.0 if r["confirmed"] else 1.0 for r in rows])
     conn.execute("UPDATE people SET centroid = %s, samples = %s, backend = %s, updated_at = now() WHERE id = %s",
                  (vec(c), len(rows), backend_name(), person_id))
 
@@ -534,11 +587,8 @@ def identify(conn, voices: list[LocalVoice], pcm: bytes, turns: list[Turn]) -> d
     people = people_vectors(conn)
     out: dict[int, tuple[int | None, float]] = {}
     for v in voices:
-        person, sim = match_person(conn, v.centroid, people=people)
-        if person is not None and (sim >= th.match or sim >= th.maybe and v.seconds >= MIN_MATCH_SEC):
-            out[v.index] = (person["id"], sim)
-        else:
-            out[v.index] = (None, max(sim, 0.0))
+        person, sim, _ = decide(rank_people(conn, v.centroid, people), v.seconds, th)
+        out[v.index] = (person["id"], sim) if person is not None else (None, max(sim, 0.0))
     return out
 
 
@@ -619,69 +669,82 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     units = [(s["id"], float(s["sec"] or 0), np.asarray(s["embedding"], dtype=np.float32)) for s in segs
              if s["embedding"] and s["embed_backend"] == backend_name()]
     result = {"voices": 0, "named": 0, "new": 0}
+    recheck = conv_id in _recheck_ids(conn)  # повторная подпись после уборки: без учёта речи и дообучения
     if not units:
         conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
+        _recheck_done(conn, conv_id)
         return result
     clusters = _cluster(units, th.same, manual)
     allow_new = others_enabled(conn) or not has_owner(conn)
     people = people_vectors(conn)
     assign: dict[int, tuple[int | None, float]] = {}
-    used: set[int] = set()
     times = {s["id"]: (s["started_at"], float(s["sec"] or 0)) for s in segs}
     # сначала голоса с ручной подписью, потом — по убыванию количества речи
     order = sorted(clusters, key=lambda c: (not any(sid in manual for sid, _, _ in c.segs), -c.seconds))
-    # 1) узнаём знакомых
-    found: dict[int, tuple[int | None, float, list]] = {}
+    # 1) узнаём знакомых. Человек уже говорит в разговоре одним голосом — второй голос отдаём ему, только
+    # если это явно он (тот же голос, разрезанный на части); иначе голос остаётся без подписи, а не
+    # достаётся «следующему по похожести», как раньше
+    found: dict[int, tuple[int | None, float, list, float, float]] = {}
+    taken: dict[int, np.ndarray] = {}
     for i, c in enumerate(order):
         pins = [manual[sid] for sid, _, _ in c.segs if sid in manual]
-        pid, score = None, 0.0
+        pid, score, gap, near = None, 0.0, 0.0, 0.0
         if pins:
             pid, score = max(set(pins), key=pins.count), 1.0
         else:
-            person, sim = match_person(conn, c.centroid, exclude=used, people=people)
-            if person is not None and (sim >= th.match or sim >= th.maybe and c.seconds >= MIN_MATCH_SEC):
-                pid, score = person["id"], sim
+            person, near, gap = decide(rank_people(conn, c.centroid, people), c.seconds, th)
+            if person is not None and person["id"] in taken and not (
+                    near >= th.match and float(c.centroid @ taken[person["id"]]) >= th.same - 2 * th.margin):
+                person = None
+            if person is not None:
+                pid, score = person["id"], near
         if pid is not None:
-            used.add(pid)
-        found[i] = (pid, score, pins)
+            taken.setdefault(pid, c.centroid)
+        found[i] = (pid, score, pins, gap, near)
     row = conn.execute("SELECT id FROM people WHERE is_owner").fetchone()
     owner = row["id"] if row else None
     owner_ids = {sid for i, c in enumerate(order) if owner and found[i][0] == owner for sid, _, _ in c.segs}
     owner_ids |= {s["id"] for s in segs if owner and s["person_id"] == owner}
     owner_spans = [times[sid] for sid in owner_ids]
-    # 2) незнакомцы: новый «Голос N» — только если отвечает пользователю
+    # 2) незнакомцы: новый «Голос N» — только если отвечает пользователю и не похож ни на кого из знакомых
+    # (похож, но не уверены — не плодим дубль, фразы остаются без подписи до «Кто это?»)
     for i, c in enumerate(order):
         result["voices"] += 1
-        pid, score, pins = found[i]
-        if pid is None and c.seconds >= MIN_NEW_PERSON_SEC and allow_new and \
+        pid, score, pins, gap, near = found[i]
+        if pid is None and near < th.match and c.seconds >= MIN_NEW_PERSON_SEC and allow_new and \
                 (owner is None or replies(c.segs, times, owner_spans) >= MIN_REPLIES):
             best = sorted(c.segs, key=lambda t: -t[1])[:8]
             p = new_unknown(conn, c.centroid, c.seconds, 0.0,
                             prints=[(emb, sec) for _, sec, emb in best if sec >= MIN_EMBED_SEC])
             people = people_vectors(conn)
-            pid, score = p["id"], 1.0
+            pid, score, gap = p["id"], 1.0, 0.0
             result["new"] += 1
             _keep_sample(conn, pid, best[0][0])
         if pid is None:
             for sid, _, _ in c.segs:
                 assign[sid] = (None, 0.0)
             continue
-        used.add(pid)
         result["named"] += 1
         for sid, _, emb in c.segs:
             assign[sid] = (pid, 1.0 if sid in manual else score)
-        # дообучение: уверенный голос — 2 самых длинных отрезка, если ещё не в образцах
-        if score >= th.learn and not pins:
+        # дообучение — только по очень уверенному узнаванию с большим отрывом от второго кандидата,
+        # и только отрезками, которые похожи на его средний голос (иначе отпечаток «уплывает» к чужим)
+        if score >= th.learn and gap >= 2 * th.margin and not pins and not recheck:
+            cen = conn.execute("SELECT centroid FROM people WHERE id = %s", (pid,)).fetchone()
             for sid, sec, emb in sorted(c.segs, key=lambda t: -t[1])[:2]:
-                if sec >= MIN_NEW_VOICE_SEC:
+                if sec >= MIN_NEW_VOICE_SEC and cen and cen["centroid"] and cosine(emb, cen["centroid"]) >= th.match:
                     conn.execute("DELETE FROM voiceprints WHERE segment_id = %s", (sid,))
                     conn.execute(
                         """INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed, segment_id)
                            VALUES (%s, %s, %s, %s, false, %s)""", (pid, vec(emb), round(sec, 2), backend_name(), sid))
+            _cap_auto(conn, pid)
             recompute_centroid(conn, pid)
-        conn.execute(
-            """UPDATE people SET speech_sec = speech_sec + %s, last_seen = greatest(coalesce(last_seen, now()), now()),
-                   first_seen = coalesce(first_seen, now()) WHERE id = %s""", (round(c.seconds, 1), pid))
+            people = people_vectors(conn)
+        if not recheck:
+            conn.execute(
+                """UPDATE people SET speech_sec = speech_sec + %s,
+                       last_seen = greatest(coalesce(last_seen, now()), now()),
+                       first_seen = coalesce(first_seen, now()) WHERE id = %s""", (round(c.seconds, 1), pid))
         if not sample_path(pid).exists():
             _keep_sample(conn, pid, max(c.segs, key=lambda t: t[1])[0])
     # короткие фразы без отпечатка — к голосу того же куска (тот же локальный голос) или соседней фразы
@@ -703,7 +766,73 @@ def finalize_conversation(conn, conv_id: int) -> dict:
                      (pid, round(score, 3) if pid else None, s["id"]))
         last_pid = pid or last_pid
     conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
+    _recheck_done(conn, conv_id)
     return result
+
+
+def _cap_auto(conn, person_id: int):
+    """Дообученных без подтверждения отпечатков — не больше MAX_AUTO_PRINTS (старые уходят)."""
+    conn.execute(
+        """DELETE FROM voiceprints WHERE id IN (
+               SELECT id FROM voiceprints WHERE person_id = %s AND NOT confirmed AND segment_id IS NOT NULL
+               ORDER BY id DESC OFFSET %s)""", (person_id, MAX_AUTO_PRINTS))
+
+
+def _recheck_ids(conn) -> set[int]:
+    row = conn.execute("SELECT value FROM settings WHERE key = %s", (RECHECK_KEY,)).fetchone()
+    try:
+        return {int(x) for x in json.loads(row["value"])} if row and row["value"] else set()
+    except (ValueError, TypeError):
+        return set()
+
+
+def _recheck_done(conn, conv_id: int):
+    ids = _recheck_ids(conn)
+    if conv_id not in ids:
+        return
+    ids.discard(conv_id)
+    if ids:
+        conn.execute("UPDATE settings SET value = %s, updated_at = now() WHERE key = %s",
+                     (json.dumps(sorted(ids)), RECHECK_KEY))
+    else:
+        conn.execute("DELETE FROM settings WHERE key = %s", (RECHECK_KEY,))
+
+
+def clean_prints(conn, days: int = 3) -> dict:
+    """Разовая уборка (после смены правил узнавания): из отпечатков каждого человека убираем чужие —
+    дообученные образцы, непохожие на его голос, и любые явно чужие. Потом разговоры последних дней
+    подписываем заново по исправленным голосам (ручные подписи «Кто это?» сохраняются)."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (CLEAN_KEY,)).fetchone():
+        return {"removed": 0, "people": 0, "recheck": 0}
+    th = thresholds()
+    removed = touched = 0
+    for p in conn.execute("SELECT id FROM people WHERE backend = %s AND centroid IS NOT NULL",
+                          (backend_name(),)).fetchall():
+        rows = conn.execute(
+            """SELECT id, embedding, confirmed, segment_id FROM voiceprints WHERE person_id = %s AND backend = %s
+               ORDER BY confirmed DESC, id DESC""", (p["id"], backend_name())).fetchall()
+        if len(rows) < 4:
+            continue
+        c, _ = _robust_centroid([r["embedding"] for r in rows], [2.0 if r["confirmed"] else 1.0 for r in rows])
+        bad = [r["id"] for r in rows
+               if (sim := cosine(r["embedding"], c)) < th.alien
+               or not r["confirmed"] and r["segment_id"] is not None and sim < th.keep]
+        if bad and len(bad) < len(rows):
+            conn.execute("DELETE FROM voiceprints WHERE id = ANY(%s::bigint[])", (bad,))
+            removed += len(bad)
+            touched += 1
+        _cap_auto(conn, p["id"])
+        recompute_centroid(conn, p["id"])
+    convs = [r["id"] for r in conn.execute(
+        """UPDATE conversations SET voices_done = false
+           WHERE voices_done AND started_at > now() - %s * interval '1 day' RETURNING id""", (days,)).fetchall()]
+    if convs:
+        conn.execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                     (RECHECK_KEY, json.dumps(sorted(set(convs) | _recheck_ids(conn)))))
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                 (CLEAN_KEY, f"{removed}/{touched}/{len(convs)}"))
+    return {"removed": removed, "people": touched, "recheck": len(convs)}
 
 
 def _keep_sample(conn, person_id: int, segment_id: int):
@@ -1054,3 +1183,49 @@ def label(p: dict | None, owner_word: str = "Я", voice_word: str = "Голос"
     if p.get("is_owner"):
         return p.get("name") or owner_word
     return p.get("name") or f"{voice_word} {p.get('number')}"
+
+
+# ======================================================================= диагностика (статус сервера)
+def diagnostics(conn) -> str:
+    """Как узнаются голоса — для статуса сервера в CI. Только номера и числа, без имён и текста
+    (логи CI публичные): #id, кто это (я / с именем / без имени), фраз и разговоров за 7 дней, средняя
+    уверенность, отпечатков (подтверждённых/дообученных), разброс образцов и самый похожий другой голос."""
+    th = thresholds()
+    rows = conn.execute(
+        """SELECT p.id, p.is_owner, p.name IS NOT NULL AS named, p.centroid,
+                  (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id) AS prints,
+                  (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id AND v.confirmed) AS conf,
+                  (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id AND NOT v.confirmed
+                      AND v.segment_id IS NOT NULL) AS auto,
+                  (SELECT count(*) FROM segments s WHERE s.person_id = p.id
+                      AND s.started_at > now() - interval '7 days') AS seg7,
+                  (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id
+                      AND s.started_at > now() - interval '7 days') AS conv7,
+                  (SELECT round(avg(s.voice_score)::numeric, 2) FROM segments s WHERE s.person_id = p.id
+                      AND s.started_at > now() - interval '7 days' AND s.voice_score < 0.999) AS score7
+           FROM people p WHERE p.centroid IS NOT NULL AND p.backend = %s""", (backend_name(),)).fetchall()
+    total = conn.execute(
+        """SELECT count(*) AS n, count(*) FILTER (WHERE person_id IS NULL) AS unsigned,
+                  count(*) FILTER (WHERE voice_score >= 0.999) AS manual,
+                  count(*) FILTER (WHERE voice_score < %s) AS weak
+           FROM segments WHERE started_at > now() - interval '7 days' AND NOT junk""", (th.match,)).fetchone()
+    parts = [f"фраз за 7 дней {total['n']}: без подписи {total['unsigned']}, вручную {total['manual']}, "
+             f"слабых (<{th.match}) {total['weak']}; голосов {len(rows)}"]
+    cents = {r["id"]: np.asarray(r["centroid"], dtype=np.float32) for r in rows}
+    for r in sorted(rows, key=lambda r: -(r["seg7"] or 0))[:8]:
+        if not r["seg7"]:
+            break
+        c = cents[r["id"]]
+        prints = _prints(conn, r["id"])
+        sims = [cosine(p, c) for p in prints]
+        spread = round(float(np.mean(sims)), 2) if sims else 0
+        alien = sum(1 for x in sims if x < th.alien)
+        near = max(((cosine(c, v), pid) for pid, v in cents.items() if pid != r["id"] and len(v) == len(c)),
+                   default=(0.0, 0))
+        who = "я" if r["is_owner"] else ("имя" if r["named"] else "без имени")
+        parts.append(f"#{r['id']} {who}: фраз {r['seg7']}, разг. {r['conv7']}, увер. {r['score7'] or '-'}, "
+                     f"отп. {r['prints']} (подтв. {r['conf']}, дообуч. {r['auto']}), разброс {spread}, чужих {alien}, "
+                     f"ближе всех #{near[1]} {near[0]:.2f}")
+    cleaned = conn.execute("SELECT value FROM settings WHERE key = %s", (CLEAN_KEY,)).fetchone()
+    parts.append(f"уборка: {cleaned['value'] if cleaned else 'не было'}, на перепроверке {len(_recheck_ids(conn))}")
+    return "; ".join(parts)

@@ -108,9 +108,9 @@ fun TasksTab() {
     fun delete(t: TaskItem) {
         Repo.tasks.edit { list -> list.filter { it.id != t.id } }
         removed = t
-        scope.launch {
+        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             try {
-                Api.setTaskStatus(t.id, "dismissed")
+                Repo.tasks.saving { Api.setTaskStatus(t.id, "dismissed") }
             } catch (e: Exception) {
                 Repo.tasks.refresh()
             }
@@ -133,14 +133,21 @@ fun TasksTab() {
         }
     }
 
+    // галочка: сразу на экране; повторное нажатие, пока первое ещё сохраняется, не отменяет его
+    val saving = remember { mutableStateMapOf<Long, String>() }
     fun toggle(t: TaskItem) {
-        val next = if (t.status == "done") "open" else "done"
+        val current = Repo.tasks.state.value.data?.firstOrNull { it.id == t.id }?.status ?: t.status
+        val next = if (current == "done") "open" else "done"
+        if (saving[t.id] == next) return
+        saving[t.id] = next
         Repo.tasks.edit { list -> list.map { if (it.id == t.id) it.copy(status = next) else it } }
-        scope.launch {
+        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             try {
-                Api.setTaskStatus(t.id, next)
+                Repo.tasks.saving { Api.setTaskStatus(t.id, next) }
             } catch (e: Exception) {
-                Repo.tasks.edit { list -> list.map { if (it.id == t.id) it.copy(status = t.status) else it } }
+                Repo.tasks.edit { list -> list.map { if (it.id == t.id) it.copy(status = current) else it } }
+            } finally {
+                if (saving[t.id] == next) saving.remove(t.id)
             }
         }
     }
@@ -239,7 +246,7 @@ fun TasksTab() {
                         if (list.isEmpty()) continue
                         item(key = "title-$title") { SectionTitle(stringResource(title) + "  " + list.size) }
                         itemsIndexed(list, key = { _, t -> t.id }) { i, t ->
-                            Grouped(i, list.size, inset = 50.dp) {
+                            Grouped(i, list.size, inset = 54.dp) {
                                 SwipeToDelete({ confirm = t }) {
                                     PromiseRow(t, { editing = t }, { toggle(t) })
                                 }
@@ -254,9 +261,9 @@ fun TasksTab() {
                                     val next = if (accept) "open" else "dismissed"
                                     Repo.tasks.edit { l -> if (accept) l.map { if (it.id == t.id) it.copy(status = next) else it }
                                         else l.filter { it.id != t.id } }
-                                    scope.launch {
+                                    scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                                         try {
-                                            Api.setTaskStatus(t.id, next)
+                                            Repo.tasks.saving { Api.setTaskStatus(t.id, next) }
                                         } catch (e: Exception) {
                                             Repo.tasks.refresh()
                                         }
@@ -276,7 +283,7 @@ fun TasksTab() {
                         if (showDone) {
                             val shown = done.take(50)
                             itemsIndexed(shown, key = { _, t -> "d" + t.id }) { i, t ->
-                                Grouped(i, shown.size, inset = 50.dp) {
+                                Grouped(i, shown.size, inset = 54.dp) {
                                     SwipeToDelete({ confirm = t }) {
                                         PromiseRow(t, { editing = t }, { toggle(t) })
                                     }

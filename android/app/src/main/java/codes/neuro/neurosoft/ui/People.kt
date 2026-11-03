@@ -177,7 +177,6 @@ private fun personSubtitle(p: Person, fmt: Fmt): String = listOfNotNull(
 @Composable
 fun PeopleTab() {
     val peopleRes by Repo.people.state.collectAsState()
-    val graphRes by Repo.graph.state.collectAsState()
     val scope = rememberCoroutineScope()
     val fmt = rememberFmt()
     var refreshing by remember { mutableStateOf(false) }
@@ -186,7 +185,6 @@ fun PeopleTab() {
     LaunchedEffect(Unit) {
         while (true) {
             Repo.people.refresh()
-            Repo.graph.refresh()
             delay(60_000)
         }
     }
@@ -199,14 +197,12 @@ fun PeopleTab() {
             scope.launch {
                 refreshing = true
                 Repo.people.refresh()
-                Repo.graph.refresh()
                 refreshing = false
             }
         },
         modifier = Modifier.fillMaxSize(),
     ) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-            item(key = "sky") { ConstellationCard(graphRes.data) }
             when {
                 outdated -> item(key = "outdated") {
                     EmptyBlock(Icons.Cloud, stringResource(R.string.people_server_old),

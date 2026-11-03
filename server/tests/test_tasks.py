@@ -81,3 +81,30 @@ def test_removed_task_is_not_created_again(conn):  # noqa: F811
     assert res == {"created": 1, "updated": 0}
     texts = [r["text"] for r in conn.execute("SELECT text FROM tasks WHERE status = 'open'").fetchall()]
     assert texts == ["Позвонить Анне"]
+
+
+def test_doubtful_promises_go_to_review(conn):  # noqa: F811
+    """Сразу в обещания — только прямое обещание, где ясно кто кому, и не больше трёх из разговора;
+    сомнительное и «напомнить» без просьбы — на согласование; бытовое «сейчас» — модель не присылает."""
+    from neuro import tasks
+    conn.execute("TRUNCATE tasks, people RESTART IDENTITY CASCADE")
+    out = tasks.classify(conn, [
+        {"text": "Отправить договор Ивану", "who": "Я", "with": "Иван", "confidence": 0.9, "evidence": "отправлю завтра"},
+        {"text": "Созвониться по проекту", "who": "Я", "confidence": 0.7, "evidence": "созвонимся как-нибудь"},
+        {"text": "Купить подарок", "kind": "reminder", "who": "Я", "confidence": 0.9, "evidence": "куплю подарок"},
+        {"text": "Прислать отчёт", "kind": "waiting", "who": "Спикер 2", "confidence": 0.9, "evidence": "пришлю"},
+        {"text": "Позвонить маме", "kind": "reminder", "confidence": 0.9, "evidence": "напомни позвонить маме"},
+        {"text": "Оплатить счёт", "who": "Я", "confidence": 0.95, "evidence": "оплачу"},
+        {"text": "Записаться к врачу", "who": "Я", "confidence": 0.92, "evidence": "запишусь"},
+    ], {}, True)
+    status = {t["text"]: (t["kind"], t["status"]) for t in out}
+    assert status["Созвониться по проекту"] == ("mine", "suggested")       # 0.7 — под вопросом
+    assert status["Купить подарок"] == ("mine", "suggested")               # «напомнить» без просьбы
+    assert status["Прислать отчёт"] == ("waiting", "suggested")             # от кого ждём — неясно
+    assert status["Позвонить маме"] == ("reminder", "open")
+    opened = [t for t in out if t["status"] == "open"]
+    assert len(opened) == 3 and status["Отправить договор Ивану"][1] == "suggested"  # 0.9 < трёх самых уверенных
+    # явная команда «напомни» голосом — достаточно 0.7
+    cmd = tasks.classify(conn, [{"text": "Позвонить Ивану", "kind": "reminder", "confidence": 0.7,
+                                 "evidence": "напомни позвонить"}], {}, None, source="voice")
+    assert cmd[0]["status"] == "open"

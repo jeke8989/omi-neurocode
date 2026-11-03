@@ -26,13 +26,19 @@ class Cached<T>(private val loader: suspend () -> T) {
     private val _state = MutableStateFlow(Res<T>())
     val state: StateFlow<Res<T>> = _state
     private val mutex = Mutex()
+    // правки на месте (галочка задачи): ответ сервера, запрошенный до правки или пока она не дошла
+    // до сервера, устарел — им не затираем то, что видит пользователь (иначе галочка «отскакивает»)
+    private val version = java.util.concurrent.atomic.AtomicInteger(0)
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger(0)
 
     suspend fun refresh() {
         if (!mutex.tryLock()) return
         try {
+            val v = version.get()
             _state.update { it.copy(loading = true) }
             val data = loader()
-            _state.value = Res(data)
+            if (v != version.get() || inFlight.get() > 0) _state.update { it.copy(loading = false) }
+            else _state.value = Res(data)
         } catch (e: CancellationException) {
             // экран ушёл или сменился день — это не ошибка, показывать нечего
             _state.update { it.copy(loading = false) }
@@ -46,7 +52,19 @@ class Cached<T>(private val loader: suspend () -> T) {
 
     /** Оптимистичное изменение (галочка задачи и т. п.). */
     fun edit(f: (T) -> T) {
+        version.incrementAndGet()
         _state.update { s -> s.data?.let { s.copy(data = f(it)) } ?: s }
+    }
+
+    /** Запрос, который сохраняет правку на сервере: пока он идёт, фоновые обновления её не затирают. */
+    suspend fun <R> saving(call: suspend () -> R): R {
+        inFlight.incrementAndGet()
+        try {
+            return call()
+        } finally {
+            version.incrementAndGet()
+            inFlight.decrementAndGet()
+        }
     }
 }
 

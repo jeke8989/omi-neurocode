@@ -221,7 +221,8 @@ diag() {
      || '; за час расшифровано ' || (SELECT count(*) FROM audio_chunks WHERE status IN ('done', 'empty') AND created_at > now() - interval '1 hour')
      || ', из памяти кулона всего ' || (SELECT count(*) FROM audio_chunks WHERE offline)
      FROM audio_chunks WHERE status IN ('pending', 'processing')"
-  echo "::notice title=Очередь расшифровки::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qq" 2>/dev/null | tr '\n' ' ' || true)"
+  # GitHub показывает не больше 10 заметок на шаг: очередь и кнопка — одной строкой
+  echo "::notice title=Очередь и кнопка::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qq" 2>/dev/null | tr '\n' ' ' || true) | кнопка за 7 дней: $asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
   # голоса и память: сколько спрятано в фон и в архив (только счётчики)
   local qp
   qp="SELECT 'людей ' || count(*) FILTER (WHERE kind IS NULL OR kind = 'person') || ', фон: реклама/ТВ '
@@ -247,7 +248,25 @@ diag() {
                                      ORDER BY last_run_at DESC LIMIT 1), 'нет') || ')'
      FROM people"
   echo "::notice title=Голоса и память::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
-  echo "::notice title=Кнопка за 7 дней::$asks; $lat; запуски: $(docker compose exec -T db psql -U neuro -d neuro -tAc "$q" 2>/dev/null | tr '\n' ' ' || true)"
+  # узнавание голосов: только номера людей и числа (имён и текста нет — логи CI публичные)
+  echo "::notice title=Узнавание голосов::$(docker compose exec -T stt python -c 'from neuro import db, voices
+with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cut -c1-1800 || true)"
+  # обещания: сколько найдено за 7 дней, как распределились, сколько отклонено — только счётчики
+  local qt
+  qt="SELECT 'за 7 дней найдено ' || count(*) || ' (в день ' || round(count(*) / 7.0, 1) || ')'
+     || ': моих ' || count(*) FILTER (WHERE kind = 'mine') || ', мне ' || count(*) FILTER (WHERE kind = 'waiting')
+     || ', напоминаний ' || count(*) FILTER (WHERE kind = 'reminder')
+     || ' | открыто ' || count(*) FILTER (WHERE status = 'open') || ', на согласовании ' || count(*) FILTER (WHERE status = 'suggested')
+     || ', сделано ' || count(*) FILTER (WHERE status = 'done') || ', отклонено ' || count(*) FILTER (WHERE status = 'dismissed')
+     || ' | подтверждено ' || count(*) FILTER (WHERE confirmed_at IS NOT NULL)
+     || ', со сроком ' || count(*) FILTER (WHERE due_at IS NOT NULL) || ', с человеком ' || count(*) FILTER (WHERE counterpart_id IS NOT NULL OR person_id IS NOT NULL)
+     || ', руками ' || count(*) FILTER (WHERE source = 'manual') || ', с кнопки ' || count(*) FILTER (WHERE source = 'button')
+     || ' | уверенность: <0.7 ' || count(*) FILTER (WHERE confidence < 0.7) || ', 0.7–0.85 ' || count(*) FILTER (WHERE confidence >= 0.7 AND confidence < 0.85)
+     || ', ≥0.85 ' || count(*) FILTER (WHERE confidence >= 0.85)
+     || ' | отклонено по уверенности: <0.7 ' || count(*) FILTER (WHERE status = 'dismissed' AND confidence < 0.7)
+     || ', ≥0.85 ' || count(*) FILTER (WHERE status = 'dismissed' AND confidence >= 0.85)
+     FROM tasks WHERE created_at > now() - interval '7 days'"
+  echo "::notice title=Обещания::$(docker compose exec -T db psql -U neuro -d neuro -tAc "$qt" 2>/dev/null | tr '\n' ' ' || true)"
   # шифрование: включено ли и сколько фраз ещё лежит открытым текстом (агент шифрует их в фоне)
   q="SELECT 'открыто: фраз ' || (SELECT count(*) FROM segments WHERE text NOT LIKE 'enc_:%%')
      || ' из ' || (SELECT count(*) FROM segments)

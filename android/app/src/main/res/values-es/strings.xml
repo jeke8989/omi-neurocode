@@ -146,7 +146,7 @@
     <string name="device_settings">Colgante</string>
     <string name="diagnostics">Diagnóstico</string>
     <string name="diagnostics_show">Ver detalles</string>
-    <string name="diary_and_photos">Diario y fotos</string>
+    <string name="diary_and_photos">Ubicación y fotos</string>
     <string name="diary_build">Crear la historia del día</string>
     <string name="diary_build_today">Crear hoy</string>
     <string name="diary_empty_text">Cada día el asistente arma una historia: dónde estuviste, de qué hablaste, qué decidiste. Las fotos ligadas a momentos reciben el estilo que elijas.</string>
@@ -697,7 +697,7 @@
     <string name="server_reconnect_text">El servidor cambió su clave de acceso. Introduce un código nuevo para volver a conectar</string>
     <string name="settings">Ajustes</string>
     <string name="settings_app">Aplicación</string>
-    <string name="settings_people_diary">Personas y diario</string>
+    <string name="settings_people_diary">Personas y lugares</string>
     <string name="setup">Configuración</string>
     <string name="share">Compartir</string>
     <string name="show">Mostrar</string>
