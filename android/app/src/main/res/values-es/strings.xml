@@ -655,6 +655,16 @@
     <string name="resume_recording">Reanudar grabación</string>
     <string name="retry">Reintentar</string>
     <string name="right_now">Ahora mismo</string>
+    <string name="role_create">Crear tu propio rol</string>
+    <string name="role_delete">Eliminar rol</string>
+    <string name="role_edit">Tu rol</string>
+    <string name="role_emoji">Emoji</string>
+    <string name="role_name">Nombre</string>
+    <string name="role_name_hint">Ej.: Editor</string>
+    <string name="role_new">Nuevo rol</string>
+    <string name="role_persona">Personalidad y enfoque</string>
+    <string name="role_persona_hint">Quién es y cómo responde. Ej.: un editor estricto, breve y al grano, que corrige mis correos</string>
+    <string name="role_title">Rol del asistente</string>
     <string name="routines_channel">Tareas del asistente</string>
     <string name="routines_empty_text">Díselo al asistente, por ejemplo: «cada día a las 23:00 haz un resumen del día en Notion» o «guarda las notas de reuniones con clientes en Notion»</string>
     <string name="routines_empty_title">Aún nada</string>

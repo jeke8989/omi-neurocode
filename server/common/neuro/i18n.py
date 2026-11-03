@@ -253,6 +253,14 @@ PHRASES: dict[str, dict[str, str]] = {
         "ru": "📔 Открываю дневник: {day}", "en": "📔 Opening the diary: {day}",
         "tr": "📔 Günlüğü açıyorum: {day}", "es": "📔 Abriendo el diario: {day}",
     },
+    "tool.talk_stats": {
+        "ru": "🗣 Разбираю, как шёл разговор", "en": "🗣 Analyzing how the conversation went",
+        "tr": "🗣 Konuşmanın nasıl geçtiğini inceliyorum", "es": "🗣 Analizo cómo fue la conversación",
+    },
+    "tool.meeting_brief": {
+        "ru": "🤝 Собираю бриф: {name}", "en": "🤝 Preparing a brief: {name}",
+        "tr": "🤝 Brif hazırlıyorum: {name}", "es": "🤝 Preparo un brief: {name}",
+    },
     "tool.ask_user": {
         "ru": "❓ Уточняю вопрос", "en": "❓ Asking you to clarify", "tr": "❓ Soruyu netleştiriyorum",
         "es": "❓ Pido una aclaración",

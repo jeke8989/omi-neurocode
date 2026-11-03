@@ -334,3 +334,93 @@ def test_chat_agents_and_validation(conn, monkeypatch):  # noqa: F811
     monkeypatch.setattr(gw, "_run_in_thread", run_now)
     r = client.post("/api/chat", json={"text": "привет", "level": "claude", "agent": "claude"}).json()
     assert r["agent"] == "claude" and r["level"] in agent_core.LEVELS
+
+
+def test_roles_starters_followups_and_talk(conn, monkeypatch):  # noqa: F811
+    """Роли ассистента (встроенные и свои), стартовые подсказки из накопленного, следующие вопросы кнопками,
+    разбор разговора и бриф к встрече."""
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    from neuro import agent_context, agent_core, llm, roles
+    from tests.test_voices import Asgi
+    gw = __import__("gateway.app", fromlist=["app"])
+    client = Asgi(gw.app)
+
+    async def run_now(fn, *a):
+        return fn(*a)
+    monkeypatch.setattr(gw, "_run_in_thread", run_now)
+    conn.execute("TRUNCATE agent_roles, people, conversations, segments, tasks RESTART IDENTITY CASCADE")
+    conn.execute("DELETE FROM settings WHERE key LIKE 'starters.%%'")
+
+    # роли: встроенные + своя
+    listing = client.get("/api/roles").json()["roles"]
+    assert listing[0]["id"] == "mnemo" and {"coach", "talk", "roast", "lang"} <= {r["id"] for r in listing}
+    assert client.post("/api/roles", json={"name": "", "persona": "x"}).status_code == 400
+    rid = client.post("/api/roles", json={"name": "пират", "emoji": "🏴‍☠️", "persona": "Говори как пират."}).json()["id"]
+    assert rid.startswith("c") and any(r["id"] == rid and r["custom"] for r in client.get("/api/roles").json()["roles"])
+    assert client.post(f"/api/roles/{rid}", json={"name": "Пират", "emoji": "🦜", "persona": "Как пират, коротко."}).json()["updated"]
+    assert "Как пират" in roles.prompt(conn, rid, "ru") and roles.prompt(conn, "mnemo", "ru") == ""
+    assert client.post("/api/roles/coach", json={"name": "x", "persona": "y"}).status_code == 404  # встроенные не меняются
+
+    # данные: человек, разговор с таймингами, обещание с ним
+    now = datetime.now(timezone.utc)
+    me = conn.execute("INSERT INTO people (number, is_owner, name) VALUES (1, true, 'Олег') RETURNING id").fetchone()["id"]
+    ilya = conn.execute("INSERT INTO people (number, name, last_seen) VALUES (2, 'Илья', now()) RETURNING id").fetchone()["id"]
+    cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status, title, summary)
+                          VALUES ('d', %s, %s, 'done', 'Созвон по проекту', 'Обсудили сроки.') RETURNING id""",
+                       (now - timedelta(hours=2), now - timedelta(hours=1))).fetchone()["id"]
+    t = now - timedelta(hours=2)
+    for i, (pid, sec, text) in enumerate([(me, 20, "Давай обсудим сроки. Когда сможешь"), (ilya, 5, "В пятницу?"),
+                                          (me, 30, "Хорошо, пришлю договор завтра."), (ilya, 4, "Договорились.")]):
+        conn.execute("""INSERT INTO segments (conversation_id, device_id, started_at, ended_at, text, person_id, voice_score)
+                        VALUES (%s, 'd', %s, %s, %s, %s, 0.9)""", (cid, t, t + timedelta(seconds=sec), text, pid))
+        t += timedelta(seconds=sec + (0.1 if i == 0 else 1.0))
+    conn.execute("""INSERT INTO tasks (conversation_id, text, kind, status, due_at, counterpart_id, source)
+                    VALUES (%s, 'Прислать договор', 'mine', 'open', %s, %s, 'conversation')""",
+                 (cid, now - timedelta(hours=1), ilya))
+
+    stats = agent_context.talk_stats(conn)
+    assert "Олег: 85% речи" in stats and "Илья:" in stats and "перебил(а) 1" in stats  # Илья вступил на оборванной фразе
+    brief = agent_context.meeting_brief(conn, "илья")
+    assert "Илья: разговоров всего 1" in brief and "Созвон по проекту" in brief and "Прислать договор" in brief
+    assert "Просрочено: [Прислать договор](task:" in agent_context.now_block(conn)
+
+    # стартовые подсказки: пул от модели, каждый раз случайные 4; без модели — по шаблонам из данных
+    calls = []
+
+    def fake_json(conn_, task, system, user, **kw):
+        calls.append((task, system, user, kw.get("usage")))
+        return {"items": [f"Вопрос {i} про Илью" for i in range(10)]}
+    monkeypatch.setattr(llm, "configured", lambda: True)
+    monkeypatch.setattr(llm, "chat_json", fake_json)
+    first = client.get("/api/chat/starters?role=coach").json()["items"]
+    again = client.get("/api/chat/starters?role=coach").json()["items"]
+    assert len(first) == 4 and len(again) == 4 and len(calls) == 1  # пул один, выборка разная
+    assert calls[0][3] == "starters" and "Коуч обещаний" in calls[0][1] and "Прислать договор" in calls[0][2]
+    conn.execute("UPDATE tasks SET status = 'done', done_at = now()")  # данные изменились — пул пересобирается
+    client.get("/api/chat/starters?role=coach")
+    assert len(calls) == 2
+
+    def broken(*a, **k):
+        raise RuntimeError("no model")
+    monkeypatch.setattr(llm, "chat_json", broken)
+    fb = roles.starters(conn, "brief")
+    assert fb and all(isinstance(x, str) and x for x in fb)
+
+    # роль в запуске и следующие вопросы кнопками
+    seen = []
+
+    def fake_chat(conn_, task, messages, **kw):
+        seen.append(messages)
+        return {"content": "Готово, держите план.\n\n>> Что ещё горит? | Напомни Илье | План на завтра"}
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    res = agent_core.ask(conn, "что у меня горит", level="fast", role="coach")
+    assert res["answer"] == "Готово, держите план."
+    assert any("Коуч обещаний" in m["content"] for m in seen[0] if m["role"] == "system")
+    run = conn.execute("SELECT role, followups FROM agent_runs WHERE id = %s", (res["run_id"],)).fetchone()
+    assert run["role"] == "coach" and _json.loads(run["followups"]) == ["Что ещё горит?", "Напомни Илье", "План на завтра"]
+    chat = client.get("/api/chat").json()
+    r = chat["runs"][str(res["run_id"])]
+    assert r["role"] == "coach" and r["followups"][1] == "Напомни Илье"
+    assert agent_core.split_followups("Ответ без кнопок.") == ("Ответ без кнопок.", [])
+    assert client.delete(f"/api/roles/{rid}").json()["deleted"]

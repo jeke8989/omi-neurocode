@@ -80,6 +80,8 @@ object Repo {
     val chat = Cached<ChatState> { Api.chat() }
     val people = Cached<PeopleInfo> { Api.people() }
     val graph = Cached<Graph> { Api.graph(365) }
+    /** Роли ассистента: встроенные и свои. */
+    val roles = Cached { Api.roles() }
     private val byDay = HashMap<String, Cached<List<ConversationItem>>>()
     private val eventsByDay = HashMap<String, Cached<DayEvents>>()
 

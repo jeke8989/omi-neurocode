@@ -655,6 +655,16 @@
     <string name="resume_recording">Kayda devam et</string>
     <string name="retry">Tekrar dene</string>
     <string name="right_now">Şu anda</string>
+    <string name="role_create">Kendi rolünü oluştur</string>
+    <string name="role_delete">Rolü sil</string>
+    <string name="role_edit">Rolün</string>
+    <string name="role_emoji">Emoji</string>
+    <string name="role_name">Ad</string>
+    <string name="role_name_hint">Örn. Editör</string>
+    <string name="role_new">Yeni rol</string>
+    <string name="role_persona">Kişilik ve odak</string>
+    <string name="role_persona_hint">Kim olduğu ve nasıl cevap verdiği. Örn. katı bir editör: kısa, net, e-postalarımı düzeltir</string>
+    <string name="role_title">Asistan rolü</string>
     <string name="routines_channel">Asistan görevleri</string>
     <string name="routines_empty_text">Asistana söyleyin, örneğin: “her gün 23:00\'te Notion\'a gün özeti yap” ya da “müşteri toplantı notlarını Notion\'a koy”</string>
     <string name="routines_empty_title">Henüz bir şey yok</string>

@@ -187,11 +187,52 @@ def diary_day(conn, day: date) -> str:
     return "\n".join(x for x in out if x)
 
 
+def now_block(conn) -> str:
+    """«Что сейчас»: горящие обещания, ближайшие встречи, последний разговор — чтобы на «что у меня сегодня»
+    и «что горит» ассистент отвечал сразу, без лишних шагов."""
+    from . import calendar as calendarlib  # noqa: PLC0415
+
+    now = datetime.now(timezone.utc)
+    lines = []
+    rows = conn.execute(
+        """SELECT t.id, t.text, t.kind, t.due_at, coalesce(cp.name, t.counterpart, t.assignee) AS mate
+           FROM tasks t LEFT JOIN people cp ON cp.id = t.counterpart_id
+           WHERE t.status = 'open' AND t.due_at IS NOT NULL AND t.due_at < %s
+           ORDER BY t.due_at LIMIT 8""", (now + timedelta(days=2),)).fetchall()
+
+    def task(t):
+        who = ("обещали мне" + (f" ({t['mate']})" if t["mate"] else "")) if t["kind"] == "waiting" else \
+            ("напоминание" if t["kind"] == "reminder" else "я обещал" + (f" {t['mate']}" if t["mate"] else ""))
+        return f"[{t['text']}](task:{t['id']}) — {who}, срок {_d(t['due_at'])}"
+    late = [t for t in rows if t["due_at"] < now]
+    soon = [t for t in rows if t["due_at"] >= now]
+    if late:
+        lines.append("Просрочено: " + "; ".join(task(t) for t in late))
+    if soon:
+        lines.append("Срок в ближайшие 2 дня: " + "; ".join(task(t) for t in soon))
+    try:
+        if calendarlib.status(conn)["connected"]:
+            ev = [e for e in calendarlib.events(conn, now, now + timedelta(days=2), 5) if not e["all_day"]]
+            if ev:
+                lines.append("Ближайшие встречи: " + "; ".join(calendarlib.line(e, with_day=True) for e in ev))
+    except Exception:  # noqa: BLE001 — без календаря обзор всё равно полезен
+        pass
+    last = conn.execute(
+        """SELECT id, title, started_at, last_activity FROM conversations WHERE trashed_at IS NULL
+           ORDER BY last_activity DESC LIMIT 1""").fetchone()
+    if last:
+        ago = int((now - last["last_activity"]).total_seconds() // 60)
+        lines.append(f"Последний разговор: [{last['title'] or '…'}](conversation:{last['id']}), закончился "
+                     f"{ago} мин назад" if ago < 180 else
+                     f"Последний разговор: [{last['title'] or '…'}](conversation:{last['id']}) {_d(last['started_at'])}")
+    return "\n".join(lines)
+
+
 def overview(conn) -> str:
-    """Короткая шпаргалка в начало каждого запуска: что было сегодня и вчера, задачи, люди."""
+    """Короткая шпаргалка в начало каждого запуска: что сейчас, что было сегодня и вчера, задачи, люди."""
     today = datetime.now(timezone.utc).astimezone(TZ).date()
-    parts = [day_overview(conn, today, with_summaries=False), day_overview(conn, today - timedelta(days=1),
-                                                                          with_summaries=False)]
+    parts = [now_block(conn), day_overview(conn, today, with_summaries=False),
+             day_overview(conn, today - timedelta(days=1), with_summaries=False)]
     n = conn.execute("SELECT count(*) AS n FROM tasks WHERE status = 'open'").fetchone()["n"]
     parts.append(f"Открытых задач: {n}.")
     named = [r["name"] for r in conn.execute(
@@ -199,8 +240,130 @@ def overview(conn) -> str:
            ORDER BY last_seen DESC NULLS LAST LIMIT 12""").fetchall()]
     if named:
         parts.append("Люди, которых кулон узнаёт по голосу: " + ", ".join(named) + ".")
-    text = "\n".join(parts)
-    return text[:3000]
+    text = "\n".join(p for p in parts if p)
+    return text[:3500]
+
+
+# ---------------------------------------------------------------- как пользователь разговаривает
+SENTENCE_END = re.compile(r"[.!?…]\s*$")
+
+
+def talk_stats(conn, conversation_id: int | None = None, day: date | None = None) -> str:
+    """Разбор разговора по таймингам фраз: кто сколько говорил, сколько реплик, самый длинный монолог, вопросы,
+    перебивания (реплика другого началась, пока предыдущая не закончилась или сразу после оборванной фразы).
+    Без id и дня — последний разговор, где говорили хотя бы двое."""
+    if conversation_id:
+        ids = [conversation_id]
+    elif day:
+        start, end = diary.day_bounds(day)
+        ids = [r["id"] for r in conn.execute(
+            """SELECT id FROM conversations WHERE started_at >= %s AND started_at < %s AND trashed_at IS NULL
+               ORDER BY started_at""", (start, end)).fetchall()]
+    else:
+        row = conn.execute(
+            """SELECT c.id FROM conversations c WHERE c.trashed_at IS NULL AND c.started_at > now() - interval '7 days'
+                 AND (SELECT count(DISTINCT s.person_id) FROM segments s WHERE s.conversation_id = c.id) >= 2
+               ORDER BY c.started_at DESC LIMIT 1""").fetchone()
+        ids = [row["id"]] if row else []
+    if not ids:
+        return "Подходящего разговора нет."
+    segs = conn.execute(people.SEGMENT_SELECT + " WHERE s.conversation_id = ANY(%s) AND NOT s.junk "
+                        "ORDER BY s.started_at, s.id", (ids,)).fetchall()
+    segs = [s for s in segs if not s.get("person_ignored") and (s.get("person_kind") or "person") == "person"]
+    if not segs:
+        return "В разговоре нет распознанной речи."
+    stats: dict[str, dict] = {}
+    prev = None
+    run_who, run_sec = None, 0.0
+    for s in segs:
+        who = people.speaker_label(s).rstrip("?")  # «Анна?» (не уверены) — тот же человек
+        sec = max(0.0, (s["ended_at"] - s["started_at"]).total_seconds())
+        st = stats.setdefault(who, {"sec": 0.0, "turns": 0, "words": 0, "questions": 0, "interrupts": 0,
+                                    "longest": 0.0})
+        st["sec"] += sec
+        st["words"] += len((s["text"] or "").split())
+        st["questions"] += (s["text"] or "").count("?")
+        if prev is None or people.speaker_label(prev).rstrip("?") != who:
+            st["turns"] += 1
+            if prev is not None:
+                gap = (s["started_at"] - prev["ended_at"]).total_seconds()
+                if gap < 0 or gap < 0.3 and not SENTENCE_END.search(prev["text"] or ""):
+                    st["interrupts"] += 1
+            run_who, run_sec = who, 0.0
+        run_sec += sec
+        if run_who == who:
+            st["longest"] = max(st["longest"], run_sec)
+        prev = s
+    total = sum(v["sec"] for v in stats.values()) or 1.0
+    convs = conn.execute("SELECT id, title, started_at, last_activity FROM conversations WHERE id = ANY(%s) "
+                         "ORDER BY started_at", (ids,)).fetchall()
+    head = "; ".join(f"[{c['title'] or '…'}](conversation:{c['id']}) {_d(c['started_at'])}–{_t(c['last_activity'])}"
+                     for c in convs[:6])
+    out = [f"Разговор: {head}" if len(convs) == 1 else f"Разговоры ({len(convs)}): {head}"]
+    for who, v in sorted(stats.items(), key=lambda x: -x[1]["sec"]):
+        wpm = round(v["words"] / (v["sec"] / 60)) if v["sec"] >= 20 else None
+        out.append(f"{who}: {round(100 * v['sec'] / total)}% речи ({round(v['sec'] / 60, 1)} мин), реплик "
+                   f"{v['turns']}, самый длинный монолог {round(v['longest'])} с, вопросов {v['questions']}, "
+                   f"перебил(а) {v['interrupts']}" + (f", темп {wpm} слов/мин" if wpm else ""))
+    out.append("Тайминги автоматические: перебивания и вопросы — оценка, а не точный счёт.")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- бриф к встрече
+def meeting_brief(conn, name: str | None = None, event_id: int | None = None) -> str:
+    """Всё к встрече: встреча из календаря (если есть), и по каждому знакомому участнику — когда и о чём говорили,
+    обещания в обе стороны."""
+    from . import calendar as calendarlib  # noqa: PLC0415
+
+    out = []
+    names: list[str] = [name] if name else []
+    if event_id:
+        e = conn.execute("""SELECT event_id, title, starts_at, ends_at, all_day, location, notes, attendees, calendar
+                            FROM calendar_events WHERE event_id = %s ORDER BY starts_at LIMIT 1""",
+                         (event_id,)).fetchone()
+        if e:
+            out.append("Встреча: " + calendarlib.line(e, with_day=True))
+            if e.get("notes"):
+                out.append("Описание: " + " ".join(e["notes"].split())[:500])
+            names += [x.strip() for x in (e.get("attendees") or "").split(",") if x.strip()]
+            names += [w for w in re.findall(r"[А-ЯЁA-Z][а-яёa-z]{2,}", e["title"] or "")]
+    known = {r["id"]: r for r in conn.execute(
+        "SELECT id, name, last_seen FROM people WHERE name IS NOT NULL AND NOT is_owner").fetchall()}
+    picked: list[dict] = []
+    for n in names:
+        key = n.lower().strip()
+        for p in known.values():
+            pn = (p["name"] or "").lower()
+            if key and (pn == key or key in pn.split() or pn in key.split()) and p not in picked:
+                picked.append(p)
+    if not picked and name:
+        out.append(f"Человека «{name}» нет среди узнанных по голосу — ищу по словам.")
+    for p in picked[:3]:
+        convs = conn.execute(
+            """SELECT c.id, c.started_at, c.title, c.summary FROM conversations c
+               WHERE c.trashed_at IS NULL AND EXISTS (SELECT 1 FROM segments s WHERE s.conversation_id = c.id
+                                                      AND s.person_id = %s)
+               ORDER BY c.started_at DESC LIMIT 5""", (p["id"],)).fetchall()
+        total = conn.execute("SELECT count(DISTINCT conversation_id) AS n FROM segments WHERE person_id = %s",
+                             (p["id"],)).fetchone()["n"]
+        out.append(f"\n{p['name']}: разговоров всего {total}" +
+                   (f", последний {_d(convs[0]['started_at'])}" if convs else ""))
+        out += [f"- [{c['title'] or '…'}](conversation:{c['id']}) {_d(c['started_at'])}: "
+                + " ".join((c["summary"] or "").split())[:300] for c in convs]
+        tasks = conn.execute(
+            """SELECT id, text, kind, status, due_at FROM tasks
+               WHERE (counterpart_id = %s OR person_id = %s) AND status IN ('open', 'suggested')
+               ORDER BY coalesce(due_at, created_at) LIMIT 10""", (p["id"], p["id"])).fetchall()
+        if tasks:
+            out.append("Обещания:")
+            out += [f"- [{t['text']}](task:{t['id']}) — " + ("обещал(а) пользователю" if t["kind"] == "waiting"
+                                                            else "обещал пользователь")
+                    + (f", срок {_d(t['due_at'])}" if t["due_at"] else "") for t in tasks]
+    if name and not picked:
+        from . import memory as memorylib  # noqa: PLC0415
+        hits = memorylib.recall(conn, name, k=6)
+        out += [f"- [{h['kind']} {h['id']} {_d(h['at'])}] {h['text']}" for h in hits]
+    return "\n".join(out) or "Нечего собрать: укажите человека или встречу из календаря."
 
 
 def context_block(conn, ref: str | None) -> str:

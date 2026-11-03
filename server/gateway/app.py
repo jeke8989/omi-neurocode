@@ -28,7 +28,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
-                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, promises, retention, routines, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, promises, retention, roles, routines, tts, voices)
 from neuro import calendar as calendarlib
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
@@ -1277,6 +1277,7 @@ async def api_chat(request: Request):
         level = str(body.get("level") or "auto")
         agent = str(body.get("agent") or "mnemo")
         context = str(body.get("context") or "").strip() or None
+        role = str(body.get("role") or roles.DEFAULT).strip()[:20]
         if not text:
             return Json({"error": "empty"}, status_code=400)
         if agent not in ("mnemo", "gpt", "claude"):
@@ -1291,11 +1292,12 @@ async def api_chat(request: Request):
 
         def start():
             with db.connect() as conn:
-                return agent_core.start_run(conn, text, level, "chat", None, agent, context)
+                return agent_core.start_run(conn, text, level, "chat", None, agent, context,
+                                            role if roles.exists(conn, role) else None)
 
         run_id, message_id = await _run_in_thread(start)
         _run_in_thread(_execute_run, run_id)
-        return Json({"run_id": run_id, "message_id": message_id, "level": level, "agent": agent})
+        return Json({"run_id": run_id, "message_id": message_id, "level": level, "agent": agent, "role": role})
 
     limit = _clamp(request.query_params.get("limit"), 60, 1, 300)
     async with await aconnect() as conn:
@@ -1306,9 +1308,13 @@ async def api_chat(request: Request):
         runs = {}
         if run_ids:
             for r in await (await conn.execute(
-                    "SELECT id, level, status, model, agent, context FROM agent_runs WHERE id = ANY(%s)",
-                    (run_ids,))).fetchall():
-                runs[r["id"]] = {**r, "steps": []}
+                    """SELECT id, level, status, model, agent, context, coalesce(role, 'mnemo') AS role, followups
+                       FROM agent_runs WHERE id = ANY(%s)""", (run_ids,))).fetchall():
+                try:
+                    follow = json.loads(r["followups"]) if r["followups"] else []
+                except (TypeError, ValueError):
+                    follow = []
+                runs[r["id"]] = {**r, "followups": follow, "steps": []}
             for st in await (await conn.execute(
                     """SELECT run_id, kind, title, detail, created_at FROM agent_steps
                        WHERE run_id = ANY(%s) ORDER BY id""", (run_ids,))).fetchall():
@@ -1352,6 +1358,77 @@ async def api_run_cancel(request: Request):
     if stopped is None:
         return Json({"error": "not found"}, status_code=404)
     return Json({"stopped": bool(stopped)})
+
+
+async def api_chat_starters(request: Request):
+    """Стартовые подсказки чата: под роль и из того, что накопилось (обещания, встречи, люди, разговоры)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    role = str(request.query_params.get("role") or roles.DEFAULT)[:20]
+
+    def build():
+        with db.connect() as conn:
+            return roles.starters(conn, role)
+
+    try:
+        items = await _run_in_thread(build)
+    except Exception:  # noqa: BLE001 — без подсказок чат работает
+        log.exception("chat starters failed")
+        items = []
+    return Json({"role": role, "items": items})
+
+
+async def api_roles(request: Request):
+    """Роли ассистента: встроенные и свои. POST — создать свою (имя, эмодзи, характер)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except ValueError:
+            return Json({"error": "bad json"}, status_code=400)
+
+        def create():
+            with db.connect() as conn:
+                return roles.create(conn, body.get("name"), body.get("emoji"), body.get("persona"))
+
+        try:
+            rid = await _run_in_thread(create)
+        except ValueError as exc:
+            return Json({"error": str(exc)}, status_code=400)
+        return Json({"id": rid})
+
+    def listing():
+        with db.connect() as conn:
+            return roles.listing(conn, i18n.lang(conn))
+
+    return Json({"roles": await _run_in_thread(listing)})
+
+
+async def api_role(request: Request):
+    """Своя роль: POST — изменить, DELETE — удалить. Встроенные не меняются."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    rid = request.path_params["role_id"]
+    if request.method == "DELETE":
+        def drop():
+            with db.connect() as conn:
+                return roles.delete(conn, rid)
+        return Json({"deleted": await _run_in_thread(drop)})
+    try:
+        body = await request.json()
+    except ValueError:
+        return Json({"error": "bad json"}, status_code=400)
+
+    def change():
+        with db.connect() as conn:
+            return roles.update(conn, rid, body.get("name"), body.get("emoji"), body.get("persona"))
+
+    try:
+        ok = await _run_in_thread(change)
+    except ValueError as exc:
+        return Json({"error": str(exc)}, status_code=400)
+    return Json({"updated": ok}, status_code=200 if ok else 404)
 
 
 async def api_chat_clear(request: Request):
@@ -2149,6 +2226,9 @@ app = Starlette(
         Route("/api/models", api_models, methods=["GET", "POST"]),
         Route("/api/chat", api_chat, methods=["GET", "POST"]),
         Route("/api/chat/clear", api_chat_clear, methods=["POST"]),
+        Route("/api/chat/starters", api_chat_starters, methods=["GET"]),
+        Route("/api/roles", api_roles, methods=["GET", "POST"]),
+        Route("/api/roles/{role_id}", api_role, methods=["POST", "DELETE"]),
         Route("/api/runs/{run_id:int}/cancel", api_run_cancel, methods=["POST"]),
         Route("/api/share", api_share),
         Route("/mcp", mcp_endpoint, methods=["GET", "POST", "DELETE"]),

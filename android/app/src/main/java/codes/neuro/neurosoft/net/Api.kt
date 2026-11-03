@@ -235,7 +235,13 @@ data class ModelsInfo(
 
 data class ChatStep(val kind: String, val title: String, val detail: String?)
 data class ChatRun(val id: Long, val level: String, val status: String, val model: String?, val steps: List<ChatStep>,
-                   val agent: String = "mnemo", val context: String? = null)
+                   val agent: String = "mnemo", val context: String? = null,
+                   /** В какой роли ответил ассистент и какие следующие вопросы предложил (кнопки под ответом). */
+                   val role: String = "mnemo", val followups: List<String> = emptyList())
+
+/** Роль ассистента — «чат-расширение»: тот же Mnemo с вашими данными, но другой характер и фокус. */
+data class AssistantRole(val id: String, val emoji: String, val name: String, val about: String,
+                         val persona: String?, val custom: Boolean)
 data class ChatMessage(val id: Long, val role: String, val text: String, val channel: String, val runId: Long?,
                        val createdAt: String)
 data class ChatState(val messages: List<ChatMessage>, val runs: Map<Long, ChatRun>, val running: Boolean)
@@ -729,6 +735,8 @@ object Api {
                 steps = r.optJSONArray("steps").map { ChatStep(it.optString("kind"), it.optString("title"), it.str("detail")) },
                 agent = r.optString("agent").ifBlank { if (r.optString("level").startsWith("claude")) "claude" else "mnemo" },
                 context = r.str("context"),
+                role = r.optString("role").ifBlank { "mnemo" },
+                followups = r.optJSONArray("followups").strings(),
             )
         }
         return ChatState(
@@ -741,10 +749,33 @@ object Api {
         )
     }
 
-    suspend fun sendChat(text: String, level: String, agent: String = "mnemo", context: String? = null) {
-        val body = JSONObject().put("text", text).put("level", level).put("agent", agent)
+    suspend fun sendChat(text: String, level: String, agent: String = "mnemo", context: String? = null,
+                         role: String = "mnemo") {
+        val body = JSONObject().put("text", text).put("level", level).put("agent", agent).put("role", role)
         if (context != null) body.put("context", context)
         call("POST", "/api/chat", body)
+    }
+
+    /** Стартовые подсказки чата: под роль и из того, что накопилось (каждый раз другие). */
+    suspend fun chatStarters(role: String): List<String> =
+        JSONObject(call("GET", "/api/chat/starters?role=" + java.net.URLEncoder.encode(role, "UTF-8")))
+            .optJSONArray("items").strings()
+
+    suspend fun roles(): List<AssistantRole> =
+        JSONObject(call("GET", "/api/roles")).optJSONArray("roles").map {
+            AssistantRole(it.optString("id"), it.optString("emoji").ifBlank { "✨" }, it.optString("name"),
+                it.optString("about"), it.str("persona"), it.optBoolean("custom"))
+        }
+
+    /** Своя роль: создать (id = null) или изменить. Возвращает id роли. */
+    suspend fun saveRole(id: String?, name: String, emoji: String, persona: String): String {
+        val body = JSONObject().put("name", name).put("emoji", emoji).put("persona", persona)
+        return if (id == null) JSONObject(call("POST", "/api/roles", body)).optString("id")
+        else id.also { call("POST", "/api/roles/$it", body) }
+    }
+
+    suspend fun deleteRole(id: String) {
+        call("DELETE", "/api/roles/$id")
     }
 
     /** Всё о событии, разговоре или дне простым текстом — для «Скопировать». ref: event:ID | conversation:ID | day:… */

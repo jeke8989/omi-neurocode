@@ -656,6 +656,16 @@
     <string name="resume_recording">Resume recording</string>
     <string name="retry">Try again</string>
     <string name="right_now">Right now</string>
+    <string name="role_create">Create your own role</string>
+    <string name="role_delete">Delete role</string>
+    <string name="role_edit">Your role</string>
+    <string name="role_emoji">Emoji</string>
+    <string name="role_name">Name</string>
+    <string name="role_name_hint">E.g. Editor</string>
+    <string name="role_new">New role</string>
+    <string name="role_persona">Personality and focus</string>
+    <string name="role_persona_hint">Who it is and how it answers. E.g. a strict editor: short, to the point, fixes my emails and texts</string>
+    <string name="role_title">Assistant role</string>
     <string name="routines_channel">Assistant tasks</string>
     <string name="routines_empty_text">Tell the assistant, for example: “every day at 23:00 make a day summary in Notion” or “put client meeting notes in Notion”</string>
     <string name="routines_empty_title">Nothing yet</string>

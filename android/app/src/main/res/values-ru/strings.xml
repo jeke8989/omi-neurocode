@@ -655,6 +655,16 @@
     <string name="resume_recording">Продолжить запись</string>
     <string name="retry">Повторить</string>
     <string name="right_now">Прямо сейчас</string>
+    <string name="role_create">Создать свою роль</string>
+    <string name="role_delete">Удалить роль</string>
+    <string name="role_edit">Своя роль</string>
+    <string name="role_emoji">Эмодзи</string>
+    <string name="role_name">Название</string>
+    <string name="role_name_hint">Например: Редактор</string>
+    <string name="role_new">Новая роль</string>
+    <string name="role_persona">Характер и задачи</string>
+    <string name="role_persona_hint">Кто он и как отвечает. Например: строгий редактор — коротко, по делу, правит мои письма и тексты</string>
+    <string name="role_title">Роль ассистента</string>
     <string name="routines_channel">Задания ассистента</string>
     <string name="routines_empty_text">Скажите ассистенту, например: «каждый день в 23:00 делай сводку дня в Notion» или «итоги встреч с клиентами клади в Notion»</string>
     <string name="routines_empty_title">Пока ничего</string>

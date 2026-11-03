@@ -506,3 +506,15 @@ UPDATE settings SET value = '0', updated_at = now() WHERE key = 'feature.diary'
     AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'feature.diary_off_v1');
 INSERT INTO settings (key, value) VALUES ('feature.diary', '0') ON CONFLICT (key) DO NOTHING;
 INSERT INTO settings (key, value) VALUES ('feature.diary_off_v1', '1') ON CONFLICT (key) DO NOTHING;
+-- роли ассистента («чат-расширения»): свои роли пользователя (встроенные — в коде, roles.py)
+CREATE TABLE IF NOT EXISTS agent_roles (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    emoji       TEXT,
+    persona     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- в какой роли ответил ассистент и какие следующие вопросы предложил (кнопки под ответом)
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS role TEXT;
+ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS followups TEXT;

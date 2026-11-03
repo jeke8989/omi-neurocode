@@ -128,6 +128,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("calendar_on", false)
         set(value) = sp.edit().putBoolean("calendar_on", value).apply()
 
+    /** Роль ассистента в чате (Mnemo, коуч обещаний, тренер общения… или своя «cN»). */
+    var chatRole: String
+        get() = sp.getString("chat_role", "mnemo") ?: "mnemo"
+        set(value) = sp.edit().putString("chat_role", value).apply()
+
     /** Последний ответ задания по расписанию, о котором уже уведомили (номер запуска агента). */
     var routineSeenRun: Long
         get() = sp.getLong("routine_seen_run", -1L)

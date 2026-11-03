@@ -11,7 +11,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -26,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import codes.neuro.neurosoft.Core
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
+import codes.neuro.neurosoft.net.AssistantRole
 import codes.neuro.neurosoft.net.ChatMessage
 import codes.neuro.neurosoft.net.ChatRun
 import kotlinx.coroutines.delay
@@ -57,6 +61,37 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
     val c = Mn.c
+    // роль ассистента: тот же Mnemo с вашими данными, но другой характер и фокус
+    var role by rememberSaveable { mutableStateOf(Core.prefs.chatRole) }
+    val rolesRes by Repo.roles.state.collectAsState()
+    val roles = rolesRes.data.orEmpty()
+    val current = roles.firstOrNull { it.id == role }
+    var picker by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<AssistantRole?>(null) }
+    // стартовые подсказки — под роль и из накопленного (каждый раз другие)
+    var starters by remember(role) { mutableStateOf<List<String>?>(null) }
+    var switched by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) { Repo.roles.refresh() }
+    LaunchedEffect(rolesRes.data) {
+        // своя роль удалена на другом устройстве — назад к Mnemo
+        if (rolesRes.data != null && current == null && role != "mnemo") {
+            role = "mnemo"
+            Core.prefs.chatRole = "mnemo"
+        }
+    }
+    LaunchedEffect(role) {
+        starters = try {
+            Api.chatStarters(role)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+    fun pickRole(id: String) {
+        if (id != role) switched = true
+        role = id
+        Core.prefs.chatRole = id
+        picker = false
+    }
 
     fun send(text: String) {
         val t = text.trim()
@@ -65,8 +100,9 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
         error = null
         scope.launch {
             try {
-                Api.sendChat(t, "auto", agent, about)
+                Api.sendChat(t, "auto", agent, about, role)
                 input = ""
+                switched = false
                 Repo.chat.refresh()
             } catch (e: Exception) {
                 error = e
@@ -118,23 +154,43 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
         )
     }
 
+    if (picker) {
+        RolePicker(roles, role, onPick = { pickRole(it) }, onEdit = { picker = false; editing = it },
+            onCreate = { picker = false; editing = AssistantRole("", "✨", "", "", "", true) },
+            onDismiss = { picker = false })
+    }
+    editing?.let { r ->
+        RoleEditor(r, onDismiss = { editing = null }, onSaved = { id ->
+            editing = null
+            scope.launch {
+                Repo.roles.refresh()
+                if (id != null) pickRole(id) else if (r.id == role) pickRole("mnemo")
+                starters = try { Api.chatStarters(role) } catch (_: Exception) { emptyList() }
+            }
+        })
+    }
+
     Column(Modifier.fillMaxSize().imePadding()) {
         TopBar(stringResource(R.string.assistant), { Nav.pop() }) {
             if (count > 0) IconCircle(Icons.Trash, stringResource(R.string.clear_chat), { confirmClear = true }, size = 40.dp)
         }
+        val chat = res.data
+        val running = chat?.runs?.values?.any { it.status == "running" } == true
         Box(Modifier.weight(1f)) {
-            val chat = res.data
             when {
                 chat == null && res.error != null -> ErrorBlock(res.error, { scope.launch { Repo.chat.refresh() } })
                 chat == null -> LoadingBlock()
-                chat.messages.isEmpty() && !sending -> ChatEmpty { send(it) }
+                chat.messages.isEmpty() && !sending -> ChatEmpty(current, starters) { send(it) }
                 else -> LazyColumn(
                     state = list,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(chat.messages, key = { it.id }) { m -> Message(m, m.runId?.let { chat.runs[it] }) }
+                    items(chat.messages, key = { it.id }) { m ->
+                        val run = m.runId?.let { chat.runs[it] }
+                        Message(m, run, run?.let { r -> roles.firstOrNull { it.id == r.role } })
+                    }
                     val pending = chat.runs.values.firstOrNull { r ->
                         r.status == "running" && chat.messages.none { it.role == "assistant" && it.runId == r.id }
                     }
@@ -143,33 +199,171 @@ fun ChatScreen(prefill: String?, context: String? = null, contextTitle: String? 
                 }
             }
         }
+        // под последним ответом — следующие вопросы; сменили роль — её стартовые подсказки
+        val last = chat?.messages?.lastOrNull()
+        val follow = last?.takeIf { it.role == "assistant" }?.runId?.let { chat?.runs?.get(it) }?.followups.orEmpty()
+        val chips = when {
+            chat == null || chat.messages.isEmpty() || sending || running || input.isNotEmpty() -> emptyList()
+            switched -> starters.orEmpty()
+            else -> follow
+        }.distinct()
+        if (chips.isNotEmpty()) {
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 6.dp)) {
+                items(chips, key = { it }) { q -> Chip(q, false, { send(q) }) }
+            }
+        }
         Composer(
             input = input, onInput = { input = it },
             about = about?.let { contextTitle ?: it }, onDropAbout = { about = null },
             sending = sending, error = error, onSend = { send(input) },
+            role = current, onRole = { picker = true; scope.launch { Repo.roles.refresh() } },
         )
     }
 }
 
-/** Переключатель агентов: Mnemo, Claude, GPT. */
+/** Пустой чат: кто сейчас отвечает (роль) и стартовые подсказки из ваших данных. */
 @Composable
-private fun ChatEmpty(onPick: (String) -> Unit) {
+private fun ChatEmpty(role: AssistantRole?, starters: List<String>?, onPick: (String) -> Unit) {
     val c = Mn.c
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalArrangement = Arrangement.Center) {
-        Lens(LensState.IDLE, 64.dp)
+        if (role == null || role.id == "mnemo") Lens(LensState.IDLE, 64.dp) else EmojiTile(role.emoji, 64.dp)
         Spacer(Modifier.height(12.dp))
-        Txt(stringResource(R.string.chat_empty_title), T.title)
+        Txt(if (role == null || role.id == "mnemo") stringResource(R.string.chat_empty_title) else role.name, T.title)
+        if (role != null && role.id != "mnemo" && role.about.isNotBlank()) {
+            Txt(role.about, T.small, c.graphite, Modifier.padding(top = 4.dp), maxLines = 2)
+        }
         Spacer(Modifier.height(20.dp))
-        listOf(R.string.chat_hint_1, R.string.chat_hint_2, R.string.chat_hint_3).forEach { id ->
-            val text = stringResource(id)
-            Txt(text, T.body, c.ink, Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                .background(c.paper).tap({ onPick(text) }).padding(horizontal = 16.dp, vertical = 12.dp))
+        val items = when {
+            starters == null -> null
+            starters.isEmpty() -> listOf(R.string.chat_hint_1, R.string.chat_hint_2, R.string.chat_hint_3).map { stringResource(it) }
+            else -> starters
+        }
+        if (items == null) {
+            Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { Spinner() }
+        } else {
+            items.forEach { text ->
+                Txt(text, T.body, c.ink, Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(c.paper).tap({ onPick(text) }).padding(horizontal = 16.dp, vertical = 12.dp))
+            }
+        }
+    }
+}
+
+/** Выбор роли: встроенные и свои; своя — карандашом правится. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RolePicker(
+    roles: List<AssistantRole>, selected: String, onPick: (String) -> Unit, onEdit: (AssistantRole) -> Unit,
+    onCreate: () -> Unit, onDismiss: () -> Unit,
+) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val c = Mn.c
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = c.fog,
+        dragHandle = { Box(Modifier.padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(c.line)) }) {
+        LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding(), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item { Txt(stringResource(R.string.role_title), T.title, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 8.dp)) }
+            if (roles.isEmpty()) item { LoadingBlock() }
+            items(roles, key = { it.id }) { r ->
+                Row(
+                    Modifier.fillMaxWidth().tap({ onPick(r.id) }).padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EmojiTile(r.emoji, 44.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Txt(r.name, T.bodyStrong, maxLines = 1)
+                        if (r.about.isNotBlank()) Txt(r.about, T.caption, c.graphite, maxLines = 2)
+                    }
+                    if (r.custom) IconCircle(Icons.Edit, stringResource(R.string.role_edit), { onEdit(r) }, size = 36.dp,
+                        background = Color.Transparent, tint = c.graphite)
+                    if (r.id == selected) Icon(Icons.Check, null, tint = c.lens, modifier = Modifier.padding(start = 4.dp).size(20.dp))
+                }
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().tap(onCreate).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(c.ink), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Plus, null, tint = c.onInk, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Txt(stringResource(R.string.role_create), T.bodyStrong, modifier = Modifier.weight(1f))
+                    Icon(Icons.Chevron, null, tint = c.faint, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+/** Своя роль: эмодзи, название, характер (как «личность чата»). onSaved(id) — id роли, null — удалена. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RoleEditor(role: AssistantRole, onDismiss: () -> Unit, onSaved: (String?) -> Unit) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val c = Mn.c
+    val scope = rememberCoroutineScope()
+    var emoji by remember { mutableStateOf(role.emoji) }
+    var name by remember { mutableStateOf(role.name) }
+    var persona by remember { mutableStateOf(role.persona.orEmpty()) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
+    val isNew = role.id.isBlank()
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, containerColor = c.fog,
+        dragHandle = { Box(Modifier.padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(c.line)) }) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(bottom = 16.dp)) {
+            Txt(stringResource(if (isNew) R.string.role_new else R.string.role_edit), T.title,
+                modifier = Modifier.padding(start = 20.dp, top = 12.dp))
+            Group(inset = 18.dp) {
+                item { FieldRow(stringResource(R.string.role_emoji), emoji, { emoji = it.take(8) }, "✨") }
+                item { FieldRow(stringResource(R.string.role_name), name, { name = it.take(40) }, stringResource(R.string.role_name_hint)) }
+                item {
+                    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+                        Txt(stringResource(R.string.role_persona), T.caption, c.graphite)
+                        Box(Modifier.fillMaxWidth().padding(top = 4.dp).heightIn(min = 96.dp)) {
+                            if (persona.isEmpty()) Txt(stringResource(R.string.role_persona_hint), T.body, c.faint)
+                            BasicTextField(
+                                value = persona, onValueChange = { persona = it.take(2000) },
+                                textStyle = T.body.copy(color = c.ink), cursorBrush = SolidColor(c.lens),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+            error?.let { Txt(errorText(it), T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) }
+            PrimaryButton(stringResource(R.string.save), {
+                busy = true
+                scope.launch {
+                    try {
+                        onSaved(Api.saveRole(role.id.ifBlank { null }, name.trim(), emoji.trim().ifBlank { "✨" }, persona.trim()))
+                    } catch (e: Exception) {
+                        error = e
+                    }
+                    busy = false
+                }
+            }, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                enabled = !busy && name.isNotBlank() && persona.isNotBlank())
+            if (!isNew) {
+                Txt(stringResource(R.string.role_delete), T.bodyStrong, c.red, Modifier.align(Alignment.CenterHorizontally)
+                    .padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).quietTap {
+                        scope.launch {
+                            try {
+                                Api.deleteRole(role.id)
+                                onSaved(null)
+                            } catch (e: Exception) {
+                                error = e
+                            }
+                        }
+                    }.padding(horizontal = 16.dp, vertical = 10.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun Message(m: ChatMessage, run: ChatRun?) {
+private fun Message(m: ChatMessage, run: ChatRun?, role: AssistantRole?) {
     val c = Mn.c
     val fmt = rememberFmt()
     val mine = m.role == "user"
@@ -186,6 +380,7 @@ private fun Message(m: ChatMessage, run: ChatRun?) {
         val meta = listOfNotNull(
             if (m.channel == "voice") stringResource(R.string.by_voice) else null,
             if (!mine && run != null && run.agent != "mnemo") agentTitle(run.agent) else null,
+            if (!mine && run != null && run.role != "mnemo") role?.let { "${it.emoji} ${it.name}" } else null,
             if (!mine && run?.status == "needs_input") stringResource(R.string.agent_asks) else null,
             fmt.time(m.createdAt),
         ).joinToString(", ")
@@ -259,25 +454,40 @@ private fun Working(run: ChatRun?) {
 @Composable
 private fun Composer(
     input: String, onInput: (String) -> Unit, about: String?, onDropAbout: () -> Unit, sending: Boolean,
-    error: Throwable?, onSend: () -> Unit,
+    error: Throwable?, onSend: () -> Unit, role: AssistantRole?, onRole: () -> Unit,
 ) {
     val c = Mn.c
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 8.dp)) {
         if (error != null) {
             Txt(errorText(error), T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
-        if (about != null) {
-            // о чём разговор: событие или день, с которого открыт чат
+        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            // роль ассистента: «🎯 Коуч обещаний ⌄»
             Row(
-                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp).clip(RoundedCornerShape(16.dp))
-                    .background(c.lens.copy(alpha = 0.10f)).padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                Modifier.height(34.dp).clip(RoundedCornerShape(17.dp)).background(c.paper)
+                    .tap(onRole).padding(start = 10.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Sparkle, null, tint = c.lens, modifier = Modifier.size(14.dp))
+                Txt(role?.emoji ?: "🧠", T.small)
                 Spacer(Modifier.width(6.dp))
-                Txt(stringResource(R.string.chat_about, about), T.caption, c.ink, Modifier.weight(1f, fill = false), maxLines = 1)
-                IconCircle(Icons.Close, stringResource(R.string.chat_about_drop), onDropAbout, size = 28.dp,
-                    background = Color.Transparent, tint = c.graphite)
+                Txt(role?.name ?: "Mnemo", T.smallStrong, maxLines = 1, modifier = Modifier.widthIn(max = 150.dp))
+                Icon(Icons.ChevronDown, stringResource(R.string.role_title), tint = c.graphite,
+                    modifier = Modifier.padding(start = 2.dp).size(16.dp))
+            }
+            if (about != null) {
+                Spacer(Modifier.width(8.dp))
+                // о чём разговор: событие или день, с которого открыт чат
+                Row(
+                    Modifier.weight(1f, fill = false).clip(RoundedCornerShape(16.dp))
+                        .background(c.lens.copy(alpha = 0.10f)).padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Sparkle, null, tint = c.lens, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Txt(stringResource(R.string.chat_about, about), T.caption, c.ink, Modifier.weight(1f, fill = false), maxLines = 1)
+                    IconCircle(Icons.Close, stringResource(R.string.chat_about_drop), onDropAbout, size = 28.dp,
+                        background = Color.Transparent, tint = c.graphite)
+                }
             }
         }
         Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp), verticalAlignment = Alignment.Bottom) {

@@ -92,14 +92,14 @@ def _headers() -> dict:
 
 
 def chat_json(conn, task: str, system: str, user: str, timeout: float = 180, fast: bool = False,
-              usage: str | None = None) -> dict:
+              usage: str | None = None, temperature: float = 0.2) -> dict:
     """Запрос к модели задачи; ответ — JSON-объект. fast=True просит минимум «размышлений» (для голоса).
     usage — под каким именем записать расход (например, events: модель «итогов», но учёт отдельно)."""
     model = resolve_model(conn, task)
     body: dict = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0.2,
+        "temperature": temperature,
     }
     if is_openrouter():
         body["usage"] = {"include": True}
