@@ -204,15 +204,19 @@ PERSON_COLUMNS = """p.id, p.name, p.is_owner, p.ignored, p.kind, p.number, p.sam
        p.first_seen, p.last_seen,
        (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) AS conversations"""
 
-# Голос, услышанный только в одном разговоре, — «Собеседник»: не показываем в «Людях», «Созвездии» и
-# подсказках, пока он не встретится снова (или пока пользователь сам его не назовёт).
+# Голос, услышанный только в одном разговоре и мельком, — «Собеседник»: не показываем в «Людях» и
+# подсказках, пока он не встретится снова (или пока пользователь сам его не назовёт). Но кто говорил с
+# пользователем хотя бы пару минут (встреча, долгий разговор) — виден сразу: его можно назвать.
 RECURRING = 2
+LONG_TALK_SEC = 120
 VISIBLE_SQL = f"""(p.name IS NOT NULL OR p.is_owner OR (coalesce(p.kind, 'person') = 'person' AND
-    (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}))"""
+    (p.speech_sec >= {LONG_TALK_SEC} OR
+     (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING})))"""
 
 
 def transient(p: dict) -> bool:
-    return not p.get("name") and not p.get("is_owner") and (p.get("conversations") or 0) < RECURRING
+    return not p.get("name") and not p.get("is_owner") and (p.get("conversations") or 0) < RECURRING \
+        and (p.get("speech_sec") or 0) < LONG_TALK_SEC
 
 
 def _with_sample(p: dict | None) -> dict | None:
@@ -251,7 +255,8 @@ def list_people(conn) -> dict:
            LEFT JOIN people t ON t.id = g.target_id
            LEFT JOIN conversations c ON c.id = g.conversation_id
            WHERE g.status = 'pending' AND p.name IS NULL AND NOT p.is_owner AND coalesce(p.kind, 'person') = 'person'
-             AND (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING}
+             AND (p.speech_sec >= {LONG_TALK_SEC}
+                  OR (SELECT count(DISTINCT s.conversation_id) FROM segments s WHERE s.person_id = p.id) >= {RECURRING})
            ORDER BY g.id DESC LIMIT 20""").fetchall()
     owner = voices.suggest_owner(conn)
     return {"people": people, "suggestions": suggestions, "owner_candidate": _with_sample(owner),

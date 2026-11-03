@@ -575,3 +575,17 @@ def test_frequent_voice_does_not_take_other_voices(clean):
     assert conn.execute("SELECT speech_sec FROM people WHERE id = %s", (anna,)).fetchone()["speech_sec"] == speech
     assert voices._recheck_ids(conn) == set()
     assert "фраз за 7 дней" in voices.diagnostics(conn)
+
+    # «это не Анна»: фраза отдана другому — похожие на неё дообученные образцы Анны убираются
+    from neuro import people
+    boris_seg = m.embed(synth(**BORIS, sec=3, seed=500))
+    conn.execute("""INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed, segment_id)
+                    VALUES (%s, %s, 3, %s, false, 9100)""", (anna, voices.vec(m.embed(synth(**BORIS, sec=3, seed=501))),
+                                                              voices.backend_name()))
+    sid = rows[1]["id"]
+    conn.execute("UPDATE segments SET embedding = %s, embed_backend = %s WHERE id = %s",
+                 (voices.vec(boris_seg), voices.backend_name(), sid))
+    people.assign_segment(conn, sid, name="Борис")
+    assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s AND segment_id = 9100",
+                        (anna,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (anna,)).fetchone()["n"] >= 15

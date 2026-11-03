@@ -975,7 +975,8 @@ def dedupe(conn) -> dict:
             merge_people(conn, b["id"], target["id"])
             gone.add(b["id"])
             merged += 1
-        elif (target["name"] or target["is_owner"]) and sim >= th.suggest and (b["conversations"] or 0) >= 2:
+        elif (target["name"] or target["is_owner"]) and sim >= th.suggest and \
+                ((b["conversations"] or 0) >= 2 or (b["speech_sec"] or 0) >= 120):  # или долгий разговор
             label_name = target["name"] or "Я"
             seen = conn.execute(
                 """SELECT 1 FROM person_suggestions WHERE person_id = %s AND target_id = %s
@@ -1172,11 +1173,21 @@ def assign_segment(conn, segment_id: int, person_id: int):
         return
     conn.execute("UPDATE segments SET person_id = %s, voice_score = 1 WHERE id = %s", (person_id, segment_id))
     conn.execute("DELETE FROM voiceprints WHERE segment_id = %s", (segment_id,))
-    if row["embedding"] and row["embed_backend"] == backend_name():
+    emb = np.asarray(row["embedding"], dtype=np.float32) if row["embedding"] and row["embed_backend"] == backend_name() \
+        else None
+    if emb is not None:
         sec = max(1.0, (row["ended_at"] - row["started_at"]).total_seconds())
-        add_voiceprint(conn, person_id, np.asarray(row["embedding"], dtype=np.float32), sec, confirmed=True,
-                       segment_id=segment_id)
+        add_voiceprint(conn, person_id, emb, sec, confirmed=True, segment_id=segment_id)
     if row["person_id"] and row["person_id"] != person_id:
+        # «это не он»: дообученные образцы прежнего человека, похожие на этот голос, — чужие, убираем их,
+        # чтобы он больше не «забирал» этот голос
+        if emb is not None:
+            th = thresholds()
+            wrong = [r["id"] for r in conn.execute(
+                """SELECT id, embedding FROM voiceprints WHERE person_id = %s AND backend = %s AND NOT confirmed""",
+                (row["person_id"], backend_name())).fetchall() if cosine(r["embedding"], emb) >= th.match]
+            if wrong:
+                conn.execute("DELETE FROM voiceprints WHERE id = ANY(%s::bigint[])", (wrong,))
         recompute_centroid(conn, row["person_id"])
 
 
