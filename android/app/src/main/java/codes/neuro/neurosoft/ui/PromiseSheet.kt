@@ -134,14 +134,25 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
             SheetLabel(stringResource(R.string.promise_kind))
             Wrap(modifier = Modifier.padding(horizontal = 16.dp)) {
                 listOf("mine" to R.string.promises_mine, "waiting" to R.string.promises_theirs,
-                    "reminder" to R.string.task_reminder).forEach { (k, label) ->
-                    Chip(stringResource(label), kind == k, { kind = k })
+                    "meeting" to R.string.promise_meeting, "reminder" to R.string.task_reminder).forEach { (k, label) ->
+                    val lead: (@Composable () -> Unit)? = if (k != "meeting") null else {
+                        { Icon(Icons.Calendar, null, tint = if (kind == k) c.onInk else c.ink, modifier = Modifier.size(16.dp)) }
+                    }
+                    Chip(stringResource(label), kind == k, {
+                        kind = k
+                        // встреча — сразу в календарь (если он подключён): со сроком-началом и длительностью
+                        if (k == "meeting" && codes.neuro.neurosoft.PhoneCalendar.granted(context)) inCalendar = true
+                    }, leading = lead)
                 }
             }
 
             // с кем
             if (kind != "reminder") {
-                SheetLabel(stringResource(if (kind == "waiting") R.string.promise_who_theirs else R.string.promise_who_mine))
+                SheetLabel(stringResource(when (kind) {
+                    "waiting" -> R.string.promise_who_theirs
+                    "meeting" -> R.string.meeting_who
+                    else -> R.string.promise_who_mine
+                }))
                 val current = person?.let { personLabel(it) } ?: personName.ifBlank { null }
                 Group(inset = 56.dp) {
                     item {
@@ -180,7 +191,8 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
             }
 
             // срок
-            SheetLabel(stringResource(R.string.promise_due) + (shownDue()?.let { ": $it" } ?: ""))
+            SheetLabel(stringResource(if (kind == "meeting") R.string.meeting_when else R.string.promise_due) +
+                (shownDue()?.let { ": $it" } ?: ""))
             Wrap(modifier = Modifier.padding(horizontal = 16.dp)) {
                 PromiseActions.quickDues().forEach { (label, ms) ->
                     Chip(stringResource(label) + ", " + fmt.timeMs(ms), due == ms, { due = ms; dueTouched = true })
@@ -223,8 +235,8 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
             }
             if (inCalendar) {
                 Wrap(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)) {
-                    listOf(15, 30, 60, 120).forEach { m ->
-                        Chip(if (m < 60) stringResource(R.string.minutes_n, m) else stringResource(R.string.hours_n, m / 60),
+                    (listOf(15, 30, 60, 120) + minutes).distinct().sorted().forEach { m ->
+                        Chip(if (m < 60 || m % 60 != 0) stringResource(R.string.minutes_n, m) else stringResource(R.string.hours_n, m / 60),
                             minutes == m, { minutes = m })
                     }
                 }

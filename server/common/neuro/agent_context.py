@@ -202,7 +202,8 @@ def now_block(conn) -> str:
 
     def task(t):
         who = ("обещали мне" + (f" ({t['mate']})" if t["mate"] else "")) if t["kind"] == "waiting" else \
-            ("напоминание" if t["kind"] == "reminder" else "я обещал" + (f" {t['mate']}" if t["mate"] else ""))
+            ("напоминание" if t["kind"] == "reminder" else "встреча" + (f" с {t['mate']}" if t["mate"] else "")
+             if t["kind"] == "meeting" else "я обещал" + (f" {t['mate']}" if t["mate"] else ""))
         return f"[{t['text']}](task:{t['id']}) — {who}, срок {_d(t['due_at'])}"
     late = [t for t in rows if t["due_at"] < now]
     soon = [t for t in rows if t["due_at"] >= now]

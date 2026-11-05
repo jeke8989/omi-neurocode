@@ -43,7 +43,7 @@ def followup(conn, conv_id: int) -> dict:
                             WHERE conversation_id = %s AND status IN ('open', 'done')""", (conv_id,)).fetchall()
     lines = []
     for t in tasks:
-        who = "я" if t["kind"] in ("mine", "reminder") else (t["assignee"] or t["counterpart"] or "собеседник")
+        who = "я" if t["kind"] in ("mine", "reminder", "meeting") else (t["assignee"] or t["counterpart"] or "собеседник")
         when = f"{t['due_at'].astimezone(TZ):%d.%m}" if t["due_at"] else (t["due"] or "без срока")
         lines.append(f"- {who}: {t['text']} ({when})")
     user = (f"Встреча: {conv['title'] or ''}, {conv['started_at'].astimezone(TZ):%d.%m.%Y}\n"

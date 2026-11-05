@@ -105,9 +105,17 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putString("chat_agent", value).apply()
 
     /** Напоминание у встреч, которые создаёт Mnemo: за сколько минут. */
+    /** За сколько минут календарь напоминает о встрече: по умолчанию 30 (раньше было 15 — переводим один раз). */
     var calendarReminderMin: Int
-        get() = sp.getInt("calendar_reminder_min", 15)
-        set(value) = sp.edit().putInt("calendar_reminder_min", value).apply()
+        get() {
+            if (!sp.getBoolean("calendar_reminder_v2", false)) {
+                val e = sp.edit().putBoolean("calendar_reminder_v2", true)
+                if (sp.getInt("calendar_reminder_min", 15) == 15) e.putInt("calendar_reminder_min", 30)
+                e.apply()
+            }
+            return sp.getInt("calendar_reminder_min", 30)
+        }
+        set(value) = sp.edit().putInt("calendar_reminder_min", value).putBoolean("calendar_reminder_v2", true).apply()
 
     /** Длительность встречи из обещания по умолчанию (минуты). */
     var calendarDefaultMin: Int
@@ -127,6 +135,11 @@ class Prefs(context: Context) {
     var calendarOn: Boolean
         get() = sp.getBoolean("calendar_on", false)
         set(value) = sp.edit().putBoolean("calendar_on", value).apply()
+
+    /** Обещания: разбивка по сроку (true) или по дню, когда обещание появилось (false, по умолчанию). */
+    var promisesByDue: Boolean
+        get() = sp.getBoolean("promises_by_due", false)
+        set(value) = sp.edit().putBoolean("promises_by_due", value).apply()
 
     /** Роль ассистента в чате (Mnemo, коуч обещаний, тренер общения… или своя «cN»). */
     var chatRole: String

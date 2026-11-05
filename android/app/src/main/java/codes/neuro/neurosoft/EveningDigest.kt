@@ -33,7 +33,7 @@ object EveningDigest {
             null
         }
         val live = tasks.filter { it.status == "open" || it.status == "done" }
-        val mine = live.filter { day(it.createdAt) == today && !it.theirs && it.kind != "reminder" }
+        val mine = live.filter { day(it.createdAt) == today && !it.theirs && it.kind != "reminder" && it.kind != "meeting" }
         val theirs = live.filter { day(it.createdAt) == today && it.theirs }
         val open = tasks.filter { it.status == "open" }
         val tomorrow = open.filter { day(it.dueAt) == today.plusDays(1) }

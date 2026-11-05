@@ -108,3 +108,26 @@ def test_doubtful_promises_go_to_review(conn):  # noqa: F811
     cmd = tasks.classify(conn, [{"text": "Позвонить Ивану", "kind": "reminder", "confidence": 0.7,
                                  "evidence": "напомни позвонить"}], {}, None, source="voice")
     assert cmd[0]["status"] == "open"
+
+
+def test_meeting_kind(conn):  # noqa: F811
+    """«Поставь встречу с Ильёй завтра в 15 на час» — встреча: начало, длительность; без времени — обычное дело."""
+    from neuro import tasks
+    conn.execute("TRUNCATE tasks, people RESTART IDENTITY CASCADE")
+    assert tasks.TRIGGER.search("Поставь встречу с Ильёй завтра в 15")
+    assert tasks.TRIGGER.search("запиши в календарь стоматолога")
+    out = tasks.classify(conn, [
+        {"text": "Встреча с Ильёй", "kind": "meeting", "with": "Илья", "due_at": "2026-11-06T15:00", "minutes": 60,
+         "confidence": 0.9, "evidence": "поставь встречу с Ильёй завтра в 15 на час"},
+        {"text": "Созвониться с Олегом", "kind": "meeting", "confidence": 0.9, "evidence": "созвонимся"},
+        {"text": "Стоматолог", "kind": "meeting", "due_at": "2026-11-13T13:00", "minutes": "abc",
+         "confidence": 0.9, "evidence": "13-го в 13:00 стоматолог"},
+    ], {}, None, source="voice")
+    m = {t["text"]: t for t in out}
+    assert m["Встреча с Ильёй"]["kind"] == "meeting" and m["Встреча с Ильёй"]["minutes"] == 60
+    assert m["Встреча с Ильёй"]["counterpart"] == "Илья" and m["Встреча с Ильёй"]["status"] == "open"
+    assert m["Созвониться с Олегом"]["kind"] == "mine"  # без времени — не встреча в календарь
+    assert m["Стоматолог"]["kind"] == "meeting" and m["Стоматолог"]["minutes"] is None
+    tasks.save(conn, None, out, "voice")
+    row = conn.execute("SELECT kind, calendar_minutes FROM tasks WHERE kind = 'meeting' ORDER BY id LIMIT 1").fetchone()
+    assert row["kind"] == "meeting" and row["calendar_minutes"] == 60

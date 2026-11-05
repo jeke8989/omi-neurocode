@@ -221,6 +221,8 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
                 return f"обещали мне{': ' + mate if mate else ''}"
             if r["kind"] == "reminder":
                 return "напоминание себе"
+            if r["kind"] == "meeting":
+                return f"встреча{' с ' + mate if mate else ''}"
             return f"я обещал{' ' + mate if mate else ''}"
 
         def when(r):

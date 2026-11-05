@@ -780,12 +780,12 @@ async def api_tasks(request: Request):
 
 
 async def api_task_create(request: Request):
-    """Обещание вручную: {text, kind: mine|waiting|reminder, due_at?, counterpart_id? | counterpart?}."""
+    """Обещание вручную: {text, kind: mine|waiting|reminder|meeting, due_at?, counterpart_id? | counterpart?}."""
     body = await _body(request) or {}
     text = " ".join(str(body.get("text") or "").split())[:1000]
     if not text:
         return Json({"error": "text"}, status_code=400)
-    kind = body.get("kind") if body.get("kind") in ("mine", "waiting", "reminder") else "mine"
+    kind = body.get("kind") if body.get("kind") in tasklib.KINDS else "mine"
     due_at = tasklib.parse_due(body.get("due_at")) if body.get("due_at") else None
     if body.get("due_at") and due_at is None:
         return Json({"error": "due_at: ISO 8601"}, status_code=400)
@@ -839,7 +839,7 @@ async def api_task_update(request: Request):
         sets.append("calendar_minutes = %s")
         args.append(max(5, min(int(body["calendar_minutes"]), 24 * 60)))
     # исправление вручную: кто кому обещал и с кем договорённость (человек из «Людей» или просто имя)
-    if body.get("kind") in ("mine", "waiting", "reminder"):
+    if body.get("kind") in tasklib.KINDS:
         sets.append("kind = %s")
         args.append(body["kind"])
     if "counterpart_id" in body or "counterpart" in body:

@@ -28,15 +28,17 @@ ACCEPT_COMMAND = 0.7  # явная команда пользователя («н
 SUGGEST = 0.45        # на согласование
 MAX_OPEN = 3          # из одного разговора сразу в обещания — не больше; остальное на согласование
 REMIND_WORDS = re.compile(r"напомн|не (дай|дайте) (мне )?забыть|не забыть|remind|hatırlat|recuérd", re.I)
+KINDS = ("mine", "waiting", "reminder", "meeting")  # meeting — встреча: телефон предложит поставить её в календарь
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
 SCHEMA = (
     '{"text": "конкретное действие, коротко", '
-    '"kind": "mine — делает пользователь | waiting — пользователю должен сделать другой | reminder — пользователь попросил напомнить", '
+    '"kind": "mine — делает пользователь | waiting — пользователю должен сделать другой | reminder — пользователь попросил напомнить | meeting — встреча, звонок или запись на конкретное время (в календарь)", '
     '"who": "кто делает: «Я» (сам пользователь) или подпись говорящего/имя", '
     '"with": "с кем договорённость: кому пользователь обещал (для mine) или кто обещал ему — имя или подпись, иначе null", '
     '"due": "срок словами, если назван, иначе null", '
-    '"due_at": "срок как дата-время ISO 8601 (YYYY-MM-DDTHH:MM), если его можно вычислить, иначе null", '
+    '"due_at": "срок как дата-время ISO 8601 (YYYY-MM-DDTHH:MM), если его можно вычислить, иначе null; у встречи — её начало", '
+    '"minutes": "у встречи — длительность в минутах, если названа («на час» — 60), иначе null", '
     '"confidence": "0..1 — насколько это точно договорённость", '
     '"evidence": "дословная фраза из расшифровки, где договорились", '
     '"same_as": "номер открытой задачи, если это она же, иначе null", '
@@ -46,7 +48,11 @@ SCHEMA = (
 RULES = """Задачи — только договорённости о действии с участием пользователя кулона:
 • пользователь сказал, что сделает («сделаю», «отправлю завтра»), или согласился на просьбу — kind=mine;
 • другой человек пообещал сделать что-то для пользователя («пришлю договор до понедельника») — kind=waiting;
-• пользователь попросил напомнить («напомни мне вечером…», «не дай забыть…») — kind=reminder.
+• пользователь попросил напомнить («напомни мне вечером…», «не дай забыть…») — kind=reminder;
+• встреча, созвон, звонок, приём или запись на конкретное время, о которых договорились или которые просят
+  поставить в календарь («поставь встречу с Ильёй завтра в 15 на час», «13-го в 13:00 стоматолог») —
+  kind=meeting: due_at — начало, minutes — длительность, если названа; text — коротко «Встреча с …»,
+  «Созвон с …», «Стоматолог». «Напомни про встречу» с временем встречи — тоже meeting.
 who — кто ДЕЛАЕТ, with — второй участник договорённости. Просьба к пользователю («постирай, пожалуйста») —
 это его обещание: kind=mine, who=Я, with=тот, кто просил. kind=waiting — только если делать будет другой.
 Имя в with — только из расшифровки (обратились по имени или подпись говорящего); не угадывай.
@@ -54,7 +60,7 @@ who — кто ДЕЛАЕТ, with — второй участник догово
 вопросы без ответа, то, что уже сделано. Разговоры, где пользователь не участвует (телевизор, чужая беседа), — без задач.
 НЕ задачи и бытовые мелочи «здесь и сейчас», которые делаются сразу и не забываются: «передай соль»,
 «закрой окно», «сейчас приду», «пойдём поедим», «включи музыку». Задача — дело на потом, которое можно забыть.
-kind=reminder — только если пользователь прямо попросил напомнить; иначе это mine.
+kind=reminder — только если пользователь прямо попросил напомнить; иначе это mine. Без времени встреча — mine.
 Лучше пропустить сомнительную задачу, чем создать лишнюю: обычно в разговоре 0–2 задачи, редко больше 5.
 Одно действие — одна задача: «посмотреть билеты» и «купить билеты» на одно событие — это одна задача
 (итоговое действие). Если задача уже есть среди открытых — верни её номер в same_as, не создавай новую.
@@ -128,10 +134,14 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
         if not evidence and source == "conversation":
             conf *= 0.6
         kind = str(t.get("kind") or "mine").lower()
-        kind = kind if kind in ("mine", "waiting", "reminder") else "mine"
+        kind = kind if kind in KINDS else "mine"
+        due_at = parse_due(t.get("due_at"))
+        if kind == "meeting" and due_at is None:
+            kind = "mine"  # встреча без времени — обычное дело «договориться о встрече»
+        minutes = _minutes(t.get("minutes")) if kind == "meeting" else None
         who = " ".join(str(t.get("who") or t.get("assignee") or "").split()).strip(" ?")
         person_id, assignee = None, None
-        if who and who.lower() in OWNER_WORDS or kind == "reminder":
+        if who and who.lower() in OWNER_WORDS or kind in ("reminder", "meeting"):
             person_id = owner["id"] if owner else None
         elif who:
             person_id = resolve(conn, who, labels)
@@ -179,17 +189,26 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
             "text": text, "kind": kind, "person_id": person_id, "assignee": assignee, "counterpart": counterpart,
             "counterpart_id": counterpart_id,
             "due": (str(t.get("due")).strip()[:120] if t.get("due") not in (None, "", "null") else None),
-            "due_at": parse_due(t.get("due_at")), "confidence": round(conf, 2), "evidence": evidence,
+            "due_at": due_at, "minutes": minutes, "confidence": round(conf, 2), "evidence": evidence,
             "status": "open" if conf >= accept and clear else "suggested", "same_as": same,
             "target": "github" if str(t.get("target") or "").lower() == "github" else "notion",
         })
     # из одного разговора сразу в обещания — не больше MAX_OPEN самых уверенных, остальное на согласование
     if source == "conversation":
         opened = sorted((t for t in out if t["status"] == "open"),
-                        key=lambda t: (t["kind"] != "reminder", -t["confidence"]))  # «напомни» — в первую очередь
+                        key=lambda t: (t["kind"] not in ("reminder", "meeting"), -t["confidence"]))  # просьбы — первыми
         for t in opened[MAX_OPEN:]:
             t["status"] = "suggested"
     return out
+
+
+def _minutes(v) -> int | None:
+    """Длительность встречи: 5 минут — 12 часов, иначе — не названа (телефон возьмёт свою по умолчанию)."""
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return None
+    return n if 5 <= n <= 720 else None
 
 
 def _key(text: str) -> str:
@@ -229,11 +248,11 @@ def save(conn, conv_id: int | None, tasks: list[dict], source: str) -> dict:
                 continue
         conn.execute(
             """INSERT INTO tasks (conversation_id, text, due, due_at, assignee, person_id, kind, confidence, evidence,
-                                  target, source, status, counterpart, counterpart_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  target, source, status, counterpart, counterpart_id, calendar_minutes)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (conv_id, crypto.seal(t["text"]), crypto.seal(t["due"]), t["due_at"], crypto.seal(t["assignee"]),
              t["person_id"], t["kind"], t["confidence"], crypto.seal(t["evidence"]), t["target"], source, t["status"],
-             crypto.seal(t.get("counterpart")), t.get("counterpart_id")))
+             crypto.seal(t.get("counterpart")), t.get("counterpart_id"), t.get("minutes")))
         created += 1
     return {"created": created, "updated": updated}
 
@@ -250,12 +269,15 @@ def owner_spoke(conn, segs: list[dict]) -> bool | None:
 # ---------------------------------------------------------------- фраза «напомни / создай задачу»
 TRIGGER = re.compile(
     r"\b(напомни|напомнить мне|создай задачу|запиши задачу|добавь задачу|поставь задачу|не дай (мне )?забыть"
-    r"|remind me|create a task|add a task|make a task"
-    r"|hatırlat|görev (oluştur|ekle)|recuérdame|crea (una )?tarea|añade (una )?tarea)", re.I)
+    r"|поставь (мне )?(встречу|созвон|звонок)|(запиши|поставь|добавь|внеси)( это| мне)? в календарь|создай встречу"
+    r"|remind me|create a task|add a task|make a task|schedule a (meeting|call)|add (it )?to (my )?calendar"
+    r"|hatırlat|görev (oluştur|ekle)|takvime ekle|toplantı (ayarla|ekle)"
+    r"|recuérdame|crea (una )?tarea|añade (una )?tarea|añade al calendario|agenda una reunión)", re.I)
 
 QUICK_SYSTEM = f"""Пользователь кулона только что сказал фразу-команду («напомни…», «создай задачу…»). Тебе дан фрагмент
 расшифровки вокруг неё. Верни строго JSON: {{"tasks": [{SCHEMA}]}}
-Создай задачу только по этой команде пользователя (kind=reminder для «напомни», иначе mine). Если команда
+Создай задачу только по этой команде пользователя (kind=meeting для встречи, созвона или «в календарь» с
+временем, kind=reminder для «напомни», иначе mine). Если команда
 относится к другому человеку, укажи его в who. confidence 0.9, если команда ясная.
 {RULES}"""
 

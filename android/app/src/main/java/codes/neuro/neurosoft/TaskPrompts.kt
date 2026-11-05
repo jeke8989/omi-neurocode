@@ -24,6 +24,7 @@ object TaskPrompts {
     const val CHANNEL = "task_prompts"
     const val ACCEPT = "codes.neuro.neurosoft.TASK_ACCEPT"
     const val DISMISS = "codes.neuro.neurosoft.TASK_DISMISS"
+    const val MEETING = "codes.neuro.neurosoft.MEETING_ADD"
     private const val FRESH_MS = 12 * 3600_000L
     private const val PER_CHECK = 3
 
@@ -42,10 +43,15 @@ object TaskPrompts {
     private fun pending(t: TaskItem) = t.status == "suggested" ||
         (t.status == "open" && t.confirmedAt == null && t.source == "conversation")
 
+    /** Встреча, которую ещё не поставили в календарь: спрашиваем «В календарь?» (если календарь подключён). */
+    private fun meetingAsk(context: Context, t: TaskItem) = t.kind == "meeting" && t.calendarEventId == null &&
+        t.confirmedAt == null && t.status in setOf("open", "suggested") &&
+        (t.dueMillis() ?: 0L) > System.currentTimeMillis() && PhoneCalendar.active(context)
+
     /** Свежий список с сервера: карточка на каждое новое обещание, убрать уведомления о решённых. */
     fun onTasks(context: Context, tasks: List<TaskItem>) {
         val prefs = Core.prefs
-        val suggested = tasks.filter { pending(it) }
+        val suggested = tasks.filter { pending(it) || meetingAsk(context, it) }
         val asked = prefs.askedTasks
         val nm = channel(context) ?: return
         // ответили в приложении или ночная проверка решила сама — уведомление больше не нужно
@@ -56,7 +62,7 @@ object TaskPrompts {
         }
         val now = System.currentTimeMillis()
         val fresh = suggested.filter { it.id !in asked && created(it) > now - FRESH_MS }.take(PER_CHECK)
-        fresh.forEach { show(context, nm, it) }
+        fresh.forEach { if (meetingAsk(context, it)) showMeeting(context, nm, it) else show(context, nm, it) }
         prefs.askedTasks = asked.intersect(suggested.map { it.id }.toSet()) + fresh.map { it.id }
     }
 
@@ -78,6 +84,7 @@ object TaskPrompts {
         val mate = t.mate
         return when {
             t.kind == "reminder" -> r.getString(R.string.promise_card_reminder)
+            t.kind == "meeting" -> mate?.let { r.getString(R.string.promise_meeting_with, it) } ?: r.getString(R.string.promise_meeting)
             t.theirs -> r.getString(R.string.promise_card_theirs, mate ?: r.getString(R.string.promise_someone))
             mate != null -> r.getString(R.string.promise_card_mine_to, mate)
             else -> r.getString(R.string.promise_card_mine)
@@ -121,6 +128,66 @@ object TaskPrompts {
         Inbox.add("task", "task:${t.id}", headline(t), t.text, "tasks", t.id)
     }
 
+    /** «Поставить встречу в календарь?» — когда, сколько длится, за сколько напомнит; кнопки: в календарь, изменить, не надо. */
+    private fun showMeeting(context: Context, nm: NotificationManager, t: TaskItem) {
+        val r = Core.res()
+        val minutes = t.calendarMinutes ?: Core.prefs.calendarDefaultMin
+        val due = t.dueMillis() ?: return
+        val zone = java.time.ZoneId.systemDefault()
+        val loc = java.util.Locale.getDefault()
+        val start = java.time.Instant.ofEpochMilli(due).atZone(zone)
+        val end = start.plusMinutes(minutes.toLong())
+        val whenText = start.format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM, HH:mm", loc)) + "–" +
+            end.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm", loc))
+        val details = listOfNotNull(whenText, r.getString(R.string.meeting_alarm, Core.prefs.calendarReminderMin),
+            t.conversationTitle?.takeIf { it.isNotBlank() })
+        val add = PendingIntent.getBroadcast(context, notificationId(t.id) * 2 + 11,
+            Intent(context, TaskPromptReceiver::class.java).setAction(MEETING).putExtra("id", t.id).putExtra("text", t.text)
+                .putExtra("due", due).putExtra("minutes", minutes).putExtra("notes", t.conversationTitle ?: ""),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val change = PendingIntent.getActivity(context, notificationId(t.id) * 2 + 7, Intent(context, MainActivity::class.java)
+            .putExtra("open", "due:${t.id}"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val open = PendingIntent.getActivity(context, 3, Intent(context, MainActivity::class.java)
+            .putExtra("open", "tasks"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_neuro)
+            .setContentTitle(r.getString(R.string.meeting_card_title))
+            .setContentText("${t.text} · $whenText")
+            .setStyle(NotificationCompat.BigTextStyle().bigText((listOf(t.text) + details).joinToString("\n")))
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setGroup(CHANNEL)
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .addAction(0, r.getString(R.string.meeting_add), add)
+            .addAction(0, r.getString(R.string.meeting_change), change)
+            .addAction(0, r.getString(R.string.meeting_skip), action(context, DISMISS, t))
+            .build()
+        try {
+            nm.notify(notificationId(t.id), n)
+        } catch (_: SecurityException) {
+        }
+        Inbox.add("task", "task:${t.id}", r.getString(R.string.meeting_card_title), "${t.text} · $whenText", "tasks", t.id)
+    }
+
+    /** Встреча поставлена (или не получилось) — коротко на месте уведомления. */
+    fun meetingResult(context: Context, id: Long, text: String, ok: Boolean) {
+        val nm = channel(context) ?: return
+        val r = Core.res()
+        val n = NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_neuro)
+            .setContentTitle(r.getString(if (ok) R.string.meeting_added else R.string.meeting_failed))
+            .setContentText(if (ok) "$text · " + r.getString(R.string.meeting_alarm, Core.prefs.calendarReminderMin) else text)
+            .setGroup(CHANNEL)
+            .setAutoCancel(true)
+            .setTimeoutAfter(if (ok) 5_000L else 15_000L)
+            .setSilent(true)
+            .build()
+        try {
+            nm.notify(notificationId(id), n)
+        } catch (_: SecurityException) {
+        }
+    }
+
     /** Ответ принят — коротко подтверждаем на месте уведомления. Нет связи — вопрос остаётся с кнопками. */
     fun result(context: Context, id: Long, text: String, ok: Boolean, accept: Boolean) {
         val nm = channel(context) ?: return
@@ -150,8 +217,37 @@ class TaskPromptReceiver : BroadcastReceiver() {
         Core.init(context)
         val id = intent.getLongExtra("id", 0L).takeIf { it > 0 } ?: return
         val text = intent.getStringExtra("text").orEmpty()
-        val accept = intent.action == TaskPrompts.ACCEPT
         val done = goAsync()
+        if (intent.action == TaskPrompts.MEETING) {
+            // «В календарь»: встреча — в календарь телефона (с напоминанием), обещание — отмечено и связано с ней
+            val due = intent.getLongExtra("due", 0L)
+            val minutes = intent.getIntExtra("minutes", Core.prefs.calendarDefaultMin)
+            CoroutineScope(Dispatchers.IO).launch {
+                val event = try {
+                    PhoneCalendar.addEvent(context, text, due, due + minutes * 60_000L,
+                        intent.getStringExtra("notes")?.takeIf { it.isNotBlank() })
+                } catch (e: Exception) {
+                    android.util.Log.w("Mnemo", "meeting to calendar failed", e)
+                    null
+                }
+                if (event != null) {
+                    try {  // нет связи — встреча всё равно в календаре; связь с обещанием догонит при следующей правке
+                        Api.setTaskCalendar(id, event, minutes)
+                        Api.setTaskStatus(id, "open")
+                    } catch (_: Exception) {
+                    }
+                }
+                TaskPrompts.meetingResult(context, id, text, event != null)
+                try {
+                    PhoneCalendar.sync(context, force = true)
+                    Repo.tasks.refresh()
+                } catch (_: Exception) {
+                }
+                done.finish()
+            }
+            return
+        }
+        val accept = intent.action == TaskPrompts.ACCEPT
         CoroutineScope(Dispatchers.IO).launch {
             val ok = try {
                 Api.setTaskStatus(id, if (accept) "open" else "dismissed")

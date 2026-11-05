@@ -46,8 +46,9 @@ object Reminders {
 
     private fun local(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
 
-    /** Когда напомнить об обещании: (этап, время). */
+    /** Когда напомнить об обещании: (этап, время). Встреча — за N минут до начала (как в календаре). */
     private fun stages(t: TaskItem, due: Long, now: Long): List<Pair<Int, Long>> {
+        if (t.kind == "meeting") return listOf(AT_DUE to due - Core.prefs.calendarReminderMin * 60_000L)
         val out = mutableListOf(AT_DUE to due)
         if (t.theirs || t.kind == "reminder") return out
         val d = local(due)
@@ -65,6 +66,7 @@ object Reminders {
         val wanted = ArrayList<Triple<Long, Long, Pair<TaskItem, Int>>>()
         for (t in tasks) {
             if (t.status != "open") continue
+            if (t.inCalendar) continue  // встреча в календаре телефона — напомнит сам календарь, без дублей
             val due = t.dueMillis() ?: continue
             if (due !in (now - 60_000)..(now + WEEK)) continue
             for ((stage, at) in stages(t, due, now)) wanted += Triple(t.id * 4 + stage, at, t to stage)
@@ -96,6 +98,7 @@ object Reminders {
             stage == EVENING_BEFORE -> r.getString(R.string.promise_due_tomorrow)
             stage == MORNING -> r.getString(R.string.promise_due_today)
             kind == "reminder" -> r.getString(R.string.reminder_title)
+            kind == "meeting" -> r.getString(R.string.meeting_soon, Core.prefs.calendarReminderMin)
             theirs -> r.getString(R.string.promise_due_theirs, mate.ifBlank { r.getString(R.string.promise_someone) })
             else -> r.getString(R.string.promise_due_now)
         }

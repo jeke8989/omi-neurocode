@@ -51,6 +51,13 @@ fun TasksTab() {
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
     var showDone by rememberSaveable { mutableStateOf(false) }
+    // что показать (все / я обещал / мне обещали / встречи / напоминания) и как разбить: по дню, когда обещание
+    // появилось (по умолчанию), или по сроку
+    var filter by rememberSaveable { mutableStateOf("all") }
+    var byDue by rememberSaveable { mutableStateOf(codes.neuro.neurosoft.Core.prefs.promisesByDue) }
+    val names = GroupNames(stringResource(R.string.promises_hot), stringResource(R.string.promises_overdue),
+        stringResource(R.string.today), stringResource(R.string.yesterday), stringResource(R.string.group_tomorrow),
+        stringResource(R.string.group_this_week), stringResource(R.string.group_later), stringResource(R.string.due_none))
     var showRemoved by rememberSaveable { mutableStateOf(false) }
     // смахнутая задача удаляется только после подтверждения
     var confirm by remember { mutableStateOf<TaskItem?>(null) }
@@ -222,12 +229,13 @@ fun TasksTab() {
                 all == null -> item { LoadingBlock() }
                 else -> {
                     val now = System.currentTimeMillis()
-                    val open = all.filter { it.status == "open" }
-                    val done = all.filter { it.status == "done" }
-                    val suggested = all.filter { it.status == "suggested" }
-                    val overdue = open.filter { (it.dueMillis() ?: Long.MAX_VALUE) < now }
-                    val mine = open.filter { !it.theirs && it !in overdue }
-                    val theirs = open.filter { it.theirs && it !in overdue }
+                    val active = all.filter { it.status == "open" || it.status == "suggested" }
+                    val counts = active.groupingBy { promiseGroupKind(it) }.eachCount()
+                    fun keep(t: TaskItem) = filter == "all" || promiseGroupKind(t) == filter
+                    val open = all.filter { it.status == "open" && keep(it) }
+                    val done = all.filter { it.status == "done" && keep(it) }
+                    val suggested = all.filter { it.status == "suggested" && keep(it) }
+                    val groups = if (byDue) groupByDue(open, names, now) else groupByCreated(open, names)
                     item { StaleNote(res.error) }
                     item(key = "stats") { PromiseStats(all) }
                     // своё обещание руками: «вернуть Олегу книгу до пятницы»
@@ -235,24 +243,35 @@ fun TasksTab() {
                         SecondaryButton(stringResource(R.string.promise_new), { editing = blankPromise() },
                             Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(), icon = Icons.Plus)
                     }
-                    if (open.isEmpty() && suggested.isEmpty()) {
-                        item {
-                            EmptyBlock(Icons.Tasks, stringResource(R.string.promises_empty_title),
-                                stringResource(R.string.promises_empty_text))
+                    if (active.isNotEmpty()) {
+                        item(key = "filters") {
+                            PromiseFilters(counts, active.size, filter, { filter = it }, byDue, {
+                                byDue = it
+                                codes.neuro.neurosoft.Core.prefs.promisesByDue = it
+                            })
                         }
                     }
-                    for ((title, list) in listOf(R.string.promises_overdue to overdue, R.string.promises_mine to mine,
-                        R.string.promises_theirs to theirs)) {
-                        if (list.isEmpty()) continue
-                        item(key = "title-$title") { SectionTitle(stringResource(title) + "  " + list.size) }
-                        itemsIndexed(list, key = { _, t -> t.id }) { i, t ->
-                            Grouped(i, list.size, inset = 54.dp) {
+                    if (open.isEmpty() && suggested.isEmpty()) {
+                        item {
+                            if (filter == "all") EmptyBlock(Icons.Tasks, stringResource(R.string.promises_empty_title),
+                                stringResource(R.string.promises_empty_text))
+                            else Txt(stringResource(R.string.filter_empty), T.body, Mn.c.graphite,
+                                Modifier.padding(horizontal = 22.dp, vertical = 18.dp))
+                        }
+                    }
+                    // сначала «горит», потом «это обещание?», потом остальное по дням (или по срокам)
+                    val (first, rest) = groups.partition { it.hot }
+                    fun section(g: PromiseGroup) {
+                        item(key = "title-${g.key}") { SectionTitle(g.title + "  " + g.items.size) }
+                        itemsIndexed(g.items, key = { _, t -> t.id }) { i, t ->
+                            Grouped(i, g.items.size, inset = 54.dp) {
                                 SwipeToDelete({ confirm = t }) {
                                     PromiseRow(t, { editing = t }, { toggle(t) })
                                 }
                             }
                         }
                     }
+                    first.forEach { section(it) }
                     if (suggested.isNotEmpty()) {
                         item(key = "suggested-title") { SectionTitle(stringResource(R.string.promises_check)) }
                         itemsIndexed(suggested, key = { _, t -> "s" + t.id }) { i, t ->
@@ -272,6 +291,7 @@ fun TasksTab() {
                             }
                         }
                     }
+                    rest.forEach { section(it) }
                     if (done.isNotEmpty()) {
                         item {
                             SectionTitle(stringResource(R.string.promises_done_count, done.size),
@@ -529,6 +549,7 @@ private fun RemovedTaskRow(t: TaskItem, onRestore: () -> Unit) {
 @Composable
 fun promiseWho(t: TaskItem): String? = when {
     t.kind == "reminder" -> stringResource(R.string.task_reminder)
+    t.kind == "meeting" -> t.mate?.let { stringResource(R.string.promise_meeting_with, it) } ?: stringResource(R.string.promise_meeting)
     t.theirs -> stringResource(R.string.promise_from, t.mate ?: stringResource(R.string.promise_someone))
     t.mate != null -> stringResource(R.string.promise_to, t.mate!!)
     else -> null
@@ -553,7 +574,12 @@ fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
             if (who != null || due != null || t.inCalendar) {
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (who != null) {
-                        Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null, tint = c.graphite,
+                        // встреча — значок календаря (синий, если она уже в календаре телефона)
+                        Icon(when (t.kind) {
+                            "reminder" -> Icons.Bell
+                            "meeting" -> Icons.Calendar
+                            else -> Icons.Person
+                        }, null, tint = if (t.kind == "meeting" && t.inCalendar) c.lens else c.graphite,
                             modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Txt(who, T.caption, c.graphite, maxLines = 1)
@@ -562,9 +588,12 @@ fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
                     due?.let {
                         Icon(Icons.Clock, null, tint = if (overdue) c.red else c.amber, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Txt(it, T.caption, if (overdue) c.red else c.graphite, maxLines = 1)
+                        val long = if (t.kind == "meeting") (t.calendarMinutes ?: codes.neuro.neurosoft.Core.prefs.calendarDefaultMin)
+                            .let { m -> " · " + if (m < 60 || m % 60 != 0) stringResource(R.string.minutes_n, m)
+                                else stringResource(R.string.hours_n, m / 60) } else ""
+                        Txt(it + long, T.caption, if (overdue) c.red else c.graphite, maxLines = 1)
                     }
-                    if (t.inCalendar) {  // встреча есть в календаре телефона
+                    if (t.inCalendar && t.kind != "meeting") {  // в календаре телефона
                         Spacer(Modifier.width(10.dp))
                         Icon(Icons.Calendar, stringResource(R.string.promise_in_calendar), tint = c.lens, modifier = Modifier.size(14.dp))
                     }
@@ -614,3 +643,106 @@ private fun PromiseStats(all: List<TaskItem>) {
 /** Пустое обещание для карточки «Новое обещание» (id = 0 — ещё не сохранено). */
 fun blankPromise() = TaskItem(id = 0L, text = "", due = null, assignee = null, status = "open", source = "manual",
     conversationId = null, conversationTitle = null, exportRef = null)
+
+
+// ======================================================================= разбивка обещаний
+/** Вид для фильтра: я обещал / мне обещали / встреча / напоминание. */
+fun promiseGroupKind(t: TaskItem): String = when {
+    t.kind == "meeting" -> "meeting"
+    t.kind == "reminder" -> "reminder"
+    t.theirs -> "theirs"
+    else -> "mine"
+}
+
+class GroupNames(val hot: String, val overdue: String, val today: String, val yesterday: String, val tomorrow: String,
+                 val week: String, val later: String, val noDue: String)
+
+class PromiseGroup(val key: String, val title: String, val items: List<TaskItem>, val hot: Boolean = false)
+
+private fun createdMs(t: TaskItem): Long = try {
+    java.time.OffsetDateTime.parse(t.createdAt).toInstant().toEpochMilli()
+} catch (_: Exception) {
+    0L
+}
+
+private fun localDay(ms: Long): java.time.LocalDate =
+    java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+
+private fun startOf(d: java.time.LocalDate): Long = d.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+private val soonestFirst = compareBy<TaskItem> { it.dueMillis() ?: Long.MAX_VALUE }.thenByDescending { createdMs(it) }
+
+/** «Горит» (просрочено и срок сегодня) — наверху; остальное — по дню, когда обещание появилось: сегодня, вчера,
+ *  дни недели, дальше — по месяцам. Внутри дня — по сроку. */
+fun groupByCreated(open: List<TaskItem>, n: GroupNames): List<PromiseGroup> {
+    val today = java.time.LocalDate.now()
+    val (hot, rest) = open.partition { (it.dueMillis() ?: Long.MAX_VALUE) < startOf(today.plusDays(1)) }
+    val out = ArrayList<PromiseGroup>()
+    if (hot.isNotEmpty()) out += PromiseGroup("hot", n.hot, hot.sortedWith(soonestFirst), hot = true)
+    val loc = java.util.Locale.getDefault()
+    val day = java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM", loc)
+    val month = java.time.format.DateTimeFormatter.ofPattern("LLLL", loc)
+    val monthYear = java.time.format.DateTimeFormatter.ofPattern("LLLL yyyy", loc)
+    rest.groupBy { t ->
+        val d = localDay(createdMs(t))
+        if (d >= today.minusDays(6)) "d$d" else "m${d.year}-${d.monthValue}"
+    }.toList().sortedByDescending { (_, list) -> list.maxOf { createdMs(it) } }.forEach { (key, list) ->
+        val d = localDay(createdMs(list.first()))
+        val title = when {
+            key.startsWith("d") && d == today -> n.today
+            key.startsWith("d") && d == today.minusDays(1) -> n.yesterday
+            key.startsWith("d") -> d.format(day)
+            d.year == today.year -> d.format(month)
+            else -> d.format(monthYear)
+        }.replaceFirstChar { it.titlecase(loc) }
+        out += PromiseGroup(key, title, list.sortedWith(soonestFirst))
+    }
+    return out
+}
+
+/** По сроку: просрочено, сегодня, завтра, на этой неделе, позже, без срока. */
+fun groupByDue(open: List<TaskItem>, n: GroupNames, now: Long): List<PromiseGroup> {
+    val today = java.time.LocalDate.now()
+    val tomorrow = startOf(today.plusDays(1))
+    val after = startOf(today.plusDays(2))
+    val weekEnd = startOf(today.with(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY)))
+    val grouped = open.groupBy { t ->
+        val d = t.dueMillis()
+        when {
+            d == null -> "none"
+            d < now -> "overdue"
+            d < tomorrow -> "today"
+            d < after -> "tomorrow"
+            d < weekEnd -> "week"
+            else -> "later"
+        }
+    }
+    return listOf("overdue" to n.overdue, "today" to n.today, "tomorrow" to n.tomorrow, "week" to n.week,
+        "later" to n.later, "none" to n.noDue).mapNotNull { (k, title) ->
+        grouped[k]?.let { PromiseGroup(k, title, it.sortedWith(soonestFirst), hot = k == "overdue") }
+    }
+}
+
+/** Фильтр по виду и переключатель разбивки (по дате создания / по сроку). */
+@Composable
+fun PromiseFilters(counts: Map<String, Int>, total: Int, selected: String, onSelect: (String) -> Unit,
+                   byDue: Boolean, onByDue: (Boolean) -> Unit) {
+    val c = Mn.c
+    androidx.compose.foundation.lazy.LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(top = 8.dp),
+    ) {
+        item(key = "mode") {
+            Chip(stringResource(if (byDue) R.string.group_by_due else R.string.group_by_created), false, { onByDue(!byDue) },
+                leading = { Icon(if (byDue) Icons.Clock else Icons.Calendar, null, tint = c.ink, modifier = Modifier.size(16.dp)) })
+        }
+        item(key = "all") { Chip(stringResource(R.string.filter_all, total), selected == "all", { onSelect("all") }) }
+        listOf("mine" to R.string.filter_mine, "theirs" to R.string.filter_theirs, "meeting" to R.string.filter_meetings,
+            "reminder" to R.string.filter_reminders).forEach { (k, label) ->
+            val n = counts[k] ?: 0
+            if (n > 0 || selected == k) item(key = k) {
+                Chip(stringResource(label, n), selected == k, { onSelect(if (selected == k) "all" else k) })
+            }
+        }
+    }
+}
