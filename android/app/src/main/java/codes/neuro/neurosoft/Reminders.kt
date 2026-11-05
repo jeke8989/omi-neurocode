@@ -40,9 +40,16 @@ object Reminders {
         PendingIntent.getBroadcast(
             context, (key % Int.MAX_VALUE).toInt(),
             Intent(context, ReminderReceiver::class.java).setAction(ACTION).putExtra("id", key / 4).putExtra("stage", stage)
-                .putExtra("text", t?.text ?: "").putExtra("kind", t?.kind ?: "mine").putExtra("mate", t?.mate ?: ""),
+                .putExtra("text", t?.text ?: "").putExtra("kind", t?.kind ?: "mine").putExtra("mate", t?.mate ?: "")
+                .putExtra("ctx", t?.let { origin(it) } ?: ""),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+
+    /** Откуда обещание — в тексте напоминания: «пришлю завтра» · из разговора «Про договор». */
+    private fun origin(t: TaskItem): String = listOfNotNull(
+        t.evidence?.takeIf { it.isNotBlank() }?.let { Core.res().getString(R.string.quoted, it) },
+        t.conversationTitle?.takeIf { it.isNotBlank() }?.let { Core.res().getString(R.string.reminder_from, it) },
+    ).joinToString("\n")
 
     private fun local(ms: Long) = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault())
 
@@ -90,7 +97,8 @@ object Reminders {
         Core.prefs.reminders = after
     }
 
-    fun show(context: Context, id: Long, text: String, stage: Int = AT_DUE, kind: String = "mine", mate: String = "") {
+    fun show(context: Context, id: Long, text: String, stage: Int = AT_DUE, kind: String = "mine", mate: String = "",
+             ctx: String = "") {
         channel(context)
         val r = Core.res()
         val theirs = kind == "waiting"
@@ -102,13 +110,14 @@ object Reminders {
             theirs -> r.getString(R.string.promise_due_theirs, mate.ifBlank { r.getString(R.string.promise_someone) })
             else -> r.getString(R.string.promise_due_now)
         }
-        val open = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java)
-            .putExtra("open", "tasks"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // нажатие — сразу карточка этого обещания (где видно, откуда оно и с кем)
+        val open = PendingIntent.getActivity(context, 6000 + (id % 100_000).toInt(), Intent(context, MainActivity::class.java)
+            .putExtra("open", if (id > 0) "due:$id" else "tasks"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_neuro)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(if (ctx.isBlank()) text else "$text\n$ctx"))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
@@ -179,6 +188,7 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Core.init(context)
         Reminders.show(context, intent.getLongExtra("id", 0), intent.getStringExtra("text").orEmpty(),
-            intent.getIntExtra("stage", 0), intent.getStringExtra("kind") ?: "mine", intent.getStringExtra("mate").orEmpty())
+            intent.getIntExtra("stage", 0), intent.getStringExtra("kind") ?: "mine", intent.getStringExtra("mate").orEmpty(),
+            intent.getStringExtra("ctx").orEmpty())
     }
 }

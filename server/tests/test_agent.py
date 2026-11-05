@@ -424,3 +424,33 @@ def test_roles_starters_followups_and_talk(conn, monkeypatch):  # noqa: F811
     assert r["role"] == "coach" and r["followups"][1] == "Напомни Илье"
     assert agent_core.split_followups("Ответ без кнопок.") == ("Ответ без кнопок.", [])
     assert client.delete(f"/api/roles/{rid}").json()["deleted"]
+
+
+def test_promise_context(conn, monkeypatch):  # noqa: F811
+    """Карточка обещания: из какого разговора и что говорили вокруг фразы, где договорились."""
+    from datetime import datetime, timedelta, timezone
+    from tests.test_voices import Asgi
+    gw = __import__("gateway.app", fromlist=["app"])
+    client = Asgi(gw.app)
+    conn.execute("TRUNCATE people, conversations, segments, tasks RESTART IDENTITY CASCADE")
+    me = conn.execute("INSERT INTO people (number, is_owner, name) VALUES (1, true, 'Олег') RETURNING id").fetchone()["id"]
+    ivan = conn.execute("INSERT INTO people (number, name) VALUES (2, 'Иван') RETURNING id").fetchone()["id"]
+    now = datetime.now(timezone.utc)
+    cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status, title, summary)
+                          VALUES ('d', %s, %s, 'done', 'Про договор', 'Иван пришлёт договор.') RETURNING id""",
+                       (now - timedelta(hours=1), now)).fetchone()["id"]
+    lines = [(me, "Привет, как дела?"), (ivan, "Нормально."), (me, "Когда будет договор?"),
+             (ivan, "Пришлю договор завтра до обеда."), (me, "Отлично, жду."), (ivan, "Договорились."),
+             (me, "Пока."), (ivan, "Пока-пока."), (me, "До связи.")]
+    for i, (pid, text) in enumerate(lines):
+        t = now - timedelta(minutes=50) + timedelta(seconds=10 * i)
+        conn.execute("""INSERT INTO segments (conversation_id, device_id, started_at, ended_at, text, person_id, voice_score)
+                        VALUES (%s, 'd', %s, %s, %s, %s, 1)""", (cid, t, t + timedelta(seconds=5), text, pid))
+    tid = conn.execute("""INSERT INTO tasks (conversation_id, text, kind, status, evidence, source)
+                          VALUES (%s, 'Прислать договор', 'waiting', 'open', 'Пришлю договор завтра', 'conversation')
+                          RETURNING id""", (cid,)).fetchone()["id"]
+    res = client.get(f"/api/tasks/{tid}/context").json()
+    assert res["conversation"]["id"] == cid and res["conversation"]["title"] == "Про договор"
+    assert len(res["lines"]) == 7 and [x["hit"] for x in res["lines"]].index(True) == 3
+    assert res["said_by"] == "Иван" and res["lines"][3]["who"] == "Иван"
+    assert client.get("/api/tasks/999999/context").status_code == 404

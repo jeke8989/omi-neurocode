@@ -300,10 +300,18 @@
     <string name="important_on">Отметить важным</string>
     <string name="important_title">Важные разговоры</string>
     <string name="inbox">Уведомления</string>
+    <string name="inbox_all_done">Все вопросы отвечены</string>
     <string name="inbox_clear">Очистить уведомления</string>
+    <string name="inbox_confirm">Да, верно</string>
+    <string name="inbox_done">Выполнено</string>
     <string name="inbox_empty_text">Здесь остаются вопросы о задачах, напоминания и утренние сводки, даже если смахнуть их в шторке</string>
     <string name="inbox_empty_title">Уведомлений нет</string>
+    <string name="inbox_from">из разговора «%1$s»</string>
+    <string name="inbox_in_promises">В обещаниях</string>
     <string name="inbox_note">Уведомления хранятся только на этом телефоне, последние 80.</string>
+    <string name="inbox_pending">Ждут ответа %1$d</string>
+    <string name="inbox_removed">Убрано</string>
+    <string name="inbox_wrong">Нет</string>
     <string name="install_by_link">Установить по ссылке</string>
     <string name="installed_ok">Установлено</string>
     <string name="integrations">Интеграции</string>
@@ -618,6 +626,7 @@
     <string name="promise_card_mine_to">Вы обещали — %1$s</string>
     <string name="promise_card_reminder">Напомнить вам</string>
     <string name="promise_card_theirs">Вам обещали — %1$s</string>
+    <string name="promise_card_theirs_anon">Вам обещали</string>
     <string name="promise_conversation">Разговор</string>
     <string name="promise_due">Срок</string>
     <string name="promise_due_now">Срок обещания</string>
@@ -643,6 +652,8 @@
     <string name="promise_to_calendar">Добавить в календарь</string>
     <string name="promise_voice_name">Как зовут этот голос</string>
     <string name="promise_was_there">Был в разговоре</string>
+    <string name="promise_where">Где договорились</string>
+    <string name="promise_where_open">Открыть разговор</string>
     <string name="promise_who_mine">Кому вы обещали</string>
     <string name="promise_who_none">Не указано — выбрать</string>
     <string name="promise_who_other">Другое имя</string>
@@ -666,6 +677,7 @@
     <string name="recently">Недавно</string>
     <string name="recommended">Рекомендуемые</string>
     <string name="remembered">Запомнено</string>
+    <string name="reminder_from">из разговора «%1$s»</string>
     <string name="reminder_title">Напоминание</string>
     <string name="reminders_channel">Напоминания</string>
     <string name="reminders_channel_desc">Задачи со сроком: в назначенное время</string>

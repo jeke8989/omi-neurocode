@@ -300,10 +300,18 @@
     <string name="important_on">Önemli olarak işaretle</string>
     <string name="important_title">Önemli konuşmalar</string>
     <string name="inbox">Bildirimler</string>
+    <string name="inbox_all_done">Tüm sorular yanıtlandı</string>
     <string name="inbox_clear">Bildirimleri temizle</string>
+    <string name="inbox_confirm">Evet, doğru</string>
+    <string name="inbox_done">Tamamlandı</string>
     <string name="inbox_empty_text">Görev soruları, hatırlatmalar ve sabah özetleri, bildirim panelinden kaydırsanız bile burada kalır</string>
     <string name="inbox_empty_title">Bildirim yok</string>
+    <string name="inbox_from">«%1$s» konuşmasından</string>
+    <string name="inbox_in_promises">Sözlerde</string>
     <string name="inbox_note">Bildirimler yalnızca bu telefonda saklanır, son 80 tanesi.</string>
+    <string name="inbox_pending">Yanıt bekleyen %1$d</string>
+    <string name="inbox_removed">Kaldırıldı</string>
+    <string name="inbox_wrong">Hayır</string>
     <string name="install_by_link">Bağlantıdan yükle</string>
     <string name="installed_ok">Yüklendi</string>
     <string name="integrations">Entegrasyonlar</string>
@@ -618,6 +626,7 @@
     <string name="promise_card_mine_to">Söz verdiniz: %1$s</string>
     <string name="promise_card_reminder">Size hatırlat</string>
     <string name="promise_card_theirs">Size söz verildi: %1$s</string>
+    <string name="promise_card_theirs_anon">Size söz verildi</string>
     <string name="promise_conversation">Konuşma</string>
     <string name="promise_due">Son tarih</string>
     <string name="promise_due_now">Söz zamanı</string>
@@ -643,6 +652,8 @@
     <string name="promise_to_calendar">Takvime ekle</string>
     <string name="promise_voice_name">Bu sesin adı</string>
     <string name="promise_was_there">Konuşmadaydı</string>
+    <string name="promise_where">Nerede anlaşıldı</string>
+    <string name="promise_where_open">Konuşmayı aç</string>
     <string name="promise_who_mine">Kime söz verdiniz</string>
     <string name="promise_who_none">Belirtilmedi — seç</string>
     <string name="promise_who_other">Başka bir ad</string>
@@ -666,6 +677,7 @@
     <string name="recently">Son zamanlarda</string>
     <string name="recommended">Önerilen</string>
     <string name="remembered">Hatırlananlar</string>
+    <string name="reminder_from">«%1$s» konuşmasından</string>
     <string name="reminder_title">Hatırlatma</string>
     <string name="reminders_channel">Hatırlatmalar</string>
     <string name="reminders_channel_desc">Süreli görevler, belirlenen zamanda</string>

@@ -53,3 +53,34 @@ def followup(conn, conv_id: int) -> dict:
                         + i18n.write_in(i18n.lang(conn)), user, timeout=90, usage="followup")
     return {"subject": str(res.get("subject") or conv["title"] or "").strip()[:200],
             "body": str(res.get("body") or "").strip()[:6000]}
+
+
+def context(conn, task_id: int, around: int = 3) -> dict | None:
+    """Откуда обещание: разговор (название, когда), несколько фраз вокруг фразы-доказательства — кто что сказал,
+    и итог разговора. Для карточки обещания и уведомлений."""
+    from .people import SEGMENT_SELECT, speaker_label  # noqa: PLC0415
+    from .tasks import _evidence_segment  # noqa: PLC0415
+
+    t = conn.execute("SELECT id, conversation_id, evidence, created_at FROM tasks WHERE id = %s", (task_id,)).fetchone()
+    if t is None:
+        return None
+    out: dict = {"conversation": None, "lines": [], "said_by": None}
+    if not t["conversation_id"]:
+        return out
+    conv = conn.execute("""SELECT id, title, summary, started_at, last_activity FROM conversations
+                           WHERE id = %s AND trashed_at IS NULL""", (t["conversation_id"],)).fetchone()
+    if conv is None:
+        return out
+    out["conversation"] = {"id": conv["id"], "title": conv["title"], "summary": (conv["summary"] or "")[:600],
+                           "started_at": conv["started_at"].isoformat(), "ended_at": conv["last_activity"].isoformat()}
+    segs = [s for s in conn.execute(SEGMENT_SELECT + " WHERE s.conversation_id = %s ORDER BY s.started_at, s.id",
+                                    (conv["id"],)).fetchall() if not s["junk"]]
+    hit = _evidence_segment(t["evidence"], segs) if t["evidence"] and segs else None
+    if hit is None:
+        return out
+    i = next(k for k, s in enumerate(segs) if s["id"] == hit["id"])
+    for s in segs[max(0, i - around): i + around + 1]:
+        out["lines"].append({"id": s["id"], "who": speaker_label(s), "text": s["text"],
+                             "at": s["started_at"].isoformat(), "hit": s["id"] == hit["id"]})
+    out["said_by"] = speaker_label(hit)
+    return out

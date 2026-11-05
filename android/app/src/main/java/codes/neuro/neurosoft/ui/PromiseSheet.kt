@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -84,6 +86,15 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
             PromiseActions.toCalendarApp(context, t.copy(text = text.trim().ifBlank { t.text }), minutes)
         }
     }
+    // откуда: разговор и что говорили вокруг того места, где договорились
+    var where by remember(t.id) { mutableStateOf<codes.neuro.neurosoft.net.PromiseContext?>(null) }
+    LaunchedEffect(t.id) {
+        if (t.id > 0 && t.conversationId != null) where = try {
+            Api.taskContext(t.id)
+        } catch (_: Exception) {
+            null
+        }
+    }
     // кто был в разговоре — первыми; потом все, кого знаем по имени
     var inConversation by remember(t.id) { mutableStateOf<List<PersonRef>>(emptyList()) }
     val people by Repo.people.state.collectAsState()
@@ -125,9 +136,50 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                     modifier = Modifier.fillMaxWidth().focusRequester(focus))
             }
             if (isNew) LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) {} }
-            t.evidence?.takeIf { it.isNotBlank() }?.let {
-                Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
-                    Modifier.padding(horizontal = 22.dp, vertical = 8.dp), maxLines = 4)
+            val ctx = where
+            val ctxConv = ctx?.conversationId
+            if (ctx == null || ctxConv == null) {
+                t.evidence?.takeIf { it.isNotBlank() }?.let {
+                    Txt(stringResource(R.string.quoted, it), T.caption.copy(fontStyle = FontStyle.Italic), c.graphite,
+                        Modifier.padding(horizontal = 22.dp, vertical = 8.dp), maxLines = 4)
+                }
+            } else {
+                // где договорились: разговор (открыть) и несколько фраз вокруг — кто что сказал
+                SheetLabel(stringResource(R.string.promise_where))
+                Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.paper)) {
+                    Row(
+                        Modifier.fillMaxWidth().tap({
+                            onDismiss()
+                            Nav.push(Route.Conversation(ctxConv))
+                        }).padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Bubble, null, tint = c.lens, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Txt(ctx.title ?: t.conversationTitle ?: stringResource(R.string.promise_where_open), T.bodyStrong, maxLines = 2)
+                            ctx.startedAt?.let { Txt(fmt.dayShortTitle(fmt.dayOf(it)) + ", " + fmt.time(it), T.caption, c.graphite) }
+                        }
+                        Icon(Icons.Chevron, stringResource(R.string.promise_where_open), tint = c.faint, modifier = Modifier.size(16.dp))
+                    }
+                    if (ctx.lines.isNotEmpty()) {
+                        HorizontalDivider(thickness = 0.6.dp, color = c.line)
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            ctx.lines.forEach { l ->
+                                Row(
+                                    Modifier.fillMaxWidth().background(if (l.hit) c.lens.copy(alpha = 0.10f) else Color.Transparent)
+                                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                                ) {
+                                    Txt(l.who, T.smallStrong, if (l.hit) c.lens else c.graphite, Modifier.width(88.dp), maxLines = 1)
+                                    Txt(l.text, if (l.hit) T.smallStrong else T.small, c.ink, Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    } else if (!ctx.summary.isNullOrBlank()) {
+                        HorizontalDivider(thickness = 0.6.dp, color = c.line)
+                        Txt(ctx.summary, T.small, c.graphite, Modifier.padding(14.dp), maxLines = 6)
+                    }
+                }
             }
 
             // кто кому

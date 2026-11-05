@@ -108,13 +108,16 @@ GENERIC = re.compile(r"^(спикер|speaker|голос|voice|ses|voz|неиз�
 OWNER_WORDS = ("владелец", "пользователь", "я", "owner", "user", "me", "ben", "yo")
 
 
-def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source: str = "conversation") -> list[dict]:
-    """Ответ модели -> задачи с решением: open | suggested (или отбрасываем)."""
+def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source: str = "conversation",
+             segs: list[dict] | None = None) -> list[dict]:
+    """Ответ модели -> задачи с решением: open | suggested (или отбрасываем).
+    segs — фразы разговора: по ним проверяем, кто на самом деле сказал фразу-доказательство."""
     from .people import resolve  # noqa: PLC0415 — people импортирует голоса, тяжёлое не тянем зря
 
     if not isinstance(raw, list):
         return []
     owner = conn.execute("SELECT id, name FROM people WHERE is_owner").fetchone()
+    partner = _only_partner(segs or [])  # разговор один на один: второй участник известен
     out: list[dict] = []
     seen: set[str] = set()
     for t in raw:
@@ -154,6 +157,18 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
                 assignee = who[:80]
             if person_id and owner and person_id != owner["id"] and kind == "mine":
                 kind = "waiting"  # делает другой — для пользователя это «жду от…»
+        # кто на самом деле сказал фразу-доказательство: «пришлю завтра» сказал Иван — значит, обещал Иван
+        said = _evidence_segment(evidence, segs) if segs and evidence else None
+        sp = said["person_id"] if said and said.get("person_id") and (said.get("voice_score") or 0) >= 0.5 \
+            and not said.get("person_ignored") else None
+        sp_owner = bool(said and said.get("person_owner"))
+        own_words = bool(evidence and FIRST_PERSON.search(evidence) and not SECOND_PERSON.search(evidence))
+        if kind == "waiting" and not (assignee or person_id) and sp and not sp_owner:
+            person_id, assignee = sp, _name(conn, sp)
+        elif kind == "waiting" and sp_owner and own_words:
+            conf = min(conf, 0.6)  # «я пришлю» сказал сам пользователь — похоже, это его обещание: под вопрос
+        elif kind == "mine" and sp and not sp_owner and own_words:
+            conf = min(conf, 0.6)  # «я сделаю» сказал собеседник — похоже, обещал он: под вопрос
         if kind == "waiting" and not (assignee or person_id):
             conf = min(conf, 0.6)  # от кого ждём — непонятно
         # с кем договорённость: «вы обещали Ивану», «Иван обещал вам» — по возможности человек из «Людей»
@@ -169,6 +184,11 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
                 counterpart = row["name"] if row and row["name"] else None
             elif not pid and not GENERIC.match(mate):
                 counterpart = mate[:80]
+        if source == "conversation" and kind in ("mine", "meeting") and not (counterpart or counterpart_id):
+            # с кем: попросил тот, кто сказал фразу; или разговор был один на один
+            pid = sp if sp and not sp_owner else partner
+            if pid and not (owner and pid == owner["id"]):
+                counterpart_id, counterpart = pid, _name(conn, pid)
         if owner_spoke is False:
             conf = min(conf, 0.65)  # пользователь в разговоре не говорил — только предложение
         if kind == "reminder" and source == "conversation" and not REMIND_WORDS.search(evidence or ""):
@@ -200,6 +220,56 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
         for t in opened[MAX_OPEN:]:
             t["status"] = "suggested"
     return out
+
+
+FIRST_PERSON = re.compile(r"(?<!\w)(я|сделаю|пришлю|отправлю|позвоню|напишу|скину|куплю|оплачу|переведу|"
+                          r"подготовлю|посмотрю|узнаю|проверю|займусь|i'll|i will|i'm going to)(?!\w)", re.I)
+SECOND_PERSON = re.compile(r"(?<!\w)(ты|вы|тебе|вам|тебя|вас|сделай|пришли|отправь|скинь|позвони|напиши|можешь|"
+                           r"сможешь|можете|сможете|you)(?!\w)", re.I)
+
+
+def _norm(text: str | None) -> str:
+    return re.sub(r"\W+", " ", (text or "").lower()).strip()
+
+
+def _evidence_segment(evidence: str, segs: list[dict]) -> dict | None:
+    """Фраза разговора, где прозвучало доказательство (точное вхождение или очень похожая)."""
+    import difflib  # noqa: PLC0415
+
+    ev = _norm(evidence)
+    if len(ev) < 6:
+        return None
+    best, score = None, 0.0
+    for s in segs:
+        t = _norm(s.get("text"))
+        if not t or s.get("junk"):
+            continue
+        if ev in t or len(t) > 12 and t in ev:
+            return s
+        m = difflib.SequenceMatcher(None, ev, t)
+        if m.quick_ratio() <= score:
+            continue
+        r = m.ratio()
+        if r > score:
+            best, score = s, r
+    return best if score >= 0.65 else None
+
+
+def _only_partner(segs: list[dict]) -> int | None:
+    """Разговор один на один: единственный, кроме пользователя, кто говорил заметно (5+ секунд)."""
+    talk: dict[int, float] = {}
+    for s in segs:
+        if s.get("person_id") and not s.get("person_owner") and not s.get("person_ignored") \
+                and (s.get("person_kind") or "person") == "person" and not s.get("junk"):
+            talk[s["person_id"]] = talk.get(s["person_id"], 0.0) + \
+                max(0.0, (s["ended_at"] - s["started_at"]).total_seconds())
+    main = [pid for pid, sec in talk.items() if sec >= 5]
+    return main[0] if len(main) == 1 else None
+
+
+def _name(conn, person_id: int) -> str | None:
+    row = conn.execute("SELECT name FROM people WHERE id = %s", (person_id,)).fetchone()
+    return row["name"] if row and row["name"] else None
 
 
 def _minutes(v) -> int | None:

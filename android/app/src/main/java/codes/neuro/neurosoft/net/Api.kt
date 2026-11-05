@@ -239,6 +239,12 @@ data class ChatRun(val id: Long, val level: String, val status: String, val mode
                    /** В какой роли ответил ассистент и какие следующие вопросы предложил (кнопки под ответом). */
                    val role: String = "mnemo", val followups: List<String> = emptyList())
 
+/** Откуда обещание: разговор, кто сказал, фразы вокруг (hit — та самая). */
+data class PromiseContext(val conversationId: Long?, val title: String?, val summary: String?, val startedAt: String?,
+                          val lines: List<Line>, val saidBy: String?) {
+    data class Line(val id: Long, val who: String, val text: String, val at: String, val hit: Boolean)
+}
+
 /** Роль ассистента — «чат-расширение»: тот же Mnemo с вашими данными, но другой характер и фокус. */
 data class AssistantRole(val id: String, val emoji: String, val name: String, val about: String,
                          val persona: String?, val custom: Boolean)
@@ -658,6 +664,21 @@ object Api {
     }
 
     /** Черновик напоминания тому, кто обещал. */
+    /** Откуда обещание: разговор и фразы вокруг того места, где договорились. */
+    suspend fun taskContext(taskId: Long): PromiseContext {
+        val o = JSONObject(call("GET", "/api/tasks/$taskId/context"))
+        val c = o.optJSONObject("conversation")
+        return PromiseContext(
+            conversationId = c?.optLong("id")?.takeIf { it > 0 },
+            title = c?.str("title"), summary = c?.str("summary"), startedAt = c?.str("started_at"),
+            lines = o.optJSONArray("lines").map {
+                PromiseContext.Line(it.optLong("id"), it.optString("who"), it.optString("text"), it.optString("at"),
+                    it.optBoolean("hit"))
+            },
+            saidBy = o.str("said_by"),
+        )
+    }
+
     suspend fun nudge(taskId: Long): String =
         JSONObject(call("POST", "/api/tasks/$taskId/nudge", JSONObject(), slow = true)).optString("text")
 

@@ -301,10 +301,18 @@
     <string name="important_on">Mark as important</string>
     <string name="important_title">Important conversations</string>
     <string name="inbox">Notifications</string>
+    <string name="inbox_all_done">All questions answered</string>
     <string name="inbox_clear">Clear notifications</string>
+    <string name="inbox_confirm">Yes, right</string>
+    <string name="inbox_done">Done</string>
     <string name="inbox_empty_text">Task questions, reminders and morning summaries stay here, even if you swipe them away in the shade</string>
     <string name="inbox_empty_title">No notifications</string>
+    <string name="inbox_from">from «%1$s»</string>
+    <string name="inbox_in_promises">In promises</string>
     <string name="inbox_note">Notifications are kept only on this phone, the latest 80.</string>
+    <string name="inbox_pending">Need an answer %1$d</string>
+    <string name="inbox_removed">Removed</string>
+    <string name="inbox_wrong">No</string>
     <string name="install_by_link">Install from link</string>
     <string name="installed_ok">Installed</string>
     <string name="integrations">Integrations</string>
@@ -619,6 +627,7 @@
     <string name="promise_card_mine_to">You promised %1$s</string>
     <string name="promise_card_reminder">Remind you</string>
     <string name="promise_card_theirs">%1$s promised you</string>
+    <string name="promise_card_theirs_anon">Promised to you</string>
     <string name="promise_conversation">Conversation</string>
     <string name="promise_due">Due date</string>
     <string name="promise_due_now">Promise due</string>
@@ -644,6 +653,8 @@
     <string name="promise_to_calendar">Add to the calendar</string>
     <string name="promise_voice_name">Name of this voice</string>
     <string name="promise_was_there">Was in the conversation</string>
+    <string name="promise_where">Where it was agreed</string>
+    <string name="promise_where_open">Open the conversation</string>
     <string name="promise_who_mine">Who you promised</string>
     <string name="promise_who_none">Not set — choose</string>
     <string name="promise_who_other">Another name</string>
@@ -667,6 +678,7 @@
     <string name="recently">Recently</string>
     <string name="recommended">Recommended</string>
     <string name="remembered">Remembered</string>
+    <string name="reminder_from">from the conversation «%1$s»</string>
     <string name="reminder_title">Reminder</string>
     <string name="reminders_channel">Reminders</string>
     <string name="reminders_channel_desc">Tasks with a deadline, at the set time</string>

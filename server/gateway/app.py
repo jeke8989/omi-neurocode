@@ -879,6 +879,17 @@ async def api_task_nudge(request: Request):
     return Json({"text": text})
 
 
+async def api_task_context(request: Request):
+    """Откуда обещание: разговор и несколько фраз вокруг того места, где договорились."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    tid = request.path_params["id"]
+    res = await _sync(promises.context, tid)
+    if res is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(res)
+
+
 async def api_conversation_followup(request: Request):
     """Письмо по итогам встречи: тема и текст (пользователь правит и отправляет сам)."""
     if not _authorized(request.headers, request.query_params):
@@ -2007,8 +2018,12 @@ async def api_segment_audio(request: Request):
             (request.path_params["id"],))).fetchone()
     if not row or not row["path"] or not Path(row["path"]).exists():
         return Json({"error": "audio is no longer stored"}, status_code=404)
-    start = max(0, int((float(row["off"]) - 0.2) * 1000)) * BYTES_PER_MS
-    length = int((min(float(row["dur"]), 20.0) + 0.4) * 1000) * BYTES_PER_MS
+    # с запасом по краям (метки времени распознавания неточны), короткая фраза — не меньше 4 секунд вокруг
+    # неё: по полсекунды «да» голос не узнать
+    dur = min(float(row["dur"]), 20.0)
+    pad = max(0.5, (4.0 - dur) / 2)
+    start = max(0, int((float(row["off"]) - pad) * 1000)) * BYTES_PER_MS
+    length = int((dur + pad + max(pad, 0.8)) * 1000) * BYTES_PER_MS
 
     def read():
         with open(row["path"], "rb") as f:
@@ -2207,6 +2222,7 @@ app = Starlette(
         Route("/api/conversations/{id:int}/important", api_conversation_important, methods=["POST"]),
         Route("/api/important", api_important),
         Route("/api/tasks/{id:int}/nudge", api_task_nudge, methods=["POST"]),
+        Route("/api/tasks/{id:int}/context", api_task_context, methods=["GET"]),
         Route("/api/conversations/{id:int}/followup", api_conversation_followup, methods=["POST"]),
         Route("/api/agent/routines", api_routines),
         Route("/api/calendar", api_calendar, methods=["GET", "POST", "DELETE"]),

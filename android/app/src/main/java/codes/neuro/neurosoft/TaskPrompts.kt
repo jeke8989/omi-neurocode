@@ -40,11 +40,11 @@ object TaskPrompts {
     }
 
     /** Обещание ждёт ответа: предложенное (не уверены) или новое из разговора, ещё не подтверждённое «Да». */
-    private fun pending(t: TaskItem) = t.status == "suggested" ||
+    fun pending(t: TaskItem) = t.status == "suggested" ||
         (t.status == "open" && t.confirmedAt == null && t.source == "conversation")
 
     /** Встреча, которую ещё не поставили в календарь: спрашиваем «В календарь?» (если календарь подключён). */
-    private fun meetingAsk(context: Context, t: TaskItem) = t.kind == "meeting" && t.calendarEventId == null &&
+    fun meetingAsk(context: Context, t: TaskItem) = t.kind == "meeting" && t.calendarEventId == null &&
         t.confirmedAt == null && t.status in setOf("open", "suggested") &&
         (t.dueMillis() ?: 0L) > System.currentTimeMillis() && PhoneCalendar.active(context)
 
@@ -79,13 +79,13 @@ object TaskPrompts {
     )
 
     /** «Вы пообещали Ивану», «Иван обещал вам», «Напомнить вам». */
-    private fun headline(t: TaskItem): String {
+    fun headline(t: TaskItem): String {
         val r = Core.res()
         val mate = t.mate
         return when {
             t.kind == "reminder" -> r.getString(R.string.promise_card_reminder)
             t.kind == "meeting" -> mate?.let { r.getString(R.string.promise_meeting_with, it) } ?: r.getString(R.string.promise_meeting)
-            t.theirs -> r.getString(R.string.promise_card_theirs, mate ?: r.getString(R.string.promise_someone))
+            t.theirs -> mate?.let { r.getString(R.string.promise_card_theirs, it) } ?: r.getString(R.string.promise_card_theirs_anon)
             mate != null -> r.getString(R.string.promise_card_mine_to, mate)
             else -> r.getString(R.string.promise_card_mine)
         }
@@ -169,6 +169,29 @@ object TaskPrompts {
         Inbox.add("task", "task:${t.id}", r.getString(R.string.meeting_card_title), "${t.text} · $whenText", "tasks", t.id)
     }
 
+    /** «В календарь»: встреча — в календарь телефона (с напоминанием), обещание — отмечено и связано с ней. */
+    suspend fun addMeeting(context: Context, id: Long, text: String, due: Long, minutes: Int, notes: String?): Boolean {
+        val event = try {
+            PhoneCalendar.addEvent(context, text, due, due + minutes * 60_000L, notes?.takeIf { it.isNotBlank() })
+        } catch (e: Exception) {
+            android.util.Log.w("Mnemo", "meeting to calendar failed", e)
+            null
+        }
+        if (event != null) {
+            try {  // нет связи — встреча всё равно в календаре; связь с обещанием догонит при следующей правке
+                Api.setTaskCalendar(id, event, minutes)
+                Api.setTaskStatus(id, "open")
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            PhoneCalendar.sync(context, force = true)
+            Repo.tasks.refresh()
+        } catch (_: Exception) {
+        }
+        return event != null
+    }
+
     /** Встреча поставлена (или не получилось) — коротко на месте уведомления. */
     fun meetingResult(context: Context, id: Long, text: String, ok: Boolean) {
         val nm = channel(context) ?: return
@@ -219,30 +242,10 @@ class TaskPromptReceiver : BroadcastReceiver() {
         val text = intent.getStringExtra("text").orEmpty()
         val done = goAsync()
         if (intent.action == TaskPrompts.MEETING) {
-            // «В календарь»: встреча — в календарь телефона (с напоминанием), обещание — отмечено и связано с ней
-            val due = intent.getLongExtra("due", 0L)
-            val minutes = intent.getIntExtra("minutes", Core.prefs.calendarDefaultMin)
             CoroutineScope(Dispatchers.IO).launch {
-                val event = try {
-                    PhoneCalendar.addEvent(context, text, due, due + minutes * 60_000L,
-                        intent.getStringExtra("notes")?.takeIf { it.isNotBlank() })
-                } catch (e: Exception) {
-                    android.util.Log.w("Mnemo", "meeting to calendar failed", e)
-                    null
-                }
-                if (event != null) {
-                    try {  // нет связи — встреча всё равно в календаре; связь с обещанием догонит при следующей правке
-                        Api.setTaskCalendar(id, event, minutes)
-                        Api.setTaskStatus(id, "open")
-                    } catch (_: Exception) {
-                    }
-                }
-                TaskPrompts.meetingResult(context, id, text, event != null)
-                try {
-                    PhoneCalendar.sync(context, force = true)
-                    Repo.tasks.refresh()
-                } catch (_: Exception) {
-                }
+                val ok = TaskPrompts.addMeeting(context, id, text, intent.getLongExtra("due", 0L),
+                    intent.getIntExtra("minutes", Core.prefs.calendarDefaultMin), intent.getStringExtra("notes"))
+                TaskPrompts.meetingResult(context, id, text, ok)
                 done.finish()
             }
             return

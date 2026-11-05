@@ -263,7 +263,10 @@ with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cu
      || ', сделано ' || count(*) FILTER (WHERE status = 'done') || ', отклонено ' || count(*) FILTER (WHERE status = 'dismissed')
      || ' | подтверждено ' || count(*) FILTER (WHERE confirmed_at IS NOT NULL)
      || ', со сроком ' || count(*) FILTER (WHERE due_at IS NOT NULL) || ', с человеком ' || count(*) FILTER (WHERE counterpart_id IS NOT NULL OR person_id IS NOT NULL)
-     || ', руками ' || count(*) FILTER (WHERE source = 'manual') || ', с кнопки ' || count(*) FILTER (WHERE source = 'button')
+     || ' (без человека: мне ' || count(*) FILTER (WHERE kind = 'waiting' AND counterpart_id IS NULL AND counterpart IS NULL)
+     || ', моих ' || count(*) FILTER (WHERE kind = 'mine' AND counterpart_id IS NULL AND counterpart IS NULL) || ')'
+     || ', встреч ' || count(*) FILTER (WHERE kind = 'meeting') || ' (в календаре ' || count(*) FILTER (WHERE kind = 'meeting' AND calendar_event_id IS NOT NULL) || ')'
+     || ', руками ' || count(*) FILTER (WHERE source = 'manual') || ', голосом ' || count(*) FILTER (WHERE source = 'voice')
      || ' | уверенность: <0.7 ' || count(*) FILTER (WHERE confidence < 0.7) || ', 0.7–0.85 ' || count(*) FILTER (WHERE confidence >= 0.7 AND confidence < 0.85)
      || ', ≥0.85 ' || count(*) FILTER (WHERE confidence >= 0.85)
      || ' | отклонено по уверенности: <0.7 ' || count(*) FILTER (WHERE status = 'dismissed' AND confidence < 0.7)

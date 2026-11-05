@@ -131,3 +131,34 @@ def test_meeting_kind(conn):  # noqa: F811
     tasks.save(conn, None, out, "voice")
     row = conn.execute("SELECT kind, calendar_minutes FROM tasks WHERE kind = 'meeting' ORDER BY id LIMIT 1").fetchone()
     assert row["kind"] == "meeting" and row["calendar_minutes"] == 60
+
+
+def test_who_said_the_promise(conn):  # noqa: F811
+    """Кто кому — по тому, кто на самом деле сказал фразу: «пришлю» сказал Иван — обещал Иван;
+    в разговоре один на один «с кем» — второй участник; противоречие — на согласование."""
+    from datetime import datetime, timedelta, timezone
+    from neuro import tasks
+    conn.execute("TRUNCATE tasks, people RESTART IDENTITY CASCADE")
+    me = conn.execute("INSERT INTO people (number, is_owner, name) VALUES (1, true, 'Олег') RETURNING id").fetchone()["id"]
+    ivan = conn.execute("INSERT INTO people (number, name) VALUES (2, 'Иван') RETURNING id").fetchone()["id"]
+    t0 = datetime.now(timezone.utc)
+
+    def seg(pid, owner, text, i, sec=6):
+        return {"id": i, "person_id": pid, "person_owner": owner, "person_ignored": False, "person_kind": "person",
+                "voice_score": 0.8, "junk": False, "text": text, "started_at": t0 + timedelta(seconds=10 * i),
+                "ended_at": t0 + timedelta(seconds=10 * i + sec)}
+    segs = [seg(me, True, "Слушай, а договор когда будет готов?", 1),
+            seg(ivan, False, "Пришлю договор завтра до обеда, не переживай.", 2),
+            seg(me, True, "Хорошо, а я тогда оплачу счёт в пятницу.", 3)]
+    out = tasks.classify(conn, [
+        {"text": "Прислать договор", "kind": "waiting", "who": "Спикер 5", "confidence": 0.9,
+         "evidence": "Пришлю договор завтра до обеда"},
+        {"text": "Оплатить счёт", "kind": "mine", "who": "Я", "confidence": 0.9, "evidence": "я тогда оплачу счёт в пятницу"},
+        {"text": "Подготовить договор", "kind": "mine", "who": "Я", "confidence": 0.9,
+         "evidence": "Пришлю договор завтра до обеда, не переживай"},
+    ], {}, True, segs=segs)
+    m = {t["text"]: t for t in out}
+    assert m["Прислать договор"]["counterpart_id"] == ivan and m["Прислать договор"]["counterpart"] == "Иван"
+    assert m["Прислать договор"]["status"] == "open"
+    assert m["Оплатить счёт"]["counterpart_id"] == ivan  # один на один — с Иваном
+    assert m["Подготовить договор"]["status"] == "suggested"  # «пришлю» сказал Иван, а записано «я» — под вопрос

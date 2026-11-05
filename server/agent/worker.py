@@ -139,7 +139,8 @@ def summarize_one(conn, conv_id: int):
             topics = people.apply_summary(conn, conv_id, segs, result, [])
         except Exception:  # noqa: BLE001 — люди и темы не должны мешать итогам
             log.exception("conversation %s: people/topics failed", conv_id)
-        tasks = tasklib.classify(conn, result.get("tasks"), people.labels_map(segs), tasklib.owner_spoke(conn, segs))
+        tasks = tasklib.classify(conn, result.get("tasks"), people.labels_map(segs), tasklib.owner_spoke(conn, segs),
+                                 segs=segs)
     else:
         title = first_words(segs, lang=lang)
 
@@ -307,7 +308,8 @@ def quick_tasks(conn):
         except Exception:  # noqa: BLE001
             log.exception("quick task from segment %s failed", seg["id"])
             continue
-        found = tasklib.classify(conn, result.get("tasks"), people.labels_map(window), None, source="voice")
+        found = tasklib.classify(conn, result.get("tasks"), people.labels_map(window), None, source="voice",
+                                 segs=window)
         res = tasklib.save(conn, seg["conversation_id"], found, "voice")
         log.info("quick task from «%s»: %s", (seg["text"] or "")[:60], res)
 

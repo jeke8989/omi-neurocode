@@ -382,6 +382,7 @@ def main():
     migrated = False
     pruned = False
     cleaned = False
+    samples_done = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -415,6 +416,14 @@ def main():
                                          "to sign again", res["removed"], res["people"], res["recheck"])
                         except Exception:  # noqa: BLE001
                             log.exception("voices: voiceprint cleanup failed")
+                    if not samples_done:
+                        samples_done = True
+                        try:
+                            n = voices.refresh_samples_once(conn)
+                            if n:
+                                log.info("voices: rebuilt %d voice samples", n)
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: voice samples rebuild failed")
                     finalize_voices(conn)
                     if not pruned:
                         pruned = True

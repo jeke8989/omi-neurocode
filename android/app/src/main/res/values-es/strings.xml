@@ -300,10 +300,18 @@
     <string name="important_on">Marcar como importante</string>
     <string name="important_title">Conversaciones importantes</string>
     <string name="inbox">Notificaciones</string>
+    <string name="inbox_all_done">Todo respondido</string>
     <string name="inbox_clear">Borrar notificaciones</string>
+    <string name="inbox_confirm">Sí, correcto</string>
+    <string name="inbox_done">Hecho</string>
     <string name="inbox_empty_text">Las preguntas sobre tareas, los recordatorios y los resúmenes de la mañana se quedan aquí aunque los descartes</string>
     <string name="inbox_empty_title">No hay notificaciones</string>
+    <string name="inbox_from">de «%1$s»</string>
+    <string name="inbox_in_promises">En promesas</string>
     <string name="inbox_note">Las notificaciones se guardan solo en este teléfono, las últimas 80.</string>
+    <string name="inbox_pending">Esperan respuesta %1$d</string>
+    <string name="inbox_removed">Quitado</string>
+    <string name="inbox_wrong">No</string>
     <string name="install_by_link">Instalar desde enlace</string>
     <string name="installed_ok">Instalada</string>
     <string name="integrations">Integraciones</string>
@@ -618,6 +626,7 @@
     <string name="promise_card_mine_to">Prometiste a %1$s</string>
     <string name="promise_card_reminder">Recordarte</string>
     <string name="promise_card_theirs">%1$s te prometió</string>
+    <string name="promise_card_theirs_anon">Te prometieron</string>
     <string name="promise_conversation">Conversación</string>
     <string name="promise_due">Plazo</string>
     <string name="promise_due_now">Vence una promesa</string>
@@ -643,6 +652,8 @@
     <string name="promise_to_calendar">Añadir al calendario</string>
     <string name="promise_voice_name">Nombre de esta voz</string>
     <string name="promise_was_there">Estuvo en la conversación</string>
+    <string name="promise_where">Dónde se acordó</string>
+    <string name="promise_where_open">Abrir la conversación</string>
     <string name="promise_who_mine">A quién prometiste</string>
     <string name="promise_who_none">Sin indicar — elegir</string>
     <string name="promise_who_other">Otro nombre</string>
@@ -666,6 +677,7 @@
     <string name="recently">Recientemente</string>
     <string name="recommended">Recomendados</string>
     <string name="remembered">Recordado</string>
+    <string name="reminder_from">de la conversación «%1$s»</string>
     <string name="reminder_title">Recordatorio</string>
     <string name="reminders_channel">Recordatorios</string>
     <string name="reminders_channel_desc">Tareas con plazo, a la hora fijada</string>

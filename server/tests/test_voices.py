@@ -589,3 +589,18 @@ def test_frequent_voice_does_not_take_other_voices(clean):
     assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s AND segment_id = 9100",
                         (anna,)).fetchone()["n"] == 0
     assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (anna,)).fetchone()["n"] >= 15
+
+
+def test_voice_sample_trims_noise():
+    """Запись голоса: тишина по краям обрезается, ровный шум — «неживой» (в запись — в последнюю очередь)."""
+    import numpy as np
+    from neuro import voices
+    sr = voices.SAMPLE_RATE
+    rng = np.random.default_rng(1)
+    t = np.arange(sr * 2) / sr
+    speech = (3000 * np.sin(2 * np.pi * 180 * t) * (np.sin(2 * np.pi * 3 * t) > 0)).astype(np.int16)  # слоги
+    clip = np.concatenate([np.zeros(sr, np.int16), speech, np.zeros(sr, np.int16)])
+    out, ratio, lively = voices._voiced(clip)
+    assert 1.9 * sr <= len(out) <= 2.6 * sr and ratio > 0.4 and lively >= 3
+    hum = (800 * rng.standard_normal(sr * 3)).astype(np.int16)
+    assert voices._voiced(hum)[2] < 3

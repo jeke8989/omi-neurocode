@@ -564,10 +564,10 @@ def new_unknown(conn, emb: np.ndarray, seconds: float, loudness: float,
     return p
 
 
-def save_sample(person_id: int, pcm16: np.ndarray):
-    """Короткая запись голоса (до 6 с) — чтобы узнать человека на слух в «Кто это?»."""
+def save_sample(person_id: int, pcm16: np.ndarray, limit_sec: float = 6.0):
+    """Запись голоса — чтобы узнать человека на слух в «Кто это?»."""
     VOICE_DIR.mkdir(parents=True, exist_ok=True)
-    clip = pcm16[: SAMPLE_RATE * 6]
+    clip = pcm16[: int(SAMPLE_RATE * limit_sec)]
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
@@ -765,7 +765,6 @@ def finalize_conversation(conn, conv_id: int) -> dict:
             people = people_vectors(conn)
             pid, score, gap = p["id"], 1.0, 0.0
             result["new"] += 1
-            _keep_sample(conn, pid, best[0][0])
         if pid is None:
             for sid, _, _ in c.segs:
                 assign[sid] = (None, 0.0)
@@ -791,8 +790,6 @@ def finalize_conversation(conn, conv_id: int) -> dict:
                 """UPDATE people SET speech_sec = speech_sec + %s,
                        last_seen = greatest(coalesce(last_seen, now()), now()),
                        first_seen = coalesce(first_seen, now()) WHERE id = %s""", (round(c.seconds, 1), pid))
-        if not sample_path(pid).exists():
-            _keep_sample(conn, pid, max(c.segs, key=lambda t: t[1])[0])
     # короткие фразы без отпечатка — к голосу того же куска (тот же локальный голос) или соседней фразы
     by_local: dict[tuple, int | None] = {}
     for s in segs:
@@ -811,6 +808,9 @@ def finalize_conversation(conn, conv_id: int) -> dict:
         conn.execute("UPDATE segments SET person_id = %s, voice_score = %s WHERE id = %s",
                      (pid, round(score, 3) if pid else None, s["id"]))
         last_pid = pid or last_pid
+    # запись голоса — когда фразы уже подписаны: нет записи или она старше суток — собрать из самых чистых
+    for pid in {p for p, _ in assign.values() if p}:
+        _keep_sample(conn, pid)
     conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
     _recheck_done(conn, conv_id)
     return result
@@ -881,22 +881,120 @@ def clean_prints(conn, days: int = 3) -> dict:
     return {"removed": removed, "people": touched, "recheck": len(convs)}
 
 
-def _keep_sample(conn, person_id: int, segment_id: int):
-    """Запись голоса для «Кто это?» — из звука фразы, если он ещё хранится на сервере."""
-    row = conn.execute(
-        """SELECT a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
+SAMPLE_MAX_SEC = 12.0        # запись голоса человека: до 12 секунд из 2–3 его самых чистых фраз
+SAMPLE_CLIP_SEC = 6.0        # одна фраза в записи — не длиннее
+SAMPLE_REFRESH = 24 * 3600   # раз в сутки запись можно заменить на более чистую
+
+
+def _voiced(pcm: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """Обрезать тишину и шум по краям (по громкости кадров 20 мс). Возвращает (звук, доля громких кадров 0..1,
+    «живость» — во сколько раз громкие кадры громче тихих: у речи слоги и паузы, у ровного шума — нет)."""
+    frame = SAMPLE_RATE // 50
+    n = len(pcm) // frame
+    if n < 10:
+        return pcm[:0], 0.0, 0.0
+    x = pcm[: n * frame].astype(np.float32).reshape(n, frame)
+    rms = np.sqrt((x ** 2).mean(axis=1)) + 1e-6
+    p95 = float(np.percentile(rms, 95))
+    loud = rms > max(250.0, 0.12 * p95)
+    idx = np.flatnonzero(loud)
+    if len(idx) == 0:
+        return pcm[:0], 0.0, 0.0
+    a, b = max(0, int(idx[0]) - 10), min(n, int(idx[-1]) + 15)  # 0.2 с до и 0.3 с после голоса
+    return pcm[a * frame: b * frame], float(loud[a:b].mean()), p95 / (float(np.percentile(rms, 10)) + 1e-6)
+
+
+def _segment_pcm(row: dict, pad_before: float = 0.15, pad_after: float = 0.25, limit: float = SAMPLE_CLIP_SEC) -> np.ndarray:
+    with open(row["path"], "rb") as f:
+        f.seek(max(0, int((float(row["off"]) - pad_before) * SAMPLE_RATE)) * 2)
+        data = f.read(int((min(float(row["dur"]), limit) + pad_before + pad_after) * SAMPLE_RATE) * 2)
+    return np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16)
+
+
+def refresh_sample(conn, person_id: int, force: bool = False) -> bool:
+    """Запись голоса для «Кто это?» и карточки человека: 2–3 самые чистые его фразы (подписанные вручную —
+    первыми, потом самые уверенно узнанные и длинные), без тишины и шума по краям, громкость выровнена.
+    Раньше бралась одна «самая длинная» фраза — часто это был шум или чужой голос рядом."""
+    path = sample_path(person_id)
+    if not force and path.exists() and time.time() - path.stat().st_mtime < SAMPLE_REFRESH:
+        return False
+    person = conn.execute("SELECT centroid FROM people WHERE id = %s", (person_id,)).fetchone()
+    centroid = person["centroid"] if person and person["centroid"] else None
+    rows = conn.execute(
+        """SELECT s.id, s.text, s.voice_score, s.embedding, s.embed_backend, a.path,
+                  extract(epoch FROM s.started_at - a.started_at) AS off,
                   extract(epoch FROM s.ended_at - s.started_at) AS dur
-           FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id WHERE s.id = %s""", (segment_id,)).fetchone()
-    if not row or not row["path"] or not Path(row["path"]).exists():
-        return
+           FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id
+           WHERE s.person_id = %s AND NOT s.junk AND a.path IS NOT NULL
+             AND s.ended_at - s.started_at >= interval '1.5 seconds'
+           ORDER BY (s.voice_score >= 0.999) DESC, s.voice_score DESC NULLS LAST,
+                    s.ended_at - s.started_at DESC
+           LIMIT 24""", (person_id,)).fetchall()
+    th = thresholds()
+    picks: list[tuple[float, np.ndarray]] = []
+    for r in rows:
+        if len((r["text"] or "").split()) < 3 or not Path(r["path"]).exists():
+            continue
+        # фраза должна звучать его голосом (отпечаток фразы похож на его средний)
+        if centroid and r["embedding"] and r["embed_backend"] == backend_name() \
+                and len(r["embedding"]) == len(centroid) and cosine(r["embedding"], centroid) < th.match:
+            continue
+        try:
+            clip, ratio, lively = _voiced(_segment_pcm(r))
+        except OSError:
+            continue
+        sec = len(clip) / SAMPLE_RATE
+        if sec < 1.2 or ratio < 0.45:
+            continue  # почти тишина
+        manual = 1.5 if (r["voice_score"] or 0) >= 0.999 else 1.0
+        speechy = 1.0 if lively >= 3.0 else 0.5  # ровный гул без слогов — в последнюю очередь
+        picks.append((ratio * min(sec, SAMPLE_CLIP_SEC) * manual * speechy, clip))
+        if len(picks) >= 8:
+            break
+    if not picks:
+        return False
+    picks.sort(key=lambda t: -t[0])
+    gap = np.zeros(int(0.35 * SAMPLE_RATE), dtype=np.int16)
+    parts: list[np.ndarray] = []
+    total = 0.0
+    for _, clip in picks[:3]:
+        if total >= SAMPLE_MAX_SEC - 1:
+            break
+        clip = clip[: int((SAMPLE_MAX_SEC - total) * SAMPLE_RATE)]
+        parts += [clip, gap]
+        total += len(clip) / SAMPLE_RATE + 0.35
+    audio = np.concatenate(parts[:-1]).astype(np.float32)
+    peak = float(np.abs(audio).max()) or 1.0
+    audio *= min(8.0, 0.7 * 32767 / peak)  # тихий голос — громче, но без перегруза
+    save_sample(person_id, audio.astype(np.int16), limit_sec=SAMPLE_MAX_SEC)
+    return True
+
+
+def _keep_sample(conn, person_id: int, segment_id: int | None = None):
+    """Запись голоса для «Кто это?» — из звука его фраз, пока он хранится на сервере."""
     try:
-        with open(row["path"], "rb") as f:
-            f.seek(max(0, int(float(row["off"]) * SAMPLE_RATE)) * 2)
-            data = f.read(int(min(float(row["dur"]), 6.0) * SAMPLE_RATE) * 2)
-        if len(data) >= SAMPLE_RATE:  # хотя бы полсекунды
-            save_sample(person_id, np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16))
-    except OSError:
-        log.warning("cannot save voice sample for person %s", person_id)
+        refresh_sample(conn, person_id)
+    except Exception:  # noqa: BLE001 — запись голоса не должна мешать узнаванию
+        log.warning("cannot save voice sample for person %s", person_id, exc_info=True)
+
+
+SAMPLES_KEY = "voices.samples_v2"
+
+
+def refresh_samples_once(conn) -> int:
+    """Один раз после обновления: пересобрать записи голосов всех людей по новым правилам (кроме своего
+    голоса, записанного по фразам знакомства)."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (SAMPLES_KEY,)).fetchone():
+        return 0
+    done = 0
+    for p in conn.execute("SELECT id FROM people WHERE NOT is_owner AND NOT ignored").fetchall():
+        try:
+            done += refresh_sample(conn, p["id"], force=True)
+        except Exception:  # noqa: BLE001
+            log.warning("voice sample for person %s failed", p["id"], exc_info=True)
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                 (SAMPLES_KEY, str(done)))
+    return done
 
 
 PRUNE_KEY = "voices.pruned_v1"
@@ -1189,6 +1287,10 @@ def assign_segment(conn, segment_id: int, person_id: int):
             if wrong:
                 conn.execute("DELETE FROM voiceprints WHERE id = ANY(%s::bigint[])", (wrong,))
         recompute_centroid(conn, row["person_id"])
+    try:  # «Кто это?» — ручная подпись: запись голоса собираем заново, с этой фразой в начале
+        refresh_sample(conn, person_id, force=True)
+    except Exception:  # noqa: BLE001
+        log.warning("voice sample for person %s failed", person_id, exc_info=True)
 
 
 def confirm_person(conn, person_id: int):
