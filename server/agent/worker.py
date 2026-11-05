@@ -10,8 +10,9 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, cleanup, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention, routines
+from neuro import agent_core, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention, routines
 from neuro import calendar as calendarlib
+from neuro import cleanup as cleanuplib  # не путать с def cleanup ниже (хранение звука)
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
 from neuro.assistant import (TASK_SCHEMA, TZ, clean_list, clean_tasks, insert_memories, insert_tasks,
@@ -108,7 +109,7 @@ def summarize_conversations(conn):
 def summarize_one(conn, conv_id: int):
     # сначала исправить расшифровку: итоги, задачи и поиск — уже по чистому тексту
     try:
-        cleanup.conversation(conn, conv_id)
+        cleanuplib.conversation(conn, conv_id)
     except Exception:  # noqa: BLE001 — без исправления итоги всё равно нужны
         log.exception("conversation %s: cleanup failed", conv_id)
     segs = conn.execute(
