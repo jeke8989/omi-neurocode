@@ -52,7 +52,8 @@ object TaskPrompts {
     fun onTasks(context: Context, tasks: List<TaskItem>) {
         val prefs = Core.prefs
         val suggested = tasks.filter { pending(it) || meetingAsk(context, it) }
-        // вопрос «В календарь?» — отдельный от «Это обещание?» (ключ -id): дело, ставшее встречей, спросим заново
+        // вопрос «В календарь?» — отдельный от «Это обещание?» (ключ -id): дело, ставшее встречей (в том числе
+        // старое «Встреча завтра в 14:30», которое сервер один раз перевёл во встречи), спросим заново
         fun key(t: TaskItem) = if (meetingAsk(context, t)) -t.id else t.id
         val keys = suggested.map { key(it) }.toSet()
         val asked = prefs.askedTasks
