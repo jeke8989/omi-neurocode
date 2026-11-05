@@ -162,3 +162,46 @@ def test_who_said_the_promise(conn):  # noqa: F811
     assert m["Прислать договор"]["status"] == "open"
     assert m["Оплатить счёт"]["counterpart_id"] == ivan  # один на один — с Иваном
     assert m["Подготовить договор"]["status"] == "suggested"  # «пришлю» сказал Иван, а записано «я» — под вопрос
+
+
+def test_meeting_fallback_and_conversion(conn):  # noqa: F811
+    """«Встреча завтра в 14:30» с временем — встреча, даже если модель назвала её делом; старые такие дела
+    один раз становятся встречами (без подтверждения — телефон спросит про календарь)."""
+    from neuro import crypto, tasks
+    conn.execute("TRUNCATE tasks, people RESTART IDENTITY CASCADE")
+    conn.execute("DELETE FROM settings WHERE key = %s", (tasks.MEETINGS_KEY,))
+    out = tasks.classify(conn, [{"text": "Встреча с Силаевым", "kind": "mine", "due_at": "2099-11-06T14:30",
+                                 "confidence": 0.9, "evidence": "надо встречу в календарь поставить"}], {}, None, source="voice")
+    assert out[0]["kind"] == "meeting"
+    assert tasks.TRIGGER.search("надо встречу в календарь поставить на завтра")
+    for text, kind in [("Напомнить: 13 ноября в 13:00 стоматология", "reminder"), ("Купить подарок к встрече", "mine")]:
+        conn.execute("""INSERT INTO tasks (text, kind, status, due_at, source, confirmed_at)
+                        VALUES (%s, %s, 'open', now() + interval '2 days', 'conversation', now())""",
+                     (crypto.seal(text), kind))
+    assert tasks.meetings_once(conn) == 1 and tasks.meetings_once(conn) == 0
+    rows = conn.execute("SELECT text, kind, confirmed_at FROM tasks ORDER BY id").fetchall()
+    assert rows[0]["kind"] == "meeting" and rows[0]["confirmed_at"] is None and rows[1]["kind"] == "mine"
+
+
+def test_owner_check(conn):  # noqa: F811
+    """«Это вы» оказалось на голосе, которого почти нет, а другой голос — почти во всех разговорах: вернуть."""
+    from datetime import datetime, timedelta, timezone
+    from neuro import profile
+    conn.execute("TRUNCATE people, conversations, segments RESTART IDENTITY CASCADE")
+    conn.execute("DELETE FROM settings WHERE key = %s", (profile.REPAIR_KEY,))
+    wearer = conn.execute("INSERT INTO people (number, name) VALUES (1, 'Олег') RETURNING id").fetchone()["id"]
+    wrong = conn.execute("INSERT INTO people (number, is_owner) VALUES (2, true) RETURNING id").fetchone()["id"]
+    now = datetime.now(timezone.utc)
+    for i in range(20):
+        cid = conn.execute("""INSERT INTO conversations (device_id, started_at, last_activity, status)
+                              VALUES ('d', %s, %s, 'done') RETURNING id""",
+                           (now - timedelta(hours=i + 1), now - timedelta(hours=i))).fetchone()["id"]
+        conn.execute("""INSERT INTO segments (conversation_id, device_id, started_at, ended_at, text, person_id)
+                        VALUES (%s, 'd', %s, %s, 'привет', %s)""",
+                     (cid, now - timedelta(hours=i + 1), now - timedelta(hours=i + 1) + timedelta(seconds=3), wearer))
+        if i == 0:
+            conn.execute("""INSERT INTO segments (conversation_id, device_id, started_at, ended_at, text, person_id)
+                            VALUES (%s, 'd', %s, %s, 'да', %s)""", (cid, now - timedelta(hours=1), now, wrong))
+    assert profile.owner_check(conn) == wearer
+    assert conn.execute("SELECT id FROM people WHERE is_owner").fetchone()["id"] == wearer
+    assert profile.owner_check(conn) is None  # не чаще раза в 30 дней

@@ -28,6 +28,8 @@ ACCEPT_COMMAND = 0.7  # явная команда пользователя («н
 SUGGEST = 0.45        # на согласование
 MAX_OPEN = 3          # из одного разговора сразу в обещания — не больше; остальное на согласование
 REMIND_WORDS = re.compile(r"напомн|не (дай|дайте) (мне )?забыть|не забыть|remind|hatırlat|recuérd", re.I)
+MEETING_TEXT = re.compile(r"(?<!к )(?<!для )(?<!перед )(?<!после )(?<!до )(?<!\w)(встреча|встречу|созвон|звонок с|"
+                          r"при[её]м у|запись к|стоматолог\w*|к врачу|у врача|meeting|call with|toplantı|reunión)(?!\w)", re.I)
 KINDS = ("mine", "waiting", "reminder", "meeting")  # meeting — встреча: телефон предложит поставить её в календарь
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 
@@ -139,6 +141,8 @@ def classify(conn, raw, labels: dict[str, int], owner_spoke: bool | None, source
         kind = str(t.get("kind") or "mine").lower()
         kind = kind if kind in KINDS else "mine"
         due_at = parse_due(t.get("due_at"))
+        if kind in ("mine", "reminder") and due_at and MEETING_TEXT.search(text):
+            kind = "meeting"  # «Встреча с Ильёй завтра в 15» — это встреча, даже если модель назвала её делом
         if kind == "meeting" and due_at is None:
             kind = "mine"  # встреча без времени — обычное дело «договориться о встрече»
         minutes = _minutes(t.get("minutes")) if kind == "meeting" else None
@@ -339,7 +343,8 @@ def owner_spoke(conn, segs: list[dict]) -> bool | None:
 # ---------------------------------------------------------------- фраза «напомни / создай задачу»
 TRIGGER = re.compile(
     r"\b(напомни|напомнить мне|создай задачу|запиши задачу|добавь задачу|поставь задачу|не дай (мне )?забыть"
-    r"|поставь (мне )?(встречу|созвон|звонок)|(запиши|поставь|добавь|внеси)( это| мне)? в календарь|создай встречу"
+    r"|(постав|запис|добав|внес|созда|назнач|запланир)\w*[^.!?]{0,20}?(встреч|созвон|звонок|в календар)"
+    r"|(встреч|созвон)\w*[^.!?]{0,40}(в|на) календар|в календарь"
     r"|remind me|create a task|add a task|make a task|schedule a (meeting|call)|add (it )?to (my )?calendar"
     r"|hatırlat|görev (oluştur|ekle)|takvime ekle|toplantı (ayarla|ekle)"
     r"|recuérdame|crea (una )?tarea|añade (una )?tarea|añade al calendario|agenda una reunión)", re.I)
@@ -350,6 +355,25 @@ QUICK_SYSTEM = f"""Пользователь кулона только что с�
 временем, kind=reminder для «напомни», иначе mine). Если команда
 относится к другому человеку, укажи его в who. confidence 0.9, если команда ясная.
 {RULES}"""
+
+
+MEETINGS_KEY = "tasks.meetings_v1"
+
+
+def meetings_once(conn) -> int:
+    """Один раз после появления «встреч»: открытые будущие дела вида «Встреча завтра в 14:30», «Напомнить:
+    стоматолог 13-го» становятся встречами — телефон предложит поставить их в календарь."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (MEETINGS_KEY,)).fetchone():
+        return 0
+    ids = [r["id"] for r in conn.execute(
+        """SELECT id, text FROM tasks WHERE status IN ('open', 'suggested') AND kind IN ('mine', 'reminder')
+           AND due_at > now() AND calendar_event_id IS NULL""").fetchall() if MEETING_TEXT.search(r["text"] or "")]
+    if ids:
+        conn.execute("UPDATE tasks SET kind = 'meeting', confirmed_at = NULL, updated_at = now() "
+                     "WHERE id = ANY(%s::bigint[])", (ids,))
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                 (MEETINGS_KEY, str(len(ids))))
+    return len(ids)
 
 
 def due_reminders(conn, limit: int = 50) -> list[dict]:

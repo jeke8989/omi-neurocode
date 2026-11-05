@@ -438,10 +438,21 @@ def main():
              config.LLM_BASE_URL if llm.configured() else "not configured",
              config.AUTO_EXPORT, notion_ready(), github_ready())
     last_cleanup = 0.0
+    last_owner_check = 0.0
     while True:
         try:
             with db.connect() as conn:
                 while True:
+                    if time.monotonic() - last_owner_check > 3600:
+                        last_owner_check = time.monotonic()
+                        try:  # «это вы» не на том голосе — вернуть (иначе «я обещал» и «мне обещали» путаются)
+                            profile.owner_check(conn)
+                        except Exception:  # noqa: BLE001
+                            log.exception("owner check failed")
+                        try:
+                            tasklib.meetings_once(conn)  # «Встреча завтра в 14:30» — встреча (один раз для старых)
+                        except Exception:  # noqa: BLE001
+                            log.exception("meetings conversion failed")
                     quick_tasks(conn)
                     summarize_conversations(conn)
                     process_events(conn)

@@ -141,11 +141,18 @@ def voice_tick(conn) -> str | None:
         if me and me["id"] != pid:
             a = conn.execute("SELECT centroid FROM people WHERE id = %s", (pid,)).fetchone()
             b = conn.execute("SELECT centroid FROM people WHERE id = %s", (me["id"],)).fetchone()
-            same = a and b and a["centroid"] and b["centroid"] and len(a["centroid"]) == len(b["centroid"]) \
-                and voices.cosine(a["centroid"], b["centroid"]) >= voices.thresholds().maybe
-            if same:  # тот же голос раздвоился — склеиваем
+            sim = voices.cosine(a["centroid"], b["centroid"]) if a and b and a["centroid"] and b["centroid"] \
+                and len(a["centroid"]) == len(b["centroid"]) else 0.0
+            if sim >= voices.thresholds().alien:  # тот же голос раздвоился — склеиваем
                 voices.merge_people(conn, pid, me["id"])
                 pid = me["id"]
+            elif _talks_a_lot(conn, me["id"]):
+                # голос пользователя уже давно известен (он в большинстве разговоров), а в окне фраз громче всех
+                # оказался кто-то другой — шум или собеседник рядом. Своего голоса не меняем.
+                job["status"] = "done"
+                _set(conn, VOICE_KEY, json.dumps(job), seal=False)
+                log.warning("profile voice: window voice %s differs from the known user %s — kept the user", pid, me["id"])
+                return "done"
             else:  # раньше «собой» был узнан чужой голос — исправляем
                 conn.execute("UPDATE people SET is_owner = false WHERE id = %s", (me["id"],))
         name = _get(conn, KEYS["name"])
@@ -157,3 +164,60 @@ def voice_tick(conn) -> str | None:
         _set(conn, VOICE_KEY, json.dumps(job), seal=False)  # только время окна и статус
     log.info("profile voice: person %s is the user", pid)
     return "done"
+
+
+def _talks_a_lot(conn, person_id: int) -> bool:
+    row = conn.execute(
+        """SELECT count(DISTINCT conversation_id) AS n FROM segments
+           WHERE person_id = %s AND started_at > now() - interval '14 days'""", (person_id,)).fetchone()
+    return (row["n"] or 0) >= 10
+
+
+REPAIR_KEY = "profile.owner_repair"
+
+
+def owner_check(conn) -> int | None:
+    """Раз в сутки: «это вы» стоит на голосе, которого почти нет в разговорах, а кто-то другой говорит почти
+    во всех (кулон носит пользователь — его голос есть почти везде). Тогда «это вы» возвращается на этот голос:
+    иначе все «я обещал» становятся «мне обещали», а команды голосом не слышны. Не чаще раза в 30 дней —
+    если пользователь сам выберет другой голос, спорить не будем. Возвращает id нового «себя» или None."""
+    from . import voices  # noqa: PLC0415
+
+    row = conn.execute("SELECT value, updated_at FROM settings WHERE key = %s", (REPAIR_KEY,)).fetchone()
+    if row and row["updated_at"] and datetime.now(timezone.utc) - row["updated_at"] < timedelta(days=30):
+        return None
+    stats = conn.execute(
+        """SELECT s.person_id, count(DISTINCT s.conversation_id) AS convs
+           FROM segments s JOIN people p ON p.id = s.person_id
+           WHERE s.started_at > now() - interval '7 days' AND NOT s.junk AND NOT p.ignored
+             AND coalesce(p.kind, 'person') = 'person'
+           GROUP BY s.person_id ORDER BY convs DESC LIMIT 1""").fetchone()
+    total = conn.execute(
+        """SELECT count(DISTINCT conversation_id) AS n FROM segments
+           WHERE started_at > now() - interval '7 days' AND person_id IS NOT NULL AND NOT junk""").fetchone()["n"] or 0
+    me = owner(conn)
+    if not stats or not me or stats["person_id"] == me["id"]:
+        return None
+    mine = conn.execute(
+        """SELECT count(DISTINCT conversation_id) AS n FROM segments
+           WHERE person_id = %s AND started_at > now() - interval '7 days'""", (me["id"],)).fetchone()["n"] or 0
+    top, convs = stats["person_id"], stats["convs"]
+    if convs < 15 or convs < 0.5 * total or mine >= 0.25 * convs:
+        return None
+    with conn.transaction():
+        conn.execute("UPDATE people SET is_owner = false WHERE id = %s", (me["id"],))
+        name = _get(conn, KEYS["name"])
+        conn.execute("UPDATE people SET is_owner = true, ignored = false, kind = 'person', kind_auto = false, "
+                     "name = coalesce(name, %s), updated_at = now() WHERE id = %s",
+                     (crypto.seal_det(name) if name else None, top))
+        a = conn.execute("SELECT centroid, name FROM people WHERE id = %s", (me["id"],)).fetchone()
+        b = conn.execute("SELECT centroid FROM people WHERE id = %s", (top,)).fetchone()
+        if a and b and a["centroid"] and b["centroid"] and len(a["centroid"]) == len(b["centroid"]) \
+                and not a["name"] and voices.cosine(a["centroid"], b["centroid"]) >= voices.thresholds().alien:
+            voices.merge_people(conn, me["id"], top)  # безымянный дубль своего голоса — склеиваем
+        conn.execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                     (REPAIR_KEY, json.dumps({"from": me["id"], "to": top, "convs": convs, "was": mine})))
+    log.warning("profile: «it's me» moved back from person %s (%d conversations) to %s (%d of %d)",
+                me["id"], mine, top, convs, total)
+    return top

@@ -1385,6 +1385,15 @@ def diagnostics(conn) -> str:
         parts.append(f"#{r['id']} {who}: фраз {r['seg7']}, разг. {r['conv7']}, увер. {r['score7'] or '-'}, "
                      f"отп. {r['prints']} (подтв. {r['conf']}, дообуч. {r['auto']}), разброс {spread}, чужих {alien}, "
                      f"ближе всех #{near[1]} {near[0]:.2f}")
+    shown = {r["id"] for r in sorted(rows, key=lambda r: -(r["seg7"] or 0))[:8]}
+    me = next((r for r in rows if r["is_owner"]), None)
+    if me is None:
+        parts.append("«я» не задан")
+    elif me["id"] not in shown:
+        parts.append(f"#{me['id']} я: фраз {me['seg7']}, разг. {me['conv7']}")
+    repair = conn.execute("SELECT value FROM settings WHERE key = 'profile.owner_repair'").fetchone()
+    if repair:
+        parts.append(f"«я» исправлено: {repair['value']}")
     cleaned = conn.execute("SELECT value FROM settings WHERE key = %s", (CLEAN_KEY,)).fetchone()
     parts.append(f"уборка: {cleaned['value'] if cleaned else 'не было'}, на перепроверке {len(_recheck_ids(conn))}")
     return "; ".join(parts)

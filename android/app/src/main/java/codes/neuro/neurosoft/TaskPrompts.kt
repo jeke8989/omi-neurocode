@@ -52,18 +52,21 @@ object TaskPrompts {
     fun onTasks(context: Context, tasks: List<TaskItem>) {
         val prefs = Core.prefs
         val suggested = tasks.filter { pending(it) || meetingAsk(context, it) }
+        // вопрос «В календарь?» — отдельный от «Это обещание?» (ключ -id): дело, ставшее встречей, спросим заново
+        fun key(t: TaskItem) = if (meetingAsk(context, t)) -t.id else t.id
+        val keys = suggested.map { key(it) }.toSet()
         val asked = prefs.askedTasks
         val nm = channel(context) ?: return
         // ответили в приложении или ночная проверка решила сама — уведомление больше не нужно
-        (asked - suggested.map { it.id }.toSet()).forEach { nm.cancel(notificationId(it)) }
+        (asked - keys).forEach { nm.cancel(notificationId(kotlin.math.abs(it))) }
         if (!prefs.taskPrompts) {
-            prefs.askedTasks = asked.intersect(suggested.map { it.id }.toSet())
+            prefs.askedTasks = asked.intersect(keys)
             return
         }
         val now = System.currentTimeMillis()
-        val fresh = suggested.filter { it.id !in asked && created(it) > now - FRESH_MS }.take(PER_CHECK)
+        val fresh = suggested.filter { key(it) !in asked && created(it) > now - FRESH_MS }.take(PER_CHECK)
         fresh.forEach { if (meetingAsk(context, it)) showMeeting(context, nm, it) else show(context, nm, it) }
-        prefs.askedTasks = asked.intersect(suggested.map { it.id }.toSet()) + fresh.map { it.id }
+        prefs.askedTasks = asked.intersect(keys) + fresh.map { key(it) }
     }
 
     private fun created(t: TaskItem): Long = try {
