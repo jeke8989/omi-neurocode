@@ -670,7 +670,7 @@ def test_demix_person(clean):
     assert "заново" in voices.demix_once(conn)
 
 
-def test_pitch_blocks_cross_gender_match(clean):
+def test_pitch_blocks_cross_gender_match(clean, monkeypatch):
     """Высота голоса: женский и мужской голоса различаются; если голос заметно ниже/выше обычного голоса
     человека, он не подписывается им, даже если отпечаток похож."""
     conn = clean
@@ -679,6 +679,7 @@ def test_pitch_blocks_cross_gender_match(clean):
         p = voices.pitch_of(synth(**v, sec=3, seed=5))
         assert p and abs(p - f0) / f0 < 0.1, (f0, p)
     assert voices.pitch_mismatch(110, 210) and not voices.pitch_mismatch(150, 180) and not voices.pitch_mismatch(None, 200)
+    monkeypatch.setattr(voices, "MIN_PITCH_PHRASES", 1)
     pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5), (OWNER, 2.0), (ANNA, 2.5))
     rows = run_chunk(conn, pcm, Timed(spans), minutes_ago=60)
     anna = rows[1]["person_id"]

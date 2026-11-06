@@ -732,7 +732,7 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     # достаётся «следующему по похожести», как раньше
     found: dict[int, tuple[int | None, float, list, float, float]] = {}
     taken: dict[int, np.ndarray] = {}
-    pitches = {s["id"]: s["pitch"] for s in segs if s.get("pitch")}
+    pitches = {s["id"]: s["pitch"] for s in segs if s.get("pitch") and 70 <= s["pitch"] <= 350}
     person_pitch = {r["id"]: r["pitch"] for r in conn.execute(
         "SELECT id, pitch FROM people WHERE pitch IS NOT NULL").fetchall()}
     for i, c in enumerate(order):
@@ -860,7 +860,7 @@ def _recheck_done(conn, conv_id: int):
         conn.execute("DELETE FROM settings WHERE key = %s", (RECHECK_KEY,))
 
 
-PITCH_KEY = "voices.pitch_v1"
+PITCH_KEY = "voices.pitch_v2"  # v1 считал высоту грубо (у части голосов выходило 400 Гц) — пересчёт
 
 
 def pitch_backfill_once(conn, days: int = 3) -> str:
@@ -872,7 +872,7 @@ def pitch_backfill_once(conn, days: int = 3) -> str:
         """SELECT s.id, a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
                   extract(epoch FROM s.ended_at - s.started_at) AS dur
            FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id
-           WHERE s.started_at > now() - %s * interval '1 day' AND s.pitch IS NULL AND a.path IS NOT NULL
+           WHERE s.started_at > now() - %s * interval '1 day' AND a.path IS NOT NULL
              AND s.ended_at - s.started_at >= interval '1 second'
            ORDER BY a.path, s.started_at""", (days,)).fetchall()
     done = 0
@@ -886,9 +886,8 @@ def pitch_backfill_once(conn, days: int = 3) -> str:
             p = pitch_of(np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16))
         except OSError:
             continue
-        if p:
-            conn.execute("UPDATE segments SET pitch = %s WHERE id = %s", (round(p, 1), r["id"]))
-            done += 1
+        conn.execute("UPDATE segments SET pitch = %s WHERE id = %s", (round(p, 1) if p else None, r["id"]))
+        done += 1 if p else 0
     for p in conn.execute("SELECT id FROM people").fetchall():
         update_pitch(conn, p["id"])
     convs = [r["id"] for r in conn.execute(
@@ -1353,15 +1352,17 @@ def enroll_owner(conn) -> int:
     return done
 
 
+MIN_PITCH_PHRASES = 15  # обычная высота голоса — не меньше чем по 15 фразам
 PITCH_RATIO = 1.45  # голос в полтора раза ниже/выше обычного голоса человека — это не он (мужской ≠ женский)
 
 
 def pitch_of(pcm16: np.ndarray) -> float | None:
-    """Высота голоса (основной тон, Гц) — медиана по звонким кадрам 40 мс (автокорреляция, 70–400 Гц).
-    Отпечаток голоса в шуме кулона бывает похож у разных людей, а высота голоса мужчину и женщину
-    различает надёжно."""
-    x = np.asarray(pcm16, dtype=np.float32)
-    frame, hop = 640, 320
+    """Высота голоса (основной тон, Гц) — медиана по звонким кадрам 50 мс, метод YIN: период — первый
+    глубокий провал нормированной разностной функции в диапазоне 70–400 Гц (шумные кадры без чёткого
+    периода не считаются). Отпечаток голоса в шуме кулона бывает похож у разных людей, а высота голоса
+    мужчину и женщину различает надёжно."""
+    x = np.asarray(pcm16, dtype=np.float64)
+    frame, hop = 800, 320
     n = (len(x) - frame) // hop
     if n < 5:
         return None
@@ -1369,19 +1370,27 @@ def pitch_of(pcm16: np.ndarray) -> float | None:
     f = x[idx]
     f = f - f.mean(axis=1, keepdims=True)
     energy = (f * f).sum(axis=1)
-    loud = energy > max(float(np.percentile(energy, 60)) * 0.5, 250.0 ** 2 * frame)
-    f = f[loud]
-    if len(f) < 5:
+    f = f[energy > max(float(np.percentile(energy, 60)) * 0.5, 250.0 ** 2 * frame)]
+    if len(f) < 8:
         return None
-    f = f * np.hanning(frame)
-    ac = np.fft.irfft(np.abs(np.fft.rfft(f, n=2 * frame, axis=1)) ** 2, axis=1)[:, :frame]
     lo, hi = SAMPLE_RATE // 400, SAMPLE_RATE // 70
-    band = ac[:, lo:hi + 1]
-    lag = band.argmax(axis=1) + lo
-    good = band.max(axis=1) / (ac[:, 0] + 1e-9) > 0.4
-    if good.sum() < 5:
+    r = np.fft.irfft(np.abs(np.fft.rfft(f, n=2 * frame, axis=1)) ** 2, axis=1)[:, :hi + 2]
+    e = np.cumsum(f * f, axis=1)
+    taus = np.arange(hi + 2)
+    head = e[:, frame - 1 - taus]
+    tail = e[:, -1:] - np.concatenate([np.zeros((len(f), 1)), e[:, taus[1:] - 1]], axis=1)
+    d = head + tail - 2 * r
+    d[:, 0] = 0
+    cmnd = np.ones_like(d)
+    cmnd[:, 1:] = d[:, 1:] * taus[1:] / (np.cumsum(d[:, 1:], axis=1) + 1e-9)
+    band = cmnd[:, lo:hi + 1]
+    dip = np.zeros_like(band, dtype=bool)
+    dip[:, 1:-1] = (band[:, 1:-1] <= band[:, :-2]) & (band[:, 1:-1] <= band[:, 2:]) & (band[:, 1:-1] < 0.2)
+    voiced = dip.any(axis=1)
+    if voiced.sum() < 8:
         return None
-    return float(np.median(SAMPLE_RATE / lag[good]))
+    lag = dip.argmax(axis=1)[voiced] + lo
+    return float(np.median(SAMPLE_RATE / lag))
 
 
 def pitch_span(pcm: bytes, start: float, end: float) -> float | None:
@@ -1397,9 +1406,11 @@ def pitch_mismatch(a: float | None, b: float | None) -> bool:
 def update_pitch(conn, person_id: int):
     """Обычная высота голоса человека — медиана по его последним уверенно подписанным фразам."""
     conn.execute(
-        """UPDATE people SET pitch = (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY pitch) FROM (
-               SELECT pitch FROM segments WHERE person_id = %s AND pitch IS NOT NULL AND voice_score >= %s
-               ORDER BY id DESC LIMIT 300) x) WHERE id = %s""", (person_id, thresholds().match, person_id))
+        """UPDATE people SET pitch = (SELECT CASE WHEN count(*) >= %s
+                                                  THEN percentile_cont(0.5) WITHIN GROUP (ORDER BY pitch) END FROM (
+               SELECT pitch FROM segments WHERE person_id = %s AND pitch BETWEEN 70 AND 350 AND voice_score >= %s
+               ORDER BY id DESC LIMIT 300) x) WHERE id = %s""",
+        (MIN_PITCH_PHRASES, person_id, thresholds().match, person_id))
 
 
 def embed_span(pcm: bytes, start: float, end: float) -> np.ndarray | None:
