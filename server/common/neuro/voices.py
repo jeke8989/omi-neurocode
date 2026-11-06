@@ -709,7 +709,7 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     th = thresholds()
     segs = conn.execute(
         """SELECT s.id, s.chunk_id, s.speaker, s.person_id, s.voice_score, s.embedding, s.embed_backend,
-                  extract(epoch FROM s.ended_at - s.started_at) AS sec, s.started_at
+                  extract(epoch FROM s.ended_at - s.started_at) AS sec, s.started_at, s.pitch
            FROM segments s WHERE s.conversation_id = %s ORDER BY s.started_at, s.id""", (conv_id,)).fetchall()
     manual = {s["id"]: s["person_id"] for s in segs if s["person_id"] and (s["voice_score"] or 0) >= 0.999}
     units = [(s["id"], float(s["sec"] or 0), np.asarray(s["embedding"], dtype=np.float32)) for s in segs
@@ -732,6 +732,9 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     # достаётся «следующему по похожести», как раньше
     found: dict[int, tuple[int | None, float, list, float, float]] = {}
     taken: dict[int, np.ndarray] = {}
+    pitches = {s["id"]: s["pitch"] for s in segs if s.get("pitch")}
+    person_pitch = {r["id"]: r["pitch"] for r in conn.execute(
+        "SELECT id, pitch FROM people WHERE pitch IS NOT NULL").fetchall()}
     for i, c in enumerate(order):
         pins = [manual[sid] for sid, _, _ in c.segs if sid in manual]
         pid, score, gap, near = None, 0.0, 0.0, 0.0
@@ -739,6 +742,10 @@ def finalize_conversation(conn, conv_id: int) -> dict:
             pid, score = max(set(pins), key=pins.count), 1.0
         else:
             person, near, gap = decide(rank_people(conn, c.centroid, people), c.seconds, th)
+            heard = [pitches[sid] for sid, _, _ in c.segs if pitches.get(sid)]
+            if person is not None and len(heard) >= 3 and \
+                    pitch_mismatch(float(np.median(heard)), person_pitch.get(person["id"])):
+                person = None  # голос заметно ниже/выше, чем у этого человека (мужской — не Кристина)
             if person is not None and person["id"] in taken and not (
                     near >= th.match and float(c.centroid @ taken[person["id"]]) >= th.same - 2 * th.margin):
                 person = None
@@ -819,6 +826,7 @@ def finalize_conversation(conn, conv_id: int) -> dict:
     # запись голоса — когда фразы уже подписаны: нет записи или она старше суток — собрать из самых чистых
     for pid in {p for p, _ in assign.values() if p}:
         _keep_sample(conn, pid)
+        update_pitch(conn, pid)
     conn.execute("UPDATE conversations SET voices_done = true WHERE id = %s", (conv_id,))
     _recheck_done(conn, conv_id)
     return result
@@ -850,6 +858,52 @@ def _recheck_done(conn, conv_id: int):
                      (json.dumps(sorted(ids)), RECHECK_KEY))
     else:
         conn.execute("DELETE FROM settings WHERE key = %s", (RECHECK_KEY,))
+
+
+PITCH_KEY = "voices.pitch_v1"
+
+
+def pitch_backfill_once(conn, days: int = 3) -> str:
+    """Один раз: высота голоса для фраз последних дней (пока звук хранится), обычная высота у людей и
+    повторная подпись разговоров последних двух дней, где были названные люди — с новой проверкой."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (PITCH_KEY,)).fetchone():
+        return ""
+    rows = conn.execute(
+        """SELECT s.id, a.path, extract(epoch FROM s.started_at - a.started_at) AS off,
+                  extract(epoch FROM s.ended_at - s.started_at) AS dur
+           FROM segments s JOIN audio_chunks a ON a.id = s.chunk_id
+           WHERE s.started_at > now() - %s * interval '1 day' AND s.pitch IS NULL AND a.path IS NOT NULL
+             AND s.ended_at - s.started_at >= interval '1 second'
+           ORDER BY a.path, s.started_at""", (days,)).fetchall()
+    done = 0
+    for r in rows:
+        try:
+            if not Path(r["path"]).exists():
+                continue
+            with open(r["path"], "rb") as f:
+                f.seek(max(0, int(float(r["off"]) * SAMPLE_RATE)) * 2)
+                data = f.read(int(min(float(r["dur"]), 12.0) * SAMPLE_RATE) * 2)
+            p = pitch_of(np.frombuffer(data[: len(data) // 2 * 2], dtype=np.int16))
+        except OSError:
+            continue
+        if p:
+            conn.execute("UPDATE segments SET pitch = %s WHERE id = %s", (round(p, 1), r["id"]))
+            done += 1
+    for p in conn.execute("SELECT id FROM people").fetchall():
+        update_pitch(conn, p["id"])
+    convs = [r["id"] for r in conn.execute(
+        """UPDATE conversations SET voices_done = false
+           WHERE voices_done AND started_at > now() - interval '2 days'
+             AND id IN (SELECT DISTINCT s.conversation_id FROM segments s JOIN people p ON p.id = s.person_id
+                        WHERE p.name IS NOT NULL AND NOT p.is_owner AND s.voice_score < 0.999)
+           RETURNING id""").fetchall()]
+    if convs:
+        conn.execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                     (RECHECK_KEY, json.dumps(sorted(set(convs) | _recheck_ids(conn)))))
+    value = f"фраз {done} из {len(rows)}; заново {len(convs)}"
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (PITCH_KEY, value))
+    return value
 
 
 DEMIX_KEY = "voices.demix_v1"
@@ -1299,6 +1353,55 @@ def enroll_owner(conn) -> int:
     return done
 
 
+PITCH_RATIO = 1.45  # голос в полтора раза ниже/выше обычного голоса человека — это не он (мужской ≠ женский)
+
+
+def pitch_of(pcm16: np.ndarray) -> float | None:
+    """Высота голоса (основной тон, Гц) — медиана по звонким кадрам 40 мс (автокорреляция, 70–400 Гц).
+    Отпечаток голоса в шуме кулона бывает похож у разных людей, а высота голоса мужчину и женщину
+    различает надёжно."""
+    x = np.asarray(pcm16, dtype=np.float32)
+    frame, hop = 640, 320
+    n = (len(x) - frame) // hop
+    if n < 5:
+        return None
+    idx = np.arange(frame)[None, :] + hop * np.arange(n)[:, None]
+    f = x[idx]
+    f = f - f.mean(axis=1, keepdims=True)
+    energy = (f * f).sum(axis=1)
+    loud = energy > max(float(np.percentile(energy, 60)) * 0.5, 250.0 ** 2 * frame)
+    f = f[loud]
+    if len(f) < 5:
+        return None
+    f = f * np.hanning(frame)
+    ac = np.fft.irfft(np.abs(np.fft.rfft(f, n=2 * frame, axis=1)) ** 2, axis=1)[:, :frame]
+    lo, hi = SAMPLE_RATE // 400, SAMPLE_RATE // 70
+    band = ac[:, lo:hi + 1]
+    lag = band.argmax(axis=1) + lo
+    good = band.max(axis=1) / (ac[:, 0] + 1e-9) > 0.4
+    if good.sum() < 5:
+        return None
+    return float(np.median(SAMPLE_RATE / lag[good]))
+
+
+def pitch_span(pcm: bytes, start: float, end: float) -> float | None:
+    x = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
+    a, b = int(max(0.0, start) * SAMPLE_RATE), int(min(end, start + 12.0) * SAMPLE_RATE)
+    return pitch_of(x[a:b]) if b - a >= SAMPLE_RATE else None
+
+
+def pitch_mismatch(a: float | None, b: float | None) -> bool:
+    return bool(a and b and max(a, b) / min(a, b) > PITCH_RATIO)
+
+
+def update_pitch(conn, person_id: int):
+    """Обычная высота голоса человека — медиана по его последним уверенно подписанным фразам."""
+    conn.execute(
+        """UPDATE people SET pitch = (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY pitch) FROM (
+               SELECT pitch FROM segments WHERE person_id = %s AND pitch IS NOT NULL AND voice_score >= %s
+               ORDER BY id DESC LIMIT 300) x) WHERE id = %s""", (person_id, thresholds().match, person_id))
+
+
 def embed_span(pcm: bytes, start: float, end: float) -> np.ndarray | None:
     """Отпечаток отдельной фразы (для правки «эта фраза — другого человека»)."""
     if end - start < MIN_EMBED_SEC:
@@ -1491,7 +1594,7 @@ def diagnostics(conn) -> str:
     уверенность, отпечатков (подтверждённых/дообученных), разброс образцов и самый похожий другой голос."""
     th = thresholds()
     rows = conn.execute(
-        """SELECT p.id, p.is_owner, p.name IS NOT NULL AS named, p.centroid,
+        """SELECT p.id, p.is_owner, p.name IS NOT NULL AS named, p.centroid, p.pitch,
                   (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id) AS prints,
                   (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id AND v.confirmed) AS conf,
                   (SELECT count(*) FROM voiceprints v WHERE v.person_id = p.id AND NOT v.confirmed
@@ -1521,7 +1624,8 @@ def diagnostics(conn) -> str:
         alien = sum(1 for x in sims if x < th.alien)
         near = max(((cosine(c, v), pid) for pid, v in cents.items() if pid != r["id"] and len(v) == len(c)),
                    default=(0.0, 0))
-        who = "я" if r["is_owner"] else ("имя" if r["named"] else "без имени")
+        who = ("я" if r["is_owner"] else ("имя" if r["named"] else "без имени")) + \
+            (f", {round(r['pitch'])} Гц" if r.get("pitch") else "")
         parts.append(f"#{r['id']} {who}: фраз {r['seg7']}, разг. {r['conv7']}, увер. {r['score7'] or '-'}, "
                      f"отп. {r['prints']} (подтв. {r['conf']}, дообуч. {r['auto']}), разброс {spread}, чужих {alien}, "
                      f"ближе всех #{near[1]} {near[0]:.2f}")
@@ -1548,6 +1652,9 @@ def diagnostics(conn) -> str:
     repair = conn.execute("SELECT value FROM settings WHERE key = 'profile.owner_repair'").fetchone()
     if repair:
         parts.append(f"«я» исправлено: {repair['value']}")
+    pitched = conn.execute("SELECT value FROM settings WHERE key = %s", (PITCH_KEY,)).fetchone()
+    if pitched:
+        parts.append(f"высота голоса: {pitched['value']}")
     demixed = conn.execute("SELECT value FROM settings WHERE key = %s", (DEMIX_KEY,)).fetchone()
     if demixed:
         parts.append(f"разделение склеенных голосов: {demixed['value']}")

@@ -668,3 +668,33 @@ def test_demix_person(clean):
     assert voices.decide(voices.rank_people(conn, m.embed(synth(**ANNA, sec=3, seed=990))), 3.0)[0]["id"] == anna
     assert voices.decide(voices.rank_people(conn, m.embed(synth(**BORIS, sec=3, seed=991))), 3.0)[0] is None
     assert "заново" in voices.demix_once(conn)
+
+
+def test_pitch_blocks_cross_gender_match(clean):
+    """Высота голоса: женский и мужской голоса различаются; если голос заметно ниже/выше обычного голоса
+    человека, он не подписывается им, даже если отпечаток похож."""
+    conn = clean
+    from neuro import voices
+    for v, f0 in ((ANNA, 210), (OWNER, 110), (BORIS, 150)):
+        p = voices.pitch_of(synth(**v, sec=3, seed=5))
+        assert p and abs(p - f0) / f0 < 0.1, (f0, p)
+    assert voices.pitch_mismatch(110, 210) and not voices.pitch_mismatch(150, 180) and not voices.pitch_mismatch(None, 200)
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5), (OWNER, 2.0), (ANNA, 2.5))
+    rows = run_chunk(conn, pcm, Timed(spans), minutes_ago=60)
+    anna = rows[1]["person_id"]
+    assert conn.execute("SELECT pitch FROM segments WHERE id = %s", (rows[1]["id"],)).fetchone()["pitch"]
+    p = conn.execute("SELECT pitch FROM people WHERE id = %s", (anna,)).fetchone()["pitch"]
+    assert p and abs(p - 210) < 25
+    # обычный голос «Анны» оказался мужским (так выглядит склеенный голос) — её женский голос ей не подписывается
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 3.0), (OWNER, 2.0), (ANNA, 3.0), (OWNER, 2.0), (ANNA, 3.0))
+    pre = run_chunk(conn, pcm, Timed(spans), minutes_ago=10, finalize=False)
+    # в тестовом отпечатке сходство ≈ 1 выглядит как ручная подпись — делаем его обычным
+    conn.execute("UPDATE segments SET voice_score = 0.9 WHERE id = ANY(%s)", ([r["id"] for r in pre],))
+    conn.execute("UPDATE people SET pitch = 110 WHERE id = %s", (anna,))
+    conv = conn.execute("SELECT conversation_id FROM segments WHERE id = %s", (pre[0]["id"],)).fetchone()["conversation_id"]
+    voices.finalize_conversation(conn, conv)
+    again = conn.execute("SELECT person_id FROM segments WHERE id = ANY(%s) ORDER BY started_at, id",
+                         ([r["id"] for r in pre],)).fetchall()
+    assert all(r["person_id"] != anna for r in again[1::2])
+    assert again[0]["person_id"] == rows[0]["person_id"]  # пользователь узнаётся как прежде
+    assert "фраз" in voices.pitch_backfill_once(conn) and voices.pitch_backfill_once(conn) == ""

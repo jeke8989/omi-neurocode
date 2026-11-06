@@ -294,11 +294,12 @@ def attach_people(conn, pcm: bytes, segs: list[Seg], seg_ids: list[int], labels:
             continue
         # отпечаток храним и у неузнанных фраз: по ним после разговора решается, кто это
         emb = voices.embed_span(pcm, seg.start, seg.end)
+        pitch = voices.pitch_span(pcm, seg.start, seg.end)
         conn.execute(
-            """UPDATE segments SET person_id = %s, voice_score = %s, embedding = %s, embed_backend = %s
+            """UPDATE segments SET person_id = %s, voice_score = %s, embedding = %s, embed_backend = %s, pitch = %s
                WHERE id = %s""",
             (pid, round(score, 3) if pid else None, voices.vec(emb) if emb is not None else None,
-             voices.backend_name() if emb is not None else None, sid))
+             voices.backend_name() if emb is not None else None, round(pitch, 1) if pitch else None, sid))
         done += 1 if pid else 0
     return done
 
@@ -384,6 +385,7 @@ def main():
     cleaned = False
     samples_done = False
     demixed = False
+    pitched = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -417,6 +419,14 @@ def main():
                                          "to sign again", res["removed"], res["people"], res["recheck"])
                         except Exception:  # noqa: BLE001
                             log.exception("voices: voiceprint cleanup failed")
+                    if not pitched:
+                        pitched = True
+                        try:
+                            res = voices.pitch_backfill_once(conn)
+                            if res:
+                                log.info("voices: pitch backfill — %s", res)
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: pitch backfill failed")
                     if not demixed:
                         demixed = True
                         try:

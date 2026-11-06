@@ -518,3 +518,6 @@ CREATE TABLE IF NOT EXISTS agent_roles (
 -- в какой роли ответил ассистент и какие следующие вопросы предложил (кнопки под ответом)
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS role TEXT;
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS followups TEXT;
+-- высота голоса (основной тон, Гц): у фразы и обычная у человека — мужской голос не подпишется женским именем
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS pitch REAL;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS pitch REAL;
