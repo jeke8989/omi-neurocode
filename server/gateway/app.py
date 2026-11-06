@@ -2006,6 +2006,25 @@ async def api_segment_person(request: Request):
     return Json(res)
 
 
+async def api_conversation_reassign(request: Request):
+    """«Это не он» в разговоре: все фразы человека {pid} здесь — {"person_id": id} | {"name": "Иван"} |
+    {} — новый безымянный голос."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request)
+    if body is None:
+        return Json({"error": "bad json"}, status_code=400)
+    try:
+        to = int(body["person_id"]) if body.get("person_id") is not None else None
+    except (TypeError, ValueError):
+        return Json({"error": "person_id: int"}, status_code=400)
+    name = str(body.get("name") or "").strip()[:60] or None
+    res = await _sync(people.reassign_in_conversation, request.path_params["id"], request.path_params["pid"], to, name)
+    if res is None:
+        return Json({"error": "not found"}, status_code=404)
+    return Json(res)
+
+
 async def api_segment_audio(request: Request):
     """Звук одной фразы (WAV), пока исходная запись хранится на сервере (KEEP_AUDIO_DAYS)."""
     if not _authorized(request.headers, request.query_params):
@@ -2271,6 +2290,7 @@ app = Starlette(
         Route("/api/people/{id:int}/merge", api_person_merge, methods=["POST"]),
         Route("/api/people/{id:int}/sample", api_person_sample),
         Route("/api/segments/{id:int}/person", api_segment_person, methods=["POST"]),
+        Route("/api/conversations/{id:int}/people/{pid:int}/reassign", api_conversation_reassign, methods=["POST"]),
         Route("/api/segments/{id:int}/audio", api_segment_audio),
         Route("/api/graph", api_graph),
         Route("/api/events", api_events),

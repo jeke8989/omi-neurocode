@@ -486,6 +486,7 @@
     <string name="no_model_key">Sunucuda model anahtarı yok</string>
     <string name="no_model_key_text">Sunucunun .env dosyasına OPENROUTER_API_KEY ekleyip yeniden başlatın.</string>
     <string name="no_outages">Bağlantı kesilmedi</string>
+    <string name="not_this_person">Kim bilmiyorum — ama %1$s değil</string>
     <string name="notif_battery">pil %%%1$d</string>
     <string name="notif_catching_up">kayıtlar yükleniyor</string>
     <string name="notif_channel">Kolye kaydı</string>
@@ -715,6 +716,7 @@
     <string name="saved">Kaydedildi</string>
     <string name="saved_secret">kaydedildi ••••</string>
     <string name="say_remembered">“İşaretlendi” de</string>
+    <string name="scope_conversation">Buradaki tüm cümleleri (%1$d)</string>
     <string name="scope_phrase">Sadece bu cümle</string>
     <string name="scope_voice">“%1$s” sesinin tamamı</string>
     <string name="search_again">Tekrar ara</string>
@@ -893,6 +895,9 @@
     <string name="voice_f1">Mnemo — kadın</string>
     <string name="voice_lost">Sunucuyla bağlantı koptu. Cevap sohbette görünecek.</string>
     <string name="voice_m1">Mnemo — erkek</string>
+    <string name="voice_menu_open">Kartı aç</string>
+    <string name="voice_menu_wrong">Bu %1$s değil</string>
+    <string name="voice_menu_wrong_hint">Bu konuşmadaki tüm cümlelerini yeniden atarız; ses bu hatadan öğrenir.</string>
     <string name="voice_n">Ses %1$d</string>
     <string name="voice_neural_sub">Doğal sesli sinir ağı sesi</string>
     <string name="voice_no_answer">Cevap veremedim.</string>

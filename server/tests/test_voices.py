@@ -604,3 +604,45 @@ def test_voice_sample_trims_noise():
     assert 1.9 * sr <= len(out) <= 2.6 * sr and ratio > 0.4 and lively >= 3
     hum = (800 * rng.standard_normal(sr * 3)).astype(np.int16)
     assert voices._voiced(hum)[2] < 3
+
+
+def test_reassign_voice_in_conversation(clean):
+    """«Это не Анна» в разговоре: все её фразы там — новому голосу (потом можно назвать), обещания — за ними;
+    Анна учится на ошибке (её образцы с этим голосом убираются), другие её разговоры не трогаются."""
+    conn = clean
+    from neuro import people, voices
+    m = voices.model()
+    pcm, spans = dialog((OWNER, 3.0), (ANNA, 2.5), (OWNER, 2.0), (ANNA, 2.5))
+    first = run_chunk(conn, pcm, Timed(spans), minutes_ago=60)
+    anna = first[1]["person_id"]
+    pcm, spans = dialog((OWNER, 3.0), (BORIS, 2.5), (OWNER, 2.0), (BORIS, 2.5))
+    second = run_chunk(conn, pcm, Timed(spans), minutes_ago=10)
+    c1 = conn.execute("SELECT conversation_id FROM segments WHERE id = %s", (first[1]["id"],)).fetchone()["conversation_id"]
+    c2 = conn.execute("SELECT conversation_id FROM segments WHERE id = %s", (second[1]["id"],)).fetchone()["conversation_id"]
+    assert c1 != c2
+    # Бориса по ошибке подписали Анной, и его голос попал в её дообученные образцы
+    boris_ids = [r["id"] for r in second if r["person_id"] != first[0]["person_id"]]
+    conn.execute("UPDATE segments SET person_id = %s, voice_score = 0.7 WHERE id = ANY(%s)", (anna, boris_ids))
+    for k in range(3):
+        conn.execute("""INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed, segment_id)
+                        VALUES (%s, %s, 3, %s, false, %s)""",
+                     (anna, voices.vec(m.embed(synth(**BORIS, sec=3, seed=700 + k))), voices.backend_name(), 9700 + k))
+    tid = conn.execute("""INSERT INTO tasks (conversation_id, text, kind, status, counterpart_id, source)
+                          VALUES (%s, 'Прислать счёт', 'waiting', 'open', %s, 'conversation') RETURNING id""",
+                       (c2, anna)).fetchone()["id"]
+
+    res = people.reassign_in_conversation(conn, c2, anna)  # «не знаю, кто — просто не Анна»
+    new = res["person_id"]
+    assert res["moved"] == len(boris_ids) and new and new != anna
+    moved = conn.execute("SELECT person_id, voice_score FROM segments WHERE id = ANY(%s)", (boris_ids,)).fetchall()
+    assert all(r["person_id"] == new and r["voice_score"] == 1 for r in moved)
+    assert conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s AND segment_id >= 9700",
+                        (anna,)).fetchone()["n"] == 0
+    assert conn.execute("SELECT person_id FROM segments WHERE id = %s", (first[1]["id"],)).fetchone()["person_id"] == anna
+    assert conn.execute("SELECT counterpart_id FROM tasks WHERE id = %s", (tid,)).fetchone()["counterpart_id"] == new
+    boris = m.embed(synth(**BORIS, sec=3, seed=800))
+    assert voices.decide(voices.rank_people(conn, boris), 3.0)[0]["id"] == new  # дальше Бориса узнаём им
+    # потом назвали: «это Борис»
+    named = people.reassign_in_conversation(conn, c2, new, name="Борис")
+    assert conn.execute("SELECT name FROM people WHERE id = %s", (named["person_id"],)).fetchone()["name"] == "Борис"
+    assert people.reassign_in_conversation(conn, c2, named["person_id"], person_id=named["person_id"]) is None

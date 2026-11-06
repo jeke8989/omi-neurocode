@@ -791,10 +791,18 @@ def finalize_conversation(conn, conv_id: int) -> dict:
                        last_seen = greatest(coalesce(last_seen, now()), now()),
                        first_seen = coalesce(first_seen, now()) WHERE id = %s""", (round(c.seconds, 1), pid))
     # короткие фразы без отпечатка — к голосу того же куска (тот же локальный голос) или соседней фразы
-    by_local: dict[tuple, int | None] = {}
+    # голос куска — тот, кому принадлежит больше всего его подписанной речи (не первая попавшаяся фраза:
+    # одна ошибочно узнанная фраза раньше «перекрашивала» все короткие реплики этого голоса)
+    votes: dict[tuple, dict[int, float]] = {}
     for s in segs:
         if s["id"] in assign and assign[s["id"]][0]:
-            by_local.setdefault((s["chunk_id"], s["speaker"]), assign[s["id"]][0])
+            v = votes.setdefault((s["chunk_id"], s["speaker"]), {})
+            v[assign[s["id"]][0]] = v.get(assign[s["id"]][0], 0.0) + float(s["sec"] or 0)
+    by_local: dict[tuple, int | None] = {}
+    for key, v in votes.items():
+        pid, sec = max(v.items(), key=lambda kv: kv[1])
+        if sec >= 0.6 * sum(v.values()):  # спорный голос куска — короткие фразы оставляем без подписи
+            by_local[key] = pid
     last_pid = None
     for s in segs:
         if s["id"] in manual:
@@ -1293,6 +1301,66 @@ def assign_segment(conn, segment_id: int, person_id: int):
         log.warning("voice sample for person %s failed", person_id, exc_info=True)
 
 
+def reassign_conversation(conn, conv_id: int, from_pid: int, to_pid: int | None) -> dict:
+    """«Это не Кристина»: все фразы человека в этом разговоре — другому (to_pid) или новому безымянному голосу
+    (to_pid=None, если у фраз есть отпечатки; иначе — без подписи). Подписи — ручные (повторная подпись их не
+    меняет). Прежний человек учится на ошибке: его образцы, похожие на этот голос, убираются — дообученные
+    при сходстве «узнан», подтверждённые — при «очень похож» (их подтвердили вместе со всем голосом)."""
+    th = thresholds()
+    rows = conn.execute(
+        """SELECT id, embedding, embed_backend, started_at, ended_at FROM segments
+           WHERE conversation_id = %s AND person_id = %s""", (conv_id, from_pid)).fetchall()
+    if not rows:
+        return {"moved": 0, "person_id": to_pid}
+    embs = [(r["id"], np.asarray(r["embedding"], dtype=np.float32), max(0.5, (r["ended_at"] - r["started_at"]).total_seconds()))
+            for r in rows if r["embedding"] and r["embed_backend"] == backend_name()]
+    with conn.transaction():
+        if to_pid is None and embs:
+            total = _norm(sum(e * sec for _, e, sec in embs))
+            seconds = sum(sec for *_, sec in embs)
+            # «не знаю, кто»: если этот голос уже знаком под другим номером — к нему, иначе новый «Голос N»
+            ranked = [(p, x) for p, x in rank_people(conn, total) if p["id"] != from_pid]
+            known, _, _ = decide(ranked, seconds, th)
+            if known is not None:
+                to_pid = known["id"]
+            else:
+                best = sorted(embs, key=lambda t: -t[2])[:8]
+                to_pid = new_unknown(conn, total, seconds, 0.0, prints=[(e, sec) for _, e, sec in best])["id"]
+        ids = [r["id"] for r in rows]
+        conn.execute("DELETE FROM voiceprints WHERE segment_id = ANY(%s::bigint[])", (ids,))
+        if to_pid is None:
+            conn.execute("UPDATE segments SET person_id = NULL, voice_score = NULL WHERE id = ANY(%s::bigint[])", (ids,))
+        else:
+            conn.execute("UPDATE segments SET person_id = %s, voice_score = 1 WHERE id = ANY(%s::bigint[])", (to_pid, ids))
+            for sid, e, sec in sorted(embs, key=lambda t: -t[2])[:3]:  # пример голоса — новому владельцу фраз
+                add_voiceprint(conn, to_pid, e, sec, confirmed=True, segment_id=sid)
+            # обещания этого разговора с прежним человеком — к новому
+            conn.execute("UPDATE tasks SET counterpart_id = %s WHERE conversation_id = %s AND counterpart_id = %s",
+                         (to_pid, conv_id, from_pid))
+            conn.execute("UPDATE tasks SET person_id = %s WHERE conversation_id = %s AND person_id = %s",
+                         (to_pid, conv_id, from_pid))
+        if embs:
+            voice = _norm(sum(e * sec for _, e, sec in embs))
+            wrong = [r["id"] for r in conn.execute(
+                "SELECT id, embedding, confirmed FROM voiceprints WHERE person_id = %s AND backend = %s",
+                (from_pid, backend_name())).fetchall()
+                if cosine(r["embedding"], voice) >= (th.sure if r["confirmed"] else th.match)]
+            left = conn.execute("SELECT count(*) AS n FROM voiceprints WHERE person_id = %s", (from_pid,)).fetchone()["n"]
+            if wrong and len(wrong) < left:
+                conn.execute("DELETE FROM voiceprints WHERE id = ANY(%s::bigint[])", (wrong,))
+        recompute_centroid(conn, from_pid)
+        if to_pid is not None:
+            recompute_centroid(conn, to_pid)
+    for pid in (from_pid, to_pid):
+        if pid:
+            try:
+                refresh_sample(conn, pid, force=True)
+            except Exception:  # noqa: BLE001
+                log.warning("voice sample for person %s failed", pid, exc_info=True)
+    log.info("voices: conversation %s — %d phrases moved from person %s to %s", conv_id, len(rows), from_pid, to_pid)
+    return {"moved": len(rows), "person_id": to_pid}
+
+
 def confirm_person(conn, person_id: int):
     """Имя подтверждено пользователем: отпечатки человека становятся подтверждёнными."""
     conn.execute("UPDATE voiceprints SET confirmed = true WHERE person_id = %s", (person_id,))
@@ -1391,6 +1459,21 @@ def diagnostics(conn) -> str:
         parts.append("«я» не задан")
     elif me["id"] not in shown:
         parts.append(f"#{me['id']} я: фраз {me['seg7']}, разг. {me['conv7']}")
+    # последние разговоры: кто как подписан (по отпечатку / по соседним фразам куска / вручную) — чтобы видеть,
+    # откуда берутся «чужие» участники
+    recent = conn.execute(
+        """SELECT s.conversation_id AS cid, s.person_id AS pid, count(*) AS n,
+                  count(*) FILTER (WHERE s.voice_score = 0.6) AS local,
+                  count(*) FILTER (WHERE s.voice_score >= 0.999) AS manual,
+                  round(avg(s.voice_score) FILTER (WHERE s.voice_score < 0.999 AND s.voice_score <> 0.6)::numeric, 2) AS score
+           FROM segments s JOIN people p ON p.id = s.person_id
+           WHERE NOT p.is_owner AND s.conversation_id IN (
+               SELECT id FROM conversations WHERE status = 'done' ORDER BY started_at DESC LIMIT 4)
+           GROUP BY s.conversation_id, s.person_id ORDER BY s.conversation_id DESC, n DESC""").fetchall()
+    if recent:
+        parts.append("последние разговоры: " + ", ".join(
+            f"#{r['cid']}→#{r['pid']} {r['n']} (соседи {r['local']}, вручную {r['manual']}, увер. {r['score'] or '-'})"
+            for r in recent[:14]))
     repair = conn.execute("SELECT value FROM settings WHERE key = 'profile.owner_repair'").fetchone()
     if repair:
         parts.append(f"«я» исправлено: {repair['value']}")

@@ -1122,6 +1122,15 @@ object Api {
         return JSONObject(call("POST", "/api/segments/$segmentId/person", body)).longOrNull("person_id")
     }
 
+    /** «Это не он» в разговоре: все фразы человека [from] здесь — другому, новому по имени или (ничего не задано)
+     *  другому голосу (знакомому или новому «Голосу N»). Возвращает id того, кому они теперь подписаны. */
+    suspend fun reassignInConversation(conversationId: Long, from: Long, personId: Long? = null, name: String? = null): Long? {
+        val body = JSONObject()
+        if (personId != null) body.put("person_id", personId)
+        if (name != null) body.put("name", name)
+        return JSONObject(call("POST", "/api/conversations/$conversationId/people/$from/reassign", body)).longOrNull("person_id")
+    }
+
     fun sampleUrl(personId: Long): String = Core.prefs.serverUrl + "/api/people/$personId/sample"
 
     fun segmentAudioUrl(segmentId: Long): String = Core.prefs.serverUrl + "/api/segments/$segmentId/audio"

@@ -486,6 +486,7 @@
     <string name="no_model_key">No hay clave de modelo en el servidor</string>
     <string name="no_model_key_text">Añade OPENROUTER_API_KEY al .env del servidor y reinícialo.</string>
     <string name="no_outages">Sin cortes</string>
+    <string name="not_this_person">No sé quién — pero no %1$s</string>
     <string name="notif_battery">batería %1$d%%</string>
     <string name="notif_catching_up">poniéndome al día</string>
     <string name="notif_channel">Grabación del colgante</string>
@@ -715,6 +716,7 @@
     <string name="saved">Guardado</string>
     <string name="saved_secret">guardado ••••</string>
     <string name="say_remembered">Decir «Marcada»</string>
+    <string name="scope_conversation">Todas sus frases aquí (%1$d)</string>
     <string name="scope_phrase">Solo esta frase</string>
     <string name="scope_voice">Toda la voz «%1$s»</string>
     <string name="search_again">Buscar de nuevo</string>
@@ -893,6 +895,9 @@
     <string name="voice_f1">Mnemo — femenina</string>
     <string name="voice_lost">Se perdió la conexión con el servidor. La respuesta aparecerá en el chat.</string>
     <string name="voice_m1">Mnemo — masculina</string>
+    <string name="voice_menu_open">Abrir ficha</string>
+    <string name="voice_menu_wrong">No es %1$s</string>
+    <string name="voice_menu_wrong_hint">Reasignaremos todas sus frases en esta conversación y la voz aprenderá del error.</string>
     <string name="voice_n">Voz %1$d</string>
     <string name="voice_neural_sub">Voz neuronal, suena natural</string>
     <string name="voice_no_answer">No pude responder.</string>

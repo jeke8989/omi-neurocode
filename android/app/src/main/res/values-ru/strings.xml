@@ -486,6 +486,7 @@
     <string name="no_model_key">На сервере нет ключа модели</string>
     <string name="no_model_key_text">Добавьте OPENROUTER_API_KEY в .env сервера и перезапустите его.</string>
     <string name="no_outages">Связь не прерывалась</string>
+    <string name="not_this_person">Не знаю кто — но не %1$s</string>
     <string name="notif_battery">батарея %1$d%%</string>
     <string name="notif_catching_up">догружаю записи</string>
     <string name="notif_channel">Запись с кулона</string>
@@ -715,6 +716,7 @@
     <string name="saved">Сохранено</string>
     <string name="saved_secret">сохранено ••••</string>
     <string name="say_remembered">Говорить «Отметил»</string>
+    <string name="scope_conversation">Все его фразы здесь (%1$d)</string>
     <string name="scope_phrase">Только эта фраза</string>
     <string name="scope_voice">Весь голос «%1$s»</string>
     <string name="search_again">Искать снова</string>
@@ -893,6 +895,9 @@
     <string name="voice_f1">Mnemo — женский</string>
     <string name="voice_lost">Связь с сервером пропала. Ответ появится в чате.</string>
     <string name="voice_m1">Mnemo — мужской</string>
+    <string name="voice_menu_open">Открыть карточку</string>
+    <string name="voice_menu_wrong">Это не %1$s</string>
+    <string name="voice_menu_wrong_hint">Переподпишем все его фразы в этом разговоре, а голос запомнит ошибку и больше так не спутает.</string>
     <string name="voice_n">Голос %1$d</string>
     <string name="voice_neural_sub">Нейроголос, звучит естественно</string>
     <string name="voice_no_answer">Не получилось ответить.</string>

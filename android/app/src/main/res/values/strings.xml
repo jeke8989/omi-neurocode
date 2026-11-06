@@ -487,6 +487,7 @@
     <string name="no_model_key">No model key on the server</string>
     <string name="no_model_key_text">Add OPENROUTER_API_KEY to the server\'s .env and restart it.</string>
     <string name="no_outages">No dropouts</string>
+    <string name="not_this_person">Don\'t know who — but not %1$s</string>
     <string name="notif_battery">battery %1$d%%</string>
     <string name="notif_catching_up">catching up</string>
     <string name="notif_channel">Pendant recording</string>
@@ -716,6 +717,7 @@
     <string name="saved">Saved</string>
     <string name="saved_secret">saved ••••</string>
     <string name="say_remembered">Say “Marked”</string>
+    <string name="scope_conversation">All their phrases here (%1$d)</string>
     <string name="scope_phrase">Just this phrase</string>
     <string name="scope_voice">The whole voice “%1$s”</string>
     <string name="search_again">Search again</string>
@@ -894,6 +896,9 @@
     <string name="voice_f1">Mnemo — female</string>
     <string name="voice_lost">Lost the connection to the server. The answer will appear in the chat.</string>
     <string name="voice_m1">Mnemo — male</string>
+    <string name="voice_menu_open">Open profile</string>
+    <string name="voice_menu_wrong">This isn\'t %1$s</string>
+    <string name="voice_menu_wrong_hint">We\'ll re-sign all their phrases in this conversation, and the voice will learn from the mistake.</string>
     <string name="voice_n">Voice %1$d</string>
     <string name="voice_neural_sub">Neural voice, sounds natural</string>
     <string name="voice_no_answer">I couldn\'t answer.</string>

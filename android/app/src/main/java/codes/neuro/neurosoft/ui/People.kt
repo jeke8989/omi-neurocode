@@ -670,13 +670,26 @@ fun PeoplePicker(title: String, subtitle: String?, exclude: Set<Long>, onDismiss
  * или только эту фразу (узнал неверно).
  */
 @Composable
-fun WhoIsThisSheet(seg: Segment, people: Map<Long, PersonRef>, onDismiss: () -> Unit, onDone: () -> Unit) {
+fun WhoIsThisSheet(seg: Segment, people: Map<Long, PersonRef>, onDismiss: () -> Unit, onDone: () -> Unit,
+                   conversationId: Long? = null, inConversation: Int = 0, startInConversation: Boolean = false) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val res by Repo.people.state.collectAsState()
     val scope = rememberCoroutineScope()
     val c = Mn.c
     val current = seg.personId?.let { people[it] ?: res.data?.people?.firstOrNull { p -> p.id == it }?.ref }
-    var wholeVoice by remember { mutableStateOf(current != null && current.name == null && !current.isOwner) }
+    // что переподписать: весь безымянный голос / все его фразы в этом разговоре / одну фразу. Названного
+    // человека («Кристина») целиком не трогаем — по умолчанию «в этом разговоре»
+    val canConversation = current != null && conversationId != null && inConversation > 1
+    var scopeSel by remember {
+        mutableStateOf(when {
+            current == null -> "phrase"
+            startInConversation && canConversation -> "conversation"
+            current.name == null && !current.isOwner -> "voice"
+            canConversation -> "conversation"
+            else -> "phrase"
+        })
+    }
+    val wholeVoice = scopeSel == "voice"
     var name by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Throwable?>(null) }
@@ -700,16 +713,19 @@ fun WhoIsThisSheet(seg: Segment, people: Map<Long, PersonRef>, onDismiss: () -> 
     }
 
     fun pick(target: Long) = launchAction {
-        if (wholeVoice && current != null) {
-            if (target != current.id) Api.mergePerson(current.id, target)
-        } else {
-            Api.assignSegment(seg.id, target)
+        when {
+            scopeSel == "voice" && current != null -> if (target != current.id) Api.mergePerson(current.id, target)
+            scopeSel == "conversation" && current != null && conversationId != null ->
+                Api.reassignInConversation(conversationId, current.id, personId = target)
+            else -> Api.assignSegment(seg.id, target)
         }
     }
 
     fun named(n: String) = launchAction {
         val same = all.firstOrNull { it.ref.name.equals(n, ignoreCase = true) }
-        if (wholeVoice && current != null) {
+        if (scopeSel == "conversation" && current != null && conversationId != null) {
+            Api.reassignInConversation(conversationId, current.id, personId = same?.id, name = if (same == null) n else null)
+        } else if (wholeVoice && current != null) {
             if (same != null && same.id != current.id) Api.mergePerson(current.id, same.id)
             else Api.updatePerson(current.id, name = n)
         } else {
@@ -735,9 +751,13 @@ fun WhoIsThisSheet(seg: Segment, people: Map<Long, PersonRef>, onDismiss: () -> 
                 }
             }
             if (current != null) {
-                Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip(stringResource(R.string.scope_voice, personLabel(current)), wholeVoice, { wholeVoice = true })
-                    Chip(stringResource(R.string.scope_phrase), !wholeVoice, { wholeVoice = false })
+                Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canConversation) Chip(stringResource(R.string.scope_conversation, inConversation),
+                        scopeSel == "conversation", { scopeSel = "conversation" })
+                    if (current.name == null && !current.isOwner) Chip(stringResource(R.string.scope_voice, personLabel(current)),
+                        scopeSel == "voice", { scopeSel = "voice" })
+                    Chip(stringResource(R.string.scope_phrase), scopeSel == "phrase", { scopeSel = "phrase" })
                 }
             }
             error?.let { Txt(errorText(it), T.caption, c.red, Modifier.padding(horizontal = 22.dp, vertical = 8.dp)) }
@@ -769,8 +789,13 @@ fun WhoIsThisSheet(seg: Segment, people: Map<Long, PersonRef>, onDismiss: () -> 
                 }
                 if (!wholeVoice && current != null) {
                     item {
-                        ListRow(stringResource(R.string.dont_know), icon = Icons.Help, onClick = {
-                            if (!busy) launchAction { Api.assignSegment(seg.id, null) }
+                        // «не знаю кто — но не он»: в разговоре — другой голос (знакомый или новый, потом можно назвать)
+                        ListRow(if (scopeSel == "conversation") stringResource(R.string.not_this_person, personLabel(current))
+                            else stringResource(R.string.dont_know), icon = Icons.Help, onClick = {
+                            if (!busy) launchAction {
+                                if (scopeSel == "conversation" && conversationId != null) Api.reassignInConversation(conversationId, current.id)
+                                else Api.assignSegment(seg.id, null)
+                            }
                         })
                     }
                 }

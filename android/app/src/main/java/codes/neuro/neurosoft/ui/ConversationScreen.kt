@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.ConversationDetail
+import codes.neuro.neurosoft.net.PersonRef
 import codes.neuro.neurosoft.net.Segment
 import kotlinx.coroutines.launch
 
@@ -39,6 +41,9 @@ fun ConversationScreen(id: Long) {
     val reprocessed = stringResource(R.string.reprocess_started)
     val speakerLabel = stringResource(R.string.speaker)
     var who by remember { mutableStateOf<Segment?>(null) }
+    var whoInConversation by remember { mutableStateOf(false) }
+    // нажали на участника: карточка или «это не он» (переподписать его фразы в этом разговоре)
+    var voiceMenu by remember { mutableStateOf<PersonRef?>(null) }
     var original by remember(id) { mutableStateOf(false) }
     var showBackground by remember(id) { mutableStateOf(false) }
     var followupOpen by remember(id) { mutableStateOf(false) }
@@ -102,9 +107,22 @@ fun ConversationScreen(id: Long) {
         ?: s.speaker?.let { companion }
 
     who?.let { seg ->
-        WhoIsThisSheet(seg, d?.people.orEmpty(), onDismiss = { who = null }, onDone = {
+        WhoIsThisSheet(seg, d?.people.orEmpty(), onDismiss = { who = null; whoInConversation = false }, onDone = {
             who = null
+            whoInConversation = false
             reload()
+        }, conversationId = id, inConversation = d?.segments?.count { it.personId != null && it.personId == seg.personId } ?: 0,
+            startInConversation = whoInConversation)
+    }
+    voiceMenu?.let { p ->
+        VoiceMenu(personLabel(p), p, onDismiss = { voiceMenu = null }, onOpen = {
+            voiceMenu = null
+            Nav.push(Route.Person(p.id))
+        }, onWrong = {
+            voiceMenu = null
+            // самая длинная его фраза — чтобы было что послушать в «Кто это?»
+            who = d?.segments?.filter { it.personId == p.id }?.maxByOrNull { it.text.length }
+            whoInConversation = true
         })
     }
     Column(Modifier.fillMaxSize()) {
@@ -165,7 +183,7 @@ fun ConversationScreen(id: Long) {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                         .padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         present.forEach { p ->
-                            Chip(personLabel(p), false, { Nav.push(Route.Person(p.id)) }, leading = { Avatar(p, 24.dp) })
+                            Chip(personLabel(p), false, { voiceMenu = p }, leading = { Avatar(p, 24.dp) })
                         }
                     }
                 }
@@ -305,5 +323,29 @@ private fun MetaPill(icon: androidx.compose.ui.graphics.vector.ImageVector, text
         Icon(icon, null, tint = Mn.c.graphite, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(6.dp))
         Txt(text, T.caption, Mn.c.ink, maxLines = 1)
+    }
+}
+
+
+/** Участник разговора: открыть карточку или «Это не он» — переподписать его фразы в этом разговоре. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceMenu(label: String, p: PersonRef, onDismiss: () -> Unit, onOpen: () -> Unit, onWrong: () -> Unit) {
+    val c = Mn.c
+    val sheet = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = c.fog,
+        dragHandle = { Box(Modifier.padding(top = 10.dp).size(36.dp, 4.dp).clip(CircleShape).background(c.line)) }) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 20.dp)) {
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Avatar(p, 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Txt(label, T.title, maxLines = 1)
+            }
+            Group {
+                item { ListRow(stringResource(R.string.voice_menu_open), icon = Icons.Person, chevron = true, onClick = onOpen) }
+                item { ListRow(stringResource(R.string.voice_menu_wrong, label), icon = Icons.Help, onClick = onWrong) }
+            }
+            Txt(stringResource(R.string.voice_menu_wrong_hint), T.caption, c.graphite, Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
+        }
     }
 }

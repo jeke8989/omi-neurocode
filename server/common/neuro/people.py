@@ -373,6 +373,21 @@ def assign_segment(conn, segment_id: int, person_id: int | None = None, name: st
     return {"segment_id": segment_id, "person_id": person_id}
 
 
+def reassign_in_conversation(conn, conv_id: int, from_pid: int, person_id: int | None = None,
+                             name: str | None = None) -> dict | None:
+    """«Это не Кристина» в разговоре: все её фразы здесь — человеку из списка, новому по имени или новому
+    безымянному голосу (person_id и name не заданы)."""
+    if conn.execute("SELECT 1 FROM people WHERE id = %s", (from_pid,)).fetchone() is None:
+        return None
+    if person_id is None and name:
+        existing = by_name(conn, name)
+        person_id = existing[0] if existing else create_named(conn, name)["id"]
+    if person_id is not None and (person_id == from_pid or
+                                  conn.execute("SELECT 1 FROM people WHERE id = %s", (person_id,)).fetchone() is None):
+        return None
+    return voices.reassign_conversation(conn, conv_id, from_pid, person_id)
+
+
 def answer_suggestion(conn, sid: int, accept: bool) -> dict | None:
     g = conn.execute("SELECT id, person_id, name, target_id FROM person_suggestions WHERE id = %s", (sid,)).fetchone()
     if g is None:
