@@ -1467,13 +1467,12 @@ def diagnostics(conn) -> str:
                   count(*) FILTER (WHERE s.voice_score >= 0.999) AS manual,
                   round(avg(s.voice_score) FILTER (WHERE s.voice_score < 0.999 AND s.voice_score <> 0.6)::numeric, 2) AS score
            FROM segments s JOIN people p ON p.id = s.person_id
-           WHERE NOT p.is_owner AND s.conversation_id IN (
-               SELECT id FROM conversations WHERE status = 'done' ORDER BY started_at DESC LIMIT 4)
+           WHERE NOT p.is_owner AND p.name IS NOT NULL AND s.started_at > now() - interval '36 hours'
            GROUP BY s.conversation_id, s.person_id ORDER BY s.conversation_id DESC, n DESC""").fetchall()
     if recent:
         parts.append("последние разговоры: " + ", ".join(
             f"#{r['cid']}→#{r['pid']} {r['n']} (соседи {r['local']}, вручную {r['manual']}, увер. {r['score'] or '-'})"
-            for r in recent[:14]))
+            for r in recent[:20]))
     repair = conn.execute("SELECT value FROM settings WHERE key = 'profile.owner_repair'").fetchone()
     if repair:
         parts.append(f"«я» исправлено: {repair['value']}")

@@ -253,7 +253,7 @@ diag() {
   echo "::notice title=Голоса и память::$(dc exec -T db psql -U neuro -d neuro -tAc "$qp" 2>/dev/null | tr '\n' ' ' || true)"
   # узнавание голосов: только номера людей и числа (имён и текста нет — логи CI публичные)
   echo "::notice title=Узнавание голосов::$(dc exec -T stt python -c 'from neuro import db, voices
-with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cut -c1-1800 || true)"
+with db.connect() as c: print(voices.diagnostics(c))' 2>/dev/null | tail -1 | cut -c1-3500 || true)"
   # обещания: сколько найдено за 7 дней, как распределились, сколько отклонено — только счётчики
   local qt
   qt="SELECT 'за 7 дней найдено ' || count(*) || ' (в день ' || round(count(*) / 7.0, 1) || ')'
