@@ -852,6 +852,77 @@ def _recheck_done(conn, conv_id: int):
         conn.execute("DELETE FROM settings WHERE key = %s", (RECHECK_KEY,))
 
 
+DEMIX_KEY = "voices.demix_v1"
+
+
+def demix_person(conn, person_id: int) -> int:
+    """Голос человека «склеен» из двух разных голосов (Кристина + мужской голос, попавший при старом
+    дообучении): образцы делятся на две далёкие группы. Оставляем группу, за которую больше ручных
+    подтверждений (подписанные «Кто это?» фразы и подтверждённые образцы), остальные образцы убираем.
+    Возвращает, сколько образцов убрано."""
+    th = thresholds()
+    rows = conn.execute(
+        """SELECT id, embedding, confirmed, seconds FROM voiceprints WHERE person_id = %s AND backend = %s""",
+        (person_id, backend_name())).fetchall()
+    if len(rows) < 12:
+        return 0
+    units = [(r["id"], max(0.5, float(r["seconds"] or 1)), np.asarray(r["embedding"], dtype=np.float32)) for r in rows]
+    groups = sorted(_cluster(units, th.same, {}), key=lambda c: -len(c.segs))
+    if len(groups) < 2:
+        return 0
+    a, b = groups[0], groups[1]
+    if len(b.segs) < max(4, 0.2 * len(rows)) or float(a.centroid @ b.centroid) >= th.maybe:
+        return 0  # одна группа или группы близки — естественный разброс одного голоса
+    confirmed = {r["id"] for r in rows if r["confirmed"]}
+    # ручные подписи «Кто это?» — самое надёжное свидетельство, чей это голос
+    pins = [np.asarray(r["embedding"], dtype=np.float32) for r in conn.execute(
+        """SELECT embedding FROM segments WHERE person_id = %s AND voice_score >= 0.999 AND embedding IS NOT NULL
+           AND embed_backend = %s ORDER BY id DESC LIMIT 40""", (person_id, backend_name())).fetchall()]
+
+    def support(g: _Cluster) -> float:
+        conf = sum(2.0 for pid, _, _ in g.segs if pid in confirmed)
+        manual = sum(3.0 for e in pins if cosine(e, g.centroid) >= th.match)
+        return conf + manual + 0.5 * len(g.segs)
+    keep = a if support(a) >= support(b) else b
+    if support(keep) < 1.3 * support(b if keep is a else a):
+        return 0  # неясно, какая группа — его: не трогаем (поможет «Это не …» в разговоре)
+    drop = [pid for g in groups if g is not keep for pid, _, emb in g.segs if cosine(emb, keep.centroid) < th.match]
+    if not drop or len(drop) >= len(rows):
+        return 0
+    conn.execute("DELETE FROM voiceprints WHERE id = ANY(%s::bigint[])", (drop,))
+    recompute_centroid(conn, person_id)
+    log.warning("voices: person %s had two voices mixed — removed %d of %d voiceprints", person_id, len(drop), len(rows))
+    return len(drop)
+
+
+def demix_once(conn, days: int = 3) -> str:
+    """Один раз: разделить «склеенные» голоса у всех, кого знаем по имени, и подписать заново разговоры
+    последних дней, где они звучали."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = %s", (DEMIX_KEY,)).fetchone():
+        return ""
+    report, touched = [], []
+    for p in conn.execute("SELECT id FROM people WHERE centroid IS NOT NULL AND backend = %s AND NOT ignored",
+                          (backend_name(),)).fetchall():
+        n = demix_person(conn, p["id"])
+        if n:
+            report.append(f"#{p['id']}-{n}")
+            touched.append(p["id"])
+    convs = []
+    if touched:
+        convs = [r["id"] for r in conn.execute(
+            """UPDATE conversations SET voices_done = false
+               WHERE voices_done AND started_at > now() - %s * interval '1 day'
+                 AND id IN (SELECT DISTINCT conversation_id FROM segments WHERE person_id = ANY(%s::bigint[]))
+               RETURNING id""", (days, touched)).fetchall()]
+        if convs:
+            conn.execute("""INSERT INTO settings (key, value) VALUES (%s, %s)
+                            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                         (RECHECK_KEY, json.dumps(sorted(set(convs) | _recheck_ids(conn)))))
+    value = (" ".join(report) or "нет") + f"; заново {len(convs)}"
+    conn.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (DEMIX_KEY, value))
+    return value
+
+
 def clean_prints(conn, days: int = 3) -> dict:
     """Разовая уборка (после смены правил узнавания): из отпечатков каждого человека убираем чужие —
     дообученные образцы, непохожие на его голос, и любые явно чужие. Потом разговоры последних дней
@@ -1351,6 +1422,7 @@ def reassign_conversation(conn, conv_id: int, from_pid: int, to_pid: int | None)
         recompute_centroid(conn, from_pid)
         if to_pid is not None:
             recompute_centroid(conn, to_pid)
+        demix_person(conn, from_pid)  # «это не она» — повод проверить, не склеены ли в ней два голоса
     for pid in (from_pid, to_pid):
         if pid:
             try:
@@ -1476,6 +1548,9 @@ def diagnostics(conn) -> str:
     repair = conn.execute("SELECT value FROM settings WHERE key = 'profile.owner_repair'").fetchone()
     if repair:
         parts.append(f"«я» исправлено: {repair['value']}")
+    demixed = conn.execute("SELECT value FROM settings WHERE key = %s", (DEMIX_KEY,)).fetchone()
+    if demixed:
+        parts.append(f"разделение склеенных голосов: {demixed['value']}")
     cleaned = conn.execute("SELECT value FROM settings WHERE key = %s", (CLEAN_KEY,)).fetchone()
     parts.append(f"уборка: {cleaned['value'] if cleaned else 'не было'}, на перепроверке {len(_recheck_ids(conn))}")
     return "; ".join(parts)

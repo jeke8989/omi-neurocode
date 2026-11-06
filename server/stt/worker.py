@@ -383,6 +383,7 @@ def main():
     pruned = False
     cleaned = False
     samples_done = False
+    demixed = False
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -416,6 +417,14 @@ def main():
                                          "to sign again", res["removed"], res["people"], res["recheck"])
                         except Exception:  # noqa: BLE001
                             log.exception("voices: voiceprint cleanup failed")
+                    if not demixed:
+                        demixed = True
+                        try:
+                            res = voices.demix_once(conn)
+                            if res:
+                                log.info("voices: demix — %s", res)
+                        except Exception:  # noqa: BLE001
+                            log.exception("voices: demix failed")
                     if not samples_done:
                         samples_done = True
                         try:

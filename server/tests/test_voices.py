@@ -646,3 +646,25 @@ def test_reassign_voice_in_conversation(clean):
     named = people.reassign_in_conversation(conn, c2, new, name="Борис")
     assert conn.execute("SELECT name FROM people WHERE id = %s", (named["person_id"],)).fetchone()["name"] == "Борис"
     assert people.reassign_in_conversation(conn, c2, named["person_id"], person_id=named["person_id"]) is None
+
+
+def test_demix_person(clean):
+    """В голосе Анны склеены два голоса (её и Бориса, попавший при старом дообучении): образцы Бориса
+    убираются, Анна по-прежнему узнаётся, Борис — уже нет; чистый голос не трогается."""
+    conn = clean
+    from neuro import voices
+    m = voices.model()
+    anna = voices.new_unknown(conn, m.embed(synth(**ANNA, sec=3, seed=900)), 3.0, 0,
+                              prints=[(m.embed(synth(**ANNA, sec=3, seed=900 + s)), 3.0) for s in range(14)])["id"]
+    conn.execute("UPDATE voiceprints SET confirmed = true WHERE id IN (SELECT id FROM voiceprints WHERE person_id = %s LIMIT 6)",
+                 (anna,))
+    for k in range(10):
+        conn.execute("""INSERT INTO voiceprints (person_id, embedding, seconds, backend, confirmed)
+                        VALUES (%s, %s, 3, %s, false)""",
+                     (anna, voices.vec(m.embed(synth(**BORIS, sec=3, seed=950 + k))), voices.backend_name()))
+    voices.recompute_centroid(conn, anna)
+    assert voices.demix_person(conn, anna) == 10
+    assert voices.demix_person(conn, anna) == 0  # уже чистый
+    assert voices.decide(voices.rank_people(conn, m.embed(synth(**ANNA, sec=3, seed=990))), 3.0)[0]["id"] == anna
+    assert voices.decide(voices.rank_people(conn, m.embed(synth(**BORIS, sec=3, seed=991))), 3.0)[0] is None
+    assert "заново" in voices.demix_once(conn)
