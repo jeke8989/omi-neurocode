@@ -236,15 +236,15 @@ def test_sync_runs_in_own_loop_not_after_summaries(monkeypatch):
     """Регрессия: автоотправка ждала итогов разговоров (3–4 минуты). Теперь — свой поток каждые несколько секунд."""
     import threading
     from agent import worker
-    calls = []
+    calls, stop = [], threading.Event()
 
     def fake_reconcile(conn):
         calls.append(1)
         if len(calls) >= 2:
-            raise SystemExit  # останавливаем поток после второго круга
+            stop.set()  # два круга подряд — поток живёт сам по себе, останавливаем
     monkeypatch.setattr(worker.task_sync, "reconcile", fake_reconcile)
     monkeypatch.setattr(worker, "TASK_SYNC_SEC", 0.01)
-    th = threading.Thread(target=worker.task_sync_loop, daemon=True)
+    th = threading.Thread(target=worker.task_sync_loop, args=(stop,), daemon=True)
     th.start()
     th.join(timeout=10)
     assert len(calls) == 2 and not th.is_alive()

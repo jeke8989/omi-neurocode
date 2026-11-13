@@ -402,15 +402,16 @@ def sync_task_integrations(conn):
 TASK_SYNC_SEC = 5
 
 
-def task_sync_loop():
+def task_sync_loop(stop: threading.Event | None = None):
     """Задачи в сервисах — своим потоком: итоги разговоров идут минутами (запросы к ИИ), а отправка новой
     задачи и закрытие выполненной не должны их ждать (было: задача уходила в SmartDesk через 3–4 минуты)."""
-    while True:
+    stop = stop or threading.Event()
+    while not stop.is_set():
         try:
             with db.connect() as conn:
-                while True:
+                while not stop.is_set():
                     task_sync.reconcile(conn)
-                    time.sleep(TASK_SYNC_SEC)
+                    stop.wait(TASK_SYNC_SEC)
         except Exception:  # noqa: BLE001
             log.exception("task sync loop error, retrying in 10s")
             time.sleep(10)
