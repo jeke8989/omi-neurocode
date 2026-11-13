@@ -10,7 +10,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from neuro import config, db, llm
-from neuro import agent_core, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention, routines
+from neuro import (agent_core, crypto, diary, encrypt_existing, events, extensions, hooks, i18n, people, profile, retention,
+                   routines, task_sync)
 from neuro import calendar as calendarlib
 from neuro import cleanup as cleanuplib  # не путать с def cleanup ниже (хранение звука)
 from neuro import memory as memorylib
@@ -147,7 +148,8 @@ def summarize_one(conn, conv_id: int):
     with conn.transaction():
         conn.execute(
             """DELETE FROM tasks WHERE conversation_id = %s AND source = 'conversation'
-                   AND status IN ('open', 'suggested') AND exported_at IS NULL""",
+                   AND status IN ('open', 'suggested') AND exported_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM task_exports e WHERE e.task_id = tasks.id AND e.ok)""",
             (conv_id,),
         )
         conn.execute("DELETE FROM memories WHERE conversation_id = %s AND source = 'conversation'", (conv_id,))
@@ -390,9 +392,14 @@ def export_tasks(conn):
 
 
 def sync_task_integrations(conn):
-    """Новые задачи -> только вебхуки, которые пользователь сам подписал на событие «задача» (n8n, Make…).
-    В интеграции-инструменты (Notion, GitHub, Telegram…) задачи сами не уходят: это инструменты агента —
-    он пользуется ими, когда просят или когда так велит постоянное правило пользователя."""
+    """Задачи в сервисах задач (SmartDesk, GitHub…): сами уходят, только если в интеграции включено
+    «Отправлять новые задачи автоматически»; иначе — кнопкой или просьбой. Выполнили или смахнули в Mnemo —
+    закрываем и там (neuro/task_sync.py)."""
+    task_sync.reconcile(conn)
+
+
+def _old_sync_task_integrations(conn):  # pragma: no cover — прежняя автоотправка, оставлена до проверки
+    """Новые задачи -> только вебхуки, которые пользователь сам подписал на событие «задача» (n8n, Make…)."""
     rows = conn.execute("SELECT id, manifest, settings, installed_at FROM extensions WHERE enabled").fetchall()
     sinks = [r for r in rows if (r["manifest"].get("on") or {}).get("task") and extensions.is_ready(r)]
     if not sinks:

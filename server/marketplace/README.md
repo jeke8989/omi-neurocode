@@ -32,10 +32,19 @@
       "http": {"method": "GET", "url": "https://api.open-meteo.com/v1/forecast?latitude={latitude}"}
     }
   ],
-  "on_task": {
-    "title": "Отправлять новые задачи в сервис",
-    "only_target": "github",
-    "http": {"method": "POST", "url": "https://...", "body": {"title": "{text}"}}
+  "tasks": {
+    "title": "Задачи → Мой трекер",
+    "create": {"http": {"method": "POST", "url": "https://tracker.example.com/api/tasks",
+                        "headers": {"Authorization": "Bearer {settings.api_key}"},
+                        "body": {"external_id": "{task_uuid}", "title": "{title}", "description": "{details}",
+                                 "deadline": "{due_at}"}},
+               "id": "data.id", "link": "data.url", "stage": "data.status"},
+    "close":  {"http": {"method": "PATCH", "url": "https://tracker.example.com/api/tasks/{external_id}",
+                        "headers": {"Authorization": "Bearer {settings.api_key}"}, "body": {"done": true}}},
+    "reopen": {"http": {"method": "PATCH", "url": "https://tracker.example.com/api/tasks/{external_id}",
+                        "headers": {"Authorization": "Bearer {settings.api_key}"}, "body": {"done": false}}},
+    "delete": {"http": {"method": "DELETE", "url": "https://tracker.example.com/api/tasks/{external_id}",
+                        "headers": {"Authorization": "Bearer {settings.api_key}"}}}
   }
 }
 ```
@@ -48,16 +57,63 @@
 | `tools[].parameters` | JSON Schema аргументов, которые заполняет модель |
 | `tools[].http` | декларативный запрос: `method`, `url`, `headers`, `body` |
 | `tools[].webhook` | вместо `http`: `{"url": "https://ваш-сервер/run"}`. Сервер Mnemo пришлёт POST `{"tool", "arguments", "settings", "context"}` и ждёт `{"result": ...}` |
-| `on_task` | интеграция задач: вызывается для каждой новой задачи (`only_target: "github"` — только для задач на разработку) |
+| `tasks` | сервис задач — см. «Задачи в сервисе задач» ниже. Старый `on_task` понимается как `tasks.create` без закрытия |
 
 ### Подстановки
 
-- `{имя}` — аргумент инструмента. Для `on_task` доступны `{text}`, `{due}`, `{assignee}`, `{source}`, `{conversation}`.
+- `{имя}` — аргумент инструмента. Для `tasks` — поля задачи (ниже).
 - `{settings.ключ}` — настройка пользователя.
 - В `url` значения кодируются автоматически. Если значение в `body` — подстановка целиком (`"{amount}"`), его тип сохраняется: число остаётся числом.
 - Подстановки работают и в ключах `body`, например `{"{settings.title_property}": ...}`.
 - `{app.locale}` — язык приложения (`ru`, `en`, `tr`, `es`), например `language={app.locale}`.
 - Домен в `url` не может содержать подстановок: так модель нельзя увести на чужой адрес. Единственное исключение — `{app.locale}` (`https://{app.locale}.wikipedia.org/…`), и тогда в `permissions.hosts` должны быть все варианты домена.
+
+### Задачи в сервисе задач (`tasks`)
+
+Задача сама никуда не уходит. Пользователь отправляет её кнопкой «Отправить в …» в карточке обещания или просит
+ассистента. В настройках интеграции есть переключатель «Отправлять новые задачи автоматически» (по умолчанию
+выключен): после включения уходят только задачи, которые появились позже. Дальше Mnemo ведёт задачу там сам:
+
+| В Mnemo | Что вызывается |
+|---|---|
+| выполнена | `close` |
+| смахнута («не задача») | `close` |
+| снова открыта | `reopen` |
+| удалена | `delete`, а если его нет — `close` |
+
+`create` обязателен, остальное — по желанию (без `close` задача там останется открытой). Ошибка — повтор через
+1, 2, 4… минуты, до 6 раз; ошибка видна под задачей в приложении. Повторная отправка той же задачи не создаёт дубль.
+
+**Чей id.** Есть два способа, выбирайте по API сервиса:
+- сервис принимает id отправителя (SmartDesk, многие трекеры) — передайте `{task_uuid}` в `create`, а в
+  `close`/`reopen`/`delete` используйте `{external_id}` — это тот же id;
+- id выдаёт сервис (GitHub — номер issue) — укажите `create.id`: путь к нему в ответе (`number`, `data.id`,
+  `items.0.id`); тогда `{external_id}` — этот id.
+
+`create.link` — путь к ссылке на задачу в ответе (приложение откроет её), `create.stage` — к этапу или статусу.
+`only_target: "github"` — автоматически отправлять только задачи на разработку.
+
+**Поля задачи для шаблонов:**
+
+| Поле | Что это |
+|---|---|
+| `{task_uuid}` | постоянный id задачи в Mnemo (UUID) |
+| `{external_id}` | id задачи в сервисе (в `close`, `reopen`, `delete`) |
+| `{title}` | текст задачи, до 200 символов |
+| `{text}` | текст целиком |
+| `{details}` | описание: срок, с кем, дословная фраза договорённости, разговор, «— из Mnemo» |
+| `{due}` | срок словами или датой (`14.11.2026 10:00`), пусто — без срока |
+| `{due_at}` | срок ISO 8601; целиком `"{due_at}"` без срока даёт `null` |
+| `{kind}` | `mine` — обещал я, `waiting` — жду от другого, `reminder`, `meeting` |
+| `{counterpart}` | с кем договорённость |
+| `{source}`, `{conversation}` | откуда задача и название разговора |
+| `{done}` | `true` в `close`, иначе `false` |
+
+Вместо `http` в любом действии можно `"webhook": {"url": "{settings.url}"}` (n8n, Make, свой сервер): придёт
+POST `{"event": "task.created" | "task.closed" | "task.reopened" | "task.deleted", "data": {поля задачи}}`.
+В ответ на `task.created` можно вернуть JSON с id и ссылкой — пути те же, `create.id` и `create.link`.
+
+Готовые примеры: `extensions/smartdesk` (id отправителя) и `extensions/github` (id выдаёт сервис).
 
 ### Переводы
 

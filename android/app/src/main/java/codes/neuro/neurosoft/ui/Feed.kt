@@ -77,6 +77,8 @@ object Repo {
     val removedTasks = Cached { Api.tasks("dismissed").take(60) }
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
+    /** Куда можно отправлять задачи (SmartDesk, GitHub…). */
+    val taskSinks = Cached { Api.taskSinks() }
     val chat = Cached<ChatState> { Api.chat() }
     val people = Cached<PeopleInfo> { Api.people() }
     val graph = Cached<Graph> { Api.graph(365) }

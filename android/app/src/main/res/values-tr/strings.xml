@@ -233,6 +233,13 @@
     <string name="ext_rebuild">Yeniden oluştur</string>
     <string name="ext_sends">Gönderir</string>
     <string name="ext_settings">Ayarlar</string>
+    <string name="ext_tasks">Görevler</string>
+    <string name="ext_tasks_auto">Yeni görevleri otomatik gönder</string>
+    <string name="ext_tasks_auto_off">Yalnızca sözün kartındaki Gönder düğmesiyle</string>
+    <string name="ext_tasks_auto_on">Yeni sözler buraya kendiliğinden gider</string>
+    <string name="ext_tasks_footer_close">Mnemo\'da tamamlanan, kaydırılan veya silinen görev burada da kapanır.</string>
+    <string name="ext_tasks_footer_delete">Mnemo\'da tamamlanan veya kaydırılan görev burada da kapanır, silinen silinir.</string>
+    <string name="ext_tasks_footer_once">Bu servis görevleri yalnızca alır: orada elle kapatmanız gerekir.</string>
     <string name="ext_waiting">bekleyen: %1$d</string>
     <string name="ext_your_url">Ayarlardaki adresiniz</string>
     <string name="filter_all">Tümü %1$d</string>
@@ -648,7 +655,13 @@
     <string name="promise_nudge">Hatırlat</string>
     <string name="promise_nudge_title">Hatırlat: %1$s</string>
     <string name="promise_other_due">Başka tarih</string>
+    <string name="promise_send_failed">Gönderilemedi: %1$s. Kendim tekrar deneyeceğim</string>
+    <string name="promise_send_title">Diğer servislerde</string>
+    <string name="promise_send_to">%1$s hizmetine gönder</string>
+    <string name="promise_sent_once">gönderildi</string>
+    <string name="promise_sent_sync">tamamladığınızda orada kapanır</string>
     <string name="promise_someone">biri</string>
+    <string name="promise_sync_error">Orada güncellenemedi: %1$s</string>
     <string name="promise_to">Kime: %1$s</string>
     <string name="promise_to_calendar">Takvime ekle</string>
     <string name="promise_voice_name">Bu sesin adı</string>
@@ -834,6 +847,7 @@
     <string name="tab_tasks">Görevler</string>
     <string name="talk_today">Bugünkü konuşmalar</string>
     <string name="task_accept">Görevlere ekle</string>
+    <string name="task_closed_there">orada kapalı</string>
     <string name="task_delete_q">Görev silinsin mi?</string>
     <string name="task_deleted">Görev silindi</string>
     <string name="task_dismiss">Kaldır</string>

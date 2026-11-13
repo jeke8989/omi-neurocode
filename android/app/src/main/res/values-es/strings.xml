@@ -233,6 +233,13 @@
     <string name="ext_rebuild">Volver a crear</string>
     <string name="ext_sends">Envía</string>
     <string name="ext_settings">Ajustes</string>
+    <string name="ext_tasks">Tareas</string>
+    <string name="ext_tasks_auto">Enviar tareas nuevas automáticamente</string>
+    <string name="ext_tasks_auto_off">Solo con el botón Enviar de la promesa</string>
+    <string name="ext_tasks_auto_on">Las promesas nuevas llegan aquí solas</string>
+    <string name="ext_tasks_footer_close">Hecha, descartada o borrada en Mnemo: la tarea se cierra también aquí.</string>
+    <string name="ext_tasks_footer_delete">Hecha o descartada en Mnemo: se cierra también aquí; borrada: se borra.</string>
+    <string name="ext_tasks_footer_once">Este servicio solo recibe tareas: tendrás que cerrarlas allí a mano.</string>
     <string name="ext_waiting">en espera: %1$d</string>
     <string name="ext_your_url">Tu dirección de los ajustes</string>
     <string name="filter_all">Todo %1$d</string>
@@ -648,7 +655,13 @@
     <string name="promise_nudge">Recordarle</string>
     <string name="promise_nudge_title">Recordar a %1$s</string>
     <string name="promise_other_due">Otra fecha</string>
+    <string name="promise_send_failed">No se envió: %1$s. Lo reintentaré</string>
+    <string name="promise_send_title">En otros servicios</string>
+    <string name="promise_send_to">Enviar a %1$s</string>
+    <string name="promise_sent_once">enviada</string>
+    <string name="promise_sent_sync">se cerrará allí cuando la completes</string>
     <string name="promise_someone">alguien</string>
+    <string name="promise_sync_error">No se pudo actualizar allí: %1$s</string>
     <string name="promise_to">Para: %1$s</string>
     <string name="promise_to_calendar">Añadir al calendario</string>
     <string name="promise_voice_name">Nombre de esta voz</string>
@@ -834,6 +847,7 @@
     <string name="tab_tasks">Tareas</string>
     <string name="talk_today">Conversaciones hoy</string>
     <string name="task_accept">Añadir a tareas</string>
+    <string name="task_closed_there">cerrada allí</string>
     <string name="task_delete_q">¿Eliminar la tarea?</string>
     <string name="task_deleted">Tarea eliminada</string>
     <string name="task_dismiss">Descartar</string>

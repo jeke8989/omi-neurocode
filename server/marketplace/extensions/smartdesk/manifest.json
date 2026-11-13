@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "id": "smartdesk",
+  "name": "SmartDesk",
+  "icon": "🗂",
+  "version": "1.0.0",
+  "author": "Neuro Codes",
+  "homepage": "https://app.smart-desk.app",
+  "description": "Обещания и задачи — в ваш проект SmartDesk кнопкой «Отправить» или автоматически. Выполнили или смахнули в Mnemo — задача закрывается и в SmartDesk.",
+  "permissions": {
+    "hosts": [
+      "app.smart-desk.app"
+    ]
+  },
+  "settings": [
+    {
+      "key": "api_token",
+      "title": "Ключ проекта",
+      "secret": true,
+      "required": true,
+      "hint": "SmartDesk → проект → Настройки → «Подключение по ссылке»: ключ tt_live_… (он же в конце ссылки)"
+    }
+  ],
+  "tasks": {
+    "title": "Задачи → SmartDesk",
+    "create": {
+      "http": {
+        "method": "POST",
+        "url": "https://app.smart-desk.app/api/v1/integration/tasks",
+        "headers": {
+          "Authorization": "Bearer {settings.api_token}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "external_id": "{task_uuid}",
+          "title": "{title}",
+          "description": "{details}",
+          "deadline": "{due_at}",
+          "type": "{kind}",
+          "tags": [
+            "mnemo"
+          ]
+        }
+      },
+      "link": "task.url",
+      "stage": "task.stage_name"
+    },
+    "close": {
+      "http": {
+        "method": "POST",
+        "url": "https://app.smart-desk.app/api/v1/integration/tasks/complete",
+        "headers": {
+          "Authorization": "Bearer {settings.api_token}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "external_id": "{external_id}"
+        }
+      }
+    },
+    "reopen": {
+      "http": {
+        "method": "POST",
+        "url": "https://app.smart-desk.app/api/v1/integration/tasks/reopen",
+        "headers": {
+          "Authorization": "Bearer {settings.api_token}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "external_id": "{external_id}"
+        }
+      }
+    }
+  },
+  "i18n": {
+    "en": {
+      "description": "Promises and tasks go to your SmartDesk project with the Send button or automatically. Done or swiped away in Mnemo — closed in SmartDesk too.",
+      "task_sync": "Tasks → SmartDesk",
+      "settings": {
+        "api_token": {
+          "title": "Project key",
+          "hint": "SmartDesk → project → Settings → “Connect by link”: the tt_live_… key (also at the end of the link)"
+        }
+      }
+    },
+    "tr": {
+      "description": "Sözler ve görevler SmartDesk projenize Gönder düğmesiyle veya otomatik gider. Mnemo'da tamamlanan ya da kaydırılan görev SmartDesk'te de kapanır.",
+      "task_sync": "Görevler → SmartDesk",
+      "settings": {
+        "api_token": {
+          "title": "Proje anahtarı",
+          "hint": "SmartDesk → proje → Ayarlar → «Bağlantı ile bağlan»: tt_live_… anahtarı"
+        }
+      }
+    },
+    "es": {
+      "description": "Las promesas y tareas van a tu proyecto de SmartDesk con el botón Enviar o automáticamente. Hecha o descartada en Mnemo, se cierra también en SmartDesk.",
+      "task_sync": "Tareas → SmartDesk",
+      "settings": {
+        "api_token": {
+          "title": "Clave del proyecto",
+          "hint": "SmartDesk → proyecto → Ajustes → «Conexión por enlace»: la clave tt_live_…"
+        }
+      }
+    }
+  }
+}

@@ -14,7 +14,8 @@ import re
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from . import agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile, roles, routines
+from . import (agent_context, config, connectors, crypto, extensions, i18n, llm, people, profile, roles, routines,
+               task_sync)
 from . import calendar as calendarlib
 from . import memory as memorylib
 from .assistant import TZ, WEEKDAYS, build_context, clean_tasks, insert_memories, insert_tasks, transcript_text
@@ -78,6 +79,10 @@ BUILTIN_TOOLS = [
         "напоминания. Для вопросов «что я обещал», «кто мне что должен», «что горит».",
         {"status": {"type": "string", "enum": ["open", "done", "all"]}}),
     _fn("complete_task", "Отметить задачу выполненной по её id.", {"id": {"type": "integer"}}, ["id"]),
+    _fn("send_task", "Отправить задачу (id из list_tasks) в подключённый сервис задач — SmartDesk, GitHub и др. "
+        "Только когда пользователь просит. Выполнят или удалят задачу в Mnemo — она закроется и там.",
+        {"id": {"type": "integer"},
+         "integration": {"type": "string", "description": "id интеграции, если их несколько"}}, ["id"]),
     _fn("save_memory", "Запомнить факт о жизни пользователя надолго (предпочтение, договорённость, важное о людях). "
         "Похожее на уже известное объединится со старой записью.", {"text": {"type": "string"}}, ["text"]),
     _fn("forget_memory", "Удалить запись памяти (в архив) по её номеру — когда пользователь просит забыть "
@@ -230,6 +235,14 @@ def run_builtin(conn, name: str, args: dict, device_id: str | None) -> str:
                 return f", срок {_d(r['due_at'])}"
             return f", срок: {r['due']}" if r["due"] else ""
         return "\n".join(f"#{r['id']} [{r['status']}; {who(r)}{when(r)}] {r['text']}" for r in rows) or "Обещаний нет."
+    if name == "send_task":
+        try:
+            e = task_sync.send(conn, int(args["id"]), str(args.get("integration") or "") or None)
+        except task_sync.SyncError as exc:
+            return f"Не отправлено: {exc}"
+        if not e["ok"]:
+            return f"Не отправлено: {e['error']}"
+        return f"Отправлено в {e['name'] or e['ext_id']}" + (f": {e['ref']}" if e["ref"] else "")
     if name == "complete_task":
         res = conn.execute("UPDATE tasks SET status = 'done', updated_at = now() WHERE id = %s", (int(args["id"]),))
         return "Готово." if res.rowcount else "Такой задачи нет."

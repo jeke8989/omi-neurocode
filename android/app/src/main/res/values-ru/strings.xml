@@ -233,6 +233,13 @@
     <string name="ext_rebuild">Собрать заново</string>
     <string name="ext_sends">Отправляет</string>
     <string name="ext_settings">Настройки</string>
+    <string name="ext_tasks">Задачи</string>
+    <string name="ext_tasks_auto">Отправлять новые задачи автоматически</string>
+    <string name="ext_tasks_auto_off">Только кнопкой «Отправить» в карточке обещания</string>
+    <string name="ext_tasks_auto_on">Новые обещания уходят сюда сами</string>
+    <string name="ext_tasks_footer_close">Выполнили, смахнули или удалили задачу в Mnemo — она закроется и здесь.</string>
+    <string name="ext_tasks_footer_delete">Выполнили или смахнули задачу в Mnemo — она закроется и здесь, удалили — удалится.</string>
+    <string name="ext_tasks_footer_once">Этот сервис только принимает задачи: закрывать их там придётся вручную.</string>
     <string name="ext_waiting">ждут отправки: %1$d</string>
     <string name="ext_your_url">Ваш адрес из настроек</string>
     <string name="filter_all">Все %1$d</string>
@@ -648,7 +655,13 @@
     <string name="promise_nudge">Напомнить</string>
     <string name="promise_nudge_title">Напомнить — %1$s</string>
     <string name="promise_other_due">Другой срок</string>
+    <string name="promise_send_failed">Не отправилось: %1$s. Повторю сам</string>
+    <string name="promise_send_title">В других сервисах</string>
+    <string name="promise_send_to">Отправить в %1$s</string>
+    <string name="promise_sent_once">отправлено</string>
+    <string name="promise_sent_sync">закроется там, когда выполните</string>
     <string name="promise_someone">собеседник</string>
+    <string name="promise_sync_error">Не получилось обновить там: %1$s</string>
     <string name="promise_to">Кому: %1$s</string>
     <string name="promise_to_calendar">Добавить в календарь</string>
     <string name="promise_voice_name">Как зовут этот голос</string>
@@ -834,6 +847,7 @@
     <string name="tab_tasks">Задачи</string>
     <string name="talk_today">Разговоры сегодня</string>
     <string name="task_accept">Принять в задачи</string>
+    <string name="task_closed_there">закрыта там</string>
     <string name="task_delete_q">Удалить задачу?</string>
     <string name="task_deleted">Задача удалена</string>
     <string name="task_dismiss">Убрать</string>

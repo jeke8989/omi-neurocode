@@ -54,8 +54,8 @@ def validate(m: dict) -> dict:
             raise ExtensionError("settings[].type: text | url")
     tools = m.get("tools") or []
     events = m.get("on") or {}
-    if not isinstance(tools, list) or not (tools or events or m.get("on_task")):
-        raise ExtensionError("нужен хотя бы один инструмент в tools или событие в on")
+    if not isinstance(tools, list) or not (tools or events or m.get("on_task") or m.get("tasks")):
+        raise ExtensionError("нужен хотя бы один инструмент в tools, событие в on или блок tasks")
     if not isinstance(events, dict) or any(e not in EVENTS for e in events):
         raise ExtensionError("on: события " + ", ".join(EVENTS))
     for name, spec in events.items():
@@ -82,6 +82,21 @@ def validate(m: dict) -> dict:
         url = (t.get("http") or t.get("webhook") or {}).get("url", "")
         for host in _template_hosts(url, m):
             _check_host(host, hosts)
+    tasks = m.get("tasks")
+    if tasks is not None:  # задачи в сервисе задач: create обязателен, close/reopen/delete — по желанию
+        if not isinstance(tasks, dict) or not isinstance(tasks.get("create"), dict):
+            raise ExtensionError("tasks: нужен tasks.create")
+        for action in ("create", "close", "reopen", "delete"):
+            act = tasks.get(action)
+            if act is None:
+                continue
+            if not isinstance(act, dict) or bool(act.get("http")) == bool(act.get("webhook")):
+                raise ExtensionError(f"tasks.{action}: нужен ровно один из http или webhook")
+            for host in _template_hosts((act.get("http") or act.get("webhook"))["url"], m):
+                _check_host(host, hosts)
+        for key in ("id", "link", "stage"):
+            if tasks["create"].get(key) is not None and not isinstance(tasks["create"][key], str):
+                raise ExtensionError(f"tasks.create.{key}: путь в ответе строкой, например task.url")
     hook = m.get("on_task")
     if hook is not None:
         if not isinstance(hook, dict) or bool(hook.get("http")) == bool(hook.get("webhook")):
@@ -205,6 +220,8 @@ def localize(m: dict, lang: str) -> dict:
                     for t in m.get("tools") or []]
     if m.get("on_task") and isinstance(tr.get("task_sync"), str):
         out["on_task"] = {**m["on_task"], "title": tr["task_sync"]}
+    if isinstance(m.get("tasks"), dict) and isinstance(tr.get("task_sync"), str):
+        out["tasks"] = {**m["tasks"], "title": tr["task_sync"]}
     ev = tr.get("events") or {}
     if m.get("on") and isinstance(ev, dict):
         out["on"] = {k: ({**v, "title": ev[k]} if isinstance(ev.get(k), str) else v) for k, v in m["on"].items()}
@@ -223,7 +240,10 @@ def public_manifest(m: dict, lang: str | None = None) -> dict:
         "hosts": (m.get("permissions") or {}).get("hosts") or [],
         "tools": [{"name": t["name"], "title": t.get("title") or t["name"], "description": t["description"]}
                   for t in m["tools"]],
-        "task_sync": (m.get("on_task") or {}).get("title"),
+        "task_sync": (m.get("tasks") or {}).get("title") or (m.get("on_task") or {}).get("title"),
+        # задачи в сервисе: что он умеет после отправки (закрыть, вернуть в работу, удалить)
+        "task_actions": ({a: bool(m["tasks"].get(a)) for a in ("close", "reopen", "delete")}
+                         if isinstance(m.get("tasks"), dict) else None),
         # на какие события подписана и куда их шлёт (адрес из настроек — «ваш адрес»)
         "events": [{"event": name, "title": spec.get("title"),
                     "to_user_url": bool(_user_url_key((spec.get("http") or spec.get("webhook") or {}).get("url", ""), m))}

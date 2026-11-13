@@ -28,7 +28,8 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from neuro import (agent_context, agent_core, assistant, cleanup, connectors, config, crypto, db, diary, extensions,
-                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, promises, retention, roles, routines, tts, voices)
+                   ext_builder, geo, hooks, i18n, llm, mnemo_mcp, pairing, people, profile, promises, retention, roles, routines,
+                   task_sync, tts, voices)
 from neuro import calendar as calendarlib
 from neuro import memory as memorylib
 from neuro import tasks as tasklib
@@ -765,9 +766,11 @@ async def api_tasks(request: Request):
                           OR t.updated_at > now() - interval '15 minutes')) AS in_calendar,
                       t.exported_at, t.export_ref, t.created_at, c.title AS conversation_title,
                       coalesce((SELECT json_agg(json_build_object(
-                                    'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref,
+                                    'ext', e.ext_id, 'ok', e.ok, 'ref', e.ref, 'error', e.error,
+                                    'state', coalesce(e.remote_state, 'open'), 'stage', e.stage,
+                                    'can_close', x.manifest->'tasks'->'close' IS NOT NULL AND e.external_id IS NOT NULL,
                                     'name', x.manifest->>'name', 'icon', x.manifest->>'icon'))
-                                FROM task_exports e LEFT JOIN extensions x ON x.id = e.ext_id
+                                FROM task_exports e JOIN extensions x ON x.id = e.ext_id
                                 WHERE e.task_id = t.id), '[]'::json) AS exports
                FROM tasks t LEFT JOIN conversations c ON c.id = t.conversation_id
                             LEFT JOIN people cp ON cp.id = t.counterpart_id
@@ -777,6 +780,34 @@ async def api_tasks(request: Request):
             (status, status, status),
         )).fetchall()
     return Json({"items": rows})
+
+
+async def api_task_send(request: Request):
+    """«Отправить в …»: задача уходит в сервис задач сразу (ответ — что получилось). {ext} — какая интеграция."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    body = await _body(request) or {}
+    tid = request.path_params["id"]
+
+    def work(conn):
+        try:
+            return task_sync.send(conn, tid, str(body.get("ext") or "") or None), None
+        except task_sync.SyncError as exc:
+            # не получилось отправить — в ответе то, что записано в выгрузке (ошибка сервиса), иначе причина
+            row = conn.execute(task_sync.EXPORT_SQL, (tid, str(body.get("ext") or ""))).fetchone()
+            return row, str(exc)
+
+    export, error = await _sync(work)
+    if error and not export:
+        return Json({"error": error}, status_code=400)
+    return Json({"export": export, "error": error})  # ошибка сервиса — в ответе и под задачей, повтор — сам
+
+
+async def api_task_sinks(request: Request):
+    """Куда можно отправлять задачи: интеграции с блоком tasks (и старые on_task / on.task)."""
+    if not _authorized(request.headers, request.query_params):
+        return _unauthorized()
+    return Json({"items": await _sync(task_sync.sinks)})
 
 
 async def api_task_create(request: Request):
@@ -1510,8 +1541,8 @@ async def api_extensions(request: Request):
     reg = await anyio.to_thread.run_sync(extensions.registry)
     async with await aconnect() as conn:
         rows = await (await conn.execute(
-            "SELECT id, manifest, enabled, settings, source_url, installed_at FROM extensions ORDER BY installed_at"
-        )).fetchall()
+            "SELECT id, manifest, enabled, settings, source_url, installed_at, auto_tasks_since FROM extensions "
+            "ORDER BY installed_at")).fetchall()
         lang_row = await (await conn.execute("SELECT value FROM settings WHERE key = 'app.language'")).fetchone()
     lang = i18n.normalize(lang_row["value"] if lang_row else None)
     installed = []
@@ -1524,8 +1555,11 @@ async def api_extensions(request: Request):
                 st["value"] = (r["settings"] or {}).get(st["key"], "")
         if pub["events"]:
             pub["delivery"] = await _sync(hooks.stats, r["id"])
+        sink = task_sync.describe(r, lang)
         installed.append({**pub, "enabled": r["enabled"], "source_url": r["source_url"],
-                          "ready": all(st["filled"] for st in pub["settings"] if st["required"])})
+                          "ready": all(st["filled"] for st in pub["settings"] if st["required"]),
+                          "task_sink": {k: sink[k] for k in ("title", "auto", "close", "reopen", "delete")}
+                          if sink else None})
     ids = {e["id"] for e in installed}
     available = [{k: v for k, v in extensions.localize(e, lang).items()
                   if not k.startswith("_") and k not in ("manifest", "i18n")}
@@ -1684,6 +1718,7 @@ async def api_extension(request: Request):
     async with await aconnect() as conn:
         if request.method == "DELETE":
             res = await conn.execute("DELETE FROM extensions WHERE id = %s", (ext_id,))
+            await conn.execute("DELETE FROM task_exports WHERE ext_id = %s", (ext_id,))  # связи с задачами там
             return Json({"deleted": res.rowcount})
         try:
             body = await request.json()
@@ -1691,6 +1726,10 @@ async def api_extension(request: Request):
             return Json({"error": "bad json"}, status_code=400)
         if "enabled" in body:
             await conn.execute("UPDATE extensions SET enabled = %s WHERE id = %s", (bool(body["enabled"]), ext_id))
+        if "auto_tasks" in body:  # «Отправлять новые задачи автоматически»: уходят задачи, появившиеся после включения
+            await conn.execute(
+                "UPDATE extensions SET auto_tasks_since = CASE WHEN %s THEN coalesce(auto_tasks_since, now()) END "
+                "WHERE id = %s", (bool(body["auto_tasks"]), ext_id))
         if isinstance(body.get("settings"), dict):
             row = await (await conn.execute("SELECT manifest, settings FROM extensions WHERE id = %s", (ext_id,))).fetchone()
             urls = {st["key"] for st in ((row or {}).get("manifest") or {}).get("settings") or [] if st.get("type") == "url"}
@@ -2242,6 +2281,8 @@ app = Starlette(
         Route("/api/important", api_important),
         Route("/api/tasks/{id:int}/nudge", api_task_nudge, methods=["POST"]),
         Route("/api/tasks/{id:int}/context", api_task_context, methods=["GET"]),
+        Route("/api/tasks/{id:int}/send", api_task_send, methods=["POST"]),
+        Route("/api/task-sinks", api_task_sinks, methods=["GET"]),
         Route("/api/conversations/{id:int}/followup", api_conversation_followup, methods=["POST"]),
         Route("/api/agent/routines", api_routines),
         Route("/api/calendar", api_calendar, methods=["GET", "POST", "DELETE"]),

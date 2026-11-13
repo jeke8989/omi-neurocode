@@ -521,3 +521,18 @@ ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS followups TEXT;
 -- высота голоса (основной тон, Гц): у фразы и обычная у человека — мужской голос не подпишется женским именем
 ALTER TABLE segments ADD COLUMN IF NOT EXISTS pitch REAL;
 ALTER TABLE people ADD COLUMN IF NOT EXISTS pitch REAL;
+-- Задачи в сервисах задач (SmartDesk, GitHub…): только кнопкой «Отправить» или по переключателю интеграции.
+-- uuid — id задачи Mnemo для чужих сервисов (наружу не уходит порядковый номер)
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS uuid UUID NOT NULL DEFAULT gen_random_uuid();
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_uuid_idx ON tasks (uuid);
+-- «Отправлять новые задачи автоматически»: с какого момента (NULL — выключено, только кнопкой)
+ALTER TABLE extensions ADD COLUMN IF NOT EXISTS auto_tasks_since TIMESTAMPTZ;
+-- выгрузка помнит id задачи там и её состояние: выполнили или смахнули в Mnemo — закрываем и там
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS external_id TEXT;
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS remote_state TEXT;   -- open | closed
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS stage TEXT;          -- этап/статус там, если сервис его вернул
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS next_at TIMESTAMPTZ;
+ALTER TABLE task_exports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+-- задачу удалили в Mnemo — строка выгрузки остаётся, пока задачу не закроют там (раньше удалялась вместе с задачей)
+ALTER TABLE task_exports DROP CONSTRAINT IF EXISTS task_exports_task_id_fkey;

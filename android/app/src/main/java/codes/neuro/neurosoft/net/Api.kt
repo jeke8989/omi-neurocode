@@ -215,7 +215,14 @@ data class DayMapData(val day: String, val track: List<LatLon>, val places: List
     val isEmpty get() = track.isEmpty() && places.isEmpty() && spots.isEmpty()
 }
 
-data class TaskExport(val ext: String, val name: String?, val icon: String?, val ok: Boolean, val ref: String?)
+/** Задача в сервисе задач: ok — дошла, state — open/closed там, canClose — закроется там вслед за Mnemo. */
+data class TaskExport(val ext: String, val name: String?, val icon: String?, val ok: Boolean, val ref: String?,
+                      val error: String? = null, val state: String = "open", val stage: String? = null,
+                      val canClose: Boolean = false)
+
+/** Куда можно отправить задачу: auto — уходят сами; close/reopen/delete — что сервис умеет потом. */
+data class TaskSink(val id: String, val name: String, val icon: String?, val title: String?, val auto: Boolean,
+                    val close: Boolean, val reopen: Boolean, val delete: Boolean)
 
 data class ModelTask(
     val key: String, val kind: String, val title: String, val description: String,
@@ -261,6 +268,8 @@ data class Extension(
     val taskSync: String?, val enabled: Boolean, val ready: Boolean, val installed: Boolean, val verified: Boolean,
     /** На какие события подписана (вебхук, n8n…) и сколько уже отправлено. */
     val events: List<ExtEvent> = emptyList(), val delivery: ExtDelivery? = null, val sourceUrl: String? = null,
+    /** Принимает задачи (SmartDesk, GitHub…): автоотправка и что закрывается там вслед за Mnemo. */
+    val taskSink: TaskSink? = null,
 )
 
 data class ExtEvent(val event: String, val title: String?, val toUserUrl: Boolean)
@@ -829,9 +838,11 @@ object Api {
         call("POST", "/api/extensions/install", body)
     }
 
-    suspend fun updateExtension(id: String, enabled: Boolean? = null, settings: Map<String, String>? = null) {
+    suspend fun updateExtension(id: String, enabled: Boolean? = null, settings: Map<String, String>? = null,
+                                autoTasks: Boolean? = null) {
         val body = JSONObject()
         if (enabled != null) body.put("enabled", enabled)
+        if (autoTasks != null) body.put("auto_tasks", autoTasks)
         if (settings != null) body.put("settings", JSONObject(settings as Map<*, *>))
         call("POST", "/api/extensions/$id", body)
     }
@@ -856,6 +867,7 @@ object Api {
             ExtDelivery(it.optInt("sent"), it.optInt("waiting"), it.optInt("failed"), it.str("last_sent"), it.str("error"))
         },
         sourceUrl = o.str("source_url"),
+        taskSink = o.optJSONObject("task_sink")?.let { taskSink(it, o.optString("id"), o.optString("name"), o.str("icon")) },
     )
 
     /** «Создать с ассистентом»: описание словами (и правка прошлого черновика) -> черновик манифеста. */
@@ -1221,6 +1233,30 @@ object Api {
         important = o.optBoolean("important"),
     )
 
+    private fun taskExport(o: JSONObject) = TaskExport(
+        o.optString("ext", o.optString("ext_id")), o.str("name"), o.str("icon"), o.optBoolean("ok"), o.str("ref"),
+        error = o.str("error"), state = o.optString("state", "open"), stage = o.str("stage"),
+        canClose = o.optBoolean("can_close"),
+    )
+
+    private fun taskSink(o: JSONObject, id: String = o.optString("id"), name: String = o.optString("name"),
+                         icon: String? = o.str("icon")) = TaskSink(
+        id = id, name = name, icon = icon, title = o.str("title"), auto = o.optBoolean("auto"),
+        close = o.optBoolean("close"), reopen = o.optBoolean("reopen"), delete = o.optBoolean("delete"),
+    )
+
+    /** Интеграции, которые принимают задачи (кнопка «Отправить в …» в карточке обещания). */
+    suspend fun taskSinks(): List<TaskSink> =
+        JSONObject(call("GET", "/api/task-sinks")).optJSONArray("items").map { taskSink(it) }
+
+    /** Отправить задачу в сервис. Не дошла — export.ok = false и причина в export.error (повтор — сам сервер). */
+    suspend fun sendTask(id: Long, ext: String): TaskExport {
+        val o = JSONObject(call("POST", "/api/tasks/$id/send", JSONObject().put("ext", ext)))
+        val e = o.optJSONObject("export")?.let { taskExport(it) }
+            ?: TaskExport(ext, null, null, false, null, error = o.str("error"))
+        return if (e.error == null && o.str("error") != null) e.copy(error = o.str("error")) else e
+    }
+
     private fun task(o: JSONObject) = TaskItem(
         id = o.getLong("id"),
         text = o.optString("text"),
@@ -1231,9 +1267,7 @@ object Api {
         conversationId = if (o.isNull("conversation_id")) null else o.optLong("conversation_id"),
         conversationTitle = o.str("conversation_title"),
         exportRef = o.str("export_ref"),
-        exports = o.optJSONArray("exports").map {
-            TaskExport(it.optString("ext"), it.str("name"), it.str("icon"), it.optBoolean("ok"), it.str("ref"))
-        },
+        exports = o.optJSONArray("exports").map { taskExport(it) },
         createdAt = o.optString("created_at"),
         personId = o.longOrNull("person_id"),
         kind = o.optString("kind", "mine").ifBlank { "mine" },

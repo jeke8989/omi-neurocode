@@ -3,6 +3,35 @@
   "name": "Mnemo Marketplace",
   "extensions": [
     {
+      "id": "smartdesk",
+      "name": "SmartDesk",
+      "icon": "🗂",
+      "author": "Neuro Codes",
+      "version": "1.0.0",
+      "verified": true,
+      "tags": [
+        "задачи",
+        "трекер",
+        "обещания"
+      ],
+      "description": "Обещания и задачи — в проект SmartDesk; выполнили в Mnemo — закрываются и там.",
+      "manifest": "extensions/smartdesk/manifest.json",
+      "i18n": {
+        "en": {
+          "name": "SmartDesk",
+          "description": "Promises and tasks to your SmartDesk project; done in Mnemo — closed there too."
+        },
+        "tr": {
+          "name": "SmartDesk",
+          "description": "Sözler ve görevler SmartDesk projenize; Mnemo'da tamamlanınca orada da kapanır."
+        },
+        "es": {
+          "name": "SmartDesk",
+          "description": "Promesas y tareas a tu proyecto de SmartDesk; hechas en Mnemo, se cierran también allí."
+        }
+      }
+    },
+    {
       "id": "webhook",
       "name": "Вебхук",
       "icon": "🔗",
@@ -68,7 +97,7 @@
         "задачи",
         "разработка"
       ],
-      "description": "Задачи на разработку из разговоров → issues в репозитории.",
+      "description": "Задачи на разработку — в issues; выполнили в Mnemo — issue закрывается.",
       "manifest": "extensions/github/manifest.json",
       "i18n": {
         "en": {

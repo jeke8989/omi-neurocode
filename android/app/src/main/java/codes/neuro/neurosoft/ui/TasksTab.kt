@@ -452,15 +452,22 @@ fun TaskRow(t: TaskItem, onToggle: () -> Unit) {
             }
             if (t.exports.isNotEmpty()) {
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    t.exports.forEach { e ->
-                        Txt(listOfNotNull(e.icon, e.name ?: e.ext).joinToString(" ") + if (e.ok) " ✓" else " !",
-                            T.tiny, if (e.ok) c.graphite else c.red, maxLines = 1)
-                    }
+                    t.exports.forEach { e -> Txt(exportLabel(e), T.tiny, if (e.ok && e.error == null) c.graphite else c.red, maxLines = 1) }
                 }
             }
         }
     }
 }
+
+/** «🗂 SmartDesk ✓», «… закрыта», «… !» — отправлена, закрыта там или не дошла. */
+@Composable
+fun exportLabel(e: codes.neuro.neurosoft.net.TaskExport): String =
+    listOfNotNull(e.icon, e.name ?: e.ext).joinToString(" ") + when {
+        !e.ok -> " !"
+        e.error != null -> " !"
+        e.state == "closed" && e.canClose -> " · " + stringResource(R.string.task_closed_there)
+        else -> " ✓"
+    }
 
 @Composable
 private fun sourceLabel(t: TaskItem): String? = when (t.source) {

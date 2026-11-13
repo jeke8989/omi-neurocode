@@ -234,6 +234,13 @@
     <string name="ext_rebuild">Rebuild</string>
     <string name="ext_sends">Sends</string>
     <string name="ext_settings">Settings</string>
+    <string name="ext_tasks">Tasks</string>
+    <string name="ext_tasks_auto">Send new tasks automatically</string>
+    <string name="ext_tasks_auto_off">Only with the Send button on a promise</string>
+    <string name="ext_tasks_auto_on">New promises go here on their own</string>
+    <string name="ext_tasks_footer_close">Done, swiped away or deleted in Mnemo — the task closes here too.</string>
+    <string name="ext_tasks_footer_delete">Done or swiped away in Mnemo — the task closes here too; deleted — it is deleted here.</string>
+    <string name="ext_tasks_footer_once">This service only receives tasks: you will have to close them there yourself.</string>
     <string name="ext_waiting">waiting: %1$d</string>
     <string name="ext_your_url">Your address from the settings</string>
     <string name="filter_all">All %1$d</string>
@@ -649,7 +656,13 @@
     <string name="promise_nudge">Remind them</string>
     <string name="promise_nudge_title">Remind %1$s</string>
     <string name="promise_other_due">Other date</string>
+    <string name="promise_send_failed">Not sent: %1$s. I will retry</string>
+    <string name="promise_send_title">In other services</string>
+    <string name="promise_send_to">Send to %1$s</string>
+    <string name="promise_sent_once">sent</string>
+    <string name="promise_sent_sync">closes there when you mark it done</string>
     <string name="promise_someone">someone</string>
+    <string name="promise_sync_error">Could not update it there: %1$s</string>
     <string name="promise_to">To: %1$s</string>
     <string name="promise_to_calendar">Add to the calendar</string>
     <string name="promise_voice_name">Name of this voice</string>
@@ -835,6 +848,7 @@
     <string name="tab_tasks">Tasks</string>
     <string name="talk_today">Talk today</string>
     <string name="task_accept">Add to tasks</string>
+    <string name="task_closed_there">closed there</string>
     <string name="task_delete_q">Delete this task?</string>
     <string name="task_deleted">Task deleted</string>
     <string name="task_dismiss">Dismiss</string>

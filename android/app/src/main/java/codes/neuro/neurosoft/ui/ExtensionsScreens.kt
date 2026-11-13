@@ -100,6 +100,7 @@ fun ExtensionsScreen() {
                 if (working.isNotEmpty()) {
                     val subtitles = working.map { e ->
                         when {
+                            e.taskSink != null -> e.taskSink.title ?: stringResource(R.string.ext_tasks)
                             e.events.isNotEmpty() -> plural(R.plurals.ext_events, e.events.size)
                             else -> plural(R.plurals.tools, e.tools.size)
                         }
@@ -455,6 +456,29 @@ fun ExtensionScreen(id: String) {
                                     }
                                 }
                             })
+                        }
+                    }
+                }
+                // задачи: сами не уходят, пока не включено «автоматически»; закрываются там вслед за Mnemo
+                e.taskSink?.let { s ->
+                    Group(stringResource(R.string.ext_tasks), footer = stringResource(when {
+                        s.close && s.delete -> R.string.ext_tasks_footer_delete
+                        s.close -> R.string.ext_tasks_footer_close
+                        else -> R.string.ext_tasks_footer_once
+                    })) {
+                        item {
+                            ToggleRow(stringResource(R.string.ext_tasks_auto), s.auto, { on ->
+                                scope.launch {
+                                    try {
+                                        Api.updateExtension(e.id, autoTasks = on)
+                                        reload()
+                                        Repo.taskSinks.refresh()
+                                    } catch (ex: Exception) {
+                                        note = ex.message
+                                    }
+                                }
+                            }, icon = Icons.Tasks, enabled = e.enabled && e.ready,
+                                subtitle = stringResource(if (s.auto) R.string.ext_tasks_auto_on else R.string.ext_tasks_auto_off))
                         }
                     }
                 }

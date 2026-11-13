@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import codes.neuro.neurosoft.R
 import codes.neuro.neurosoft.net.Api
 import codes.neuro.neurosoft.net.PersonRef
+import codes.neuro.neurosoft.net.TaskExport
 import codes.neuro.neurosoft.net.TaskItem
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -294,6 +295,9 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                 }
             }
 
+            // в сервисах задач (SmartDesk, GitHub…): сама задача туда не уходит — только кнопкой
+            if (!isNew) TaskSinksBlock(t)
+
             // действия
             Spacer(Modifier.height(18.dp))
             Wrap(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -319,4 +323,66 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
 @Composable
 private fun SheetLabel(text: String) {
     Txt(text, T.smallStrong, Mn.c.graphite, Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 8.dp))
+}
+
+
+/** «В другие сервисы»: где задача уже есть (и что с ней там) и кнопки «Отправить в …». */
+@Composable
+private fun TaskSinksBlock(t: TaskItem) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sinks by Repo.taskSinks.state.collectAsState()
+    var exports by remember(t.id) { mutableStateOf(t.exports) }
+    var sending by remember(t.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { try { Repo.taskSinks.refresh() } catch (_: Exception) {} }
+    val targets = sinks.data.orEmpty().filter { s -> exports.none { it.ext == s.id && it.ok } }
+    val canSend = t.status == "open"
+    if (exports.isEmpty() && (targets.isEmpty() || !canSend)) return
+
+    fun send(ext: String, name: String, icon: String?) {
+        sending = ext
+        scope.launch {
+            val e = try {
+                Api.sendTask(t.id, ext)
+            } catch (ex: Exception) {
+                TaskExport(ext, name, icon, false, null, error = ex.message)
+            }
+            exports = exports.filter { it.ext != ext } + e.copy(name = e.name ?: name, icon = e.icon ?: icon)
+            sending = null
+            try { Repo.tasks.refresh() } catch (_: Exception) {}
+        }
+    }
+
+    SheetLabel(stringResource(R.string.promise_send_title))
+    Group(inset = 56.dp) {
+        exports.forEach { e ->
+            item {
+                ListRow(listOfNotNull(e.icon, e.name ?: e.ext).joinToString(" "), icon = Icons.Link,
+                    iconTint = if (e.ok && e.error == null) null else Mn.c.red,
+                    subtitle = when {
+                        !e.ok -> stringResource(R.string.promise_send_failed, e.error ?: "?")
+                        e.error != null -> stringResource(R.string.promise_sync_error, e.error)
+                        e.state == "closed" && e.canClose -> stringResource(R.string.task_closed_there)
+                        else -> listOfNotNull(e.stage, stringResource(
+                            if (e.canClose) R.string.promise_sent_sync else R.string.promise_sent_once)).joinToString(", ")
+                    },
+                    chevron = e.ref != null,
+                    onClick = e.ref?.let { url -> {
+                        try {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(url)))
+                        } catch (_: Exception) {}
+                    } })
+            }
+        }
+        if (canSend) {
+            targets.forEach { s ->
+                item {
+                    ListRow(stringResource(R.string.promise_send_to, s.name), icon = Icons.Share, accent = true,
+                        onClick = if (sending == null) ({ send(s.id, s.name, s.icon) }) else null,
+                        trailing = if (sending == s.id) ({ Spinner(18.dp) }) else null)
+                }
+            }
+        }
+    }
 }

@@ -27,12 +27,27 @@ SYSTEM = """Ты собираешь интеграцию (плагин) для M
             "http": {"method": "POST", "url": "https://api.example.com/v1/items?key={settings.api_key}",
                      "headers": {"Authorization": "Bearer {settings.api_key}"}, "body": {"content": "{text}"}}}],
  "on": {"conversation": {"title": "…", "http": {…} или "webhook": {"url": "{settings.url}"}},
-        "task": {…}, "memory": {…}, "day": {…}}}
+        "memory": {…}, "day": {…}},
+ "tasks": {"title": "Задачи → Сервис",
+           "create": {"http": {"method": "POST", "url": "https://api.example.com/tasks",
+                               "body": {"external_id": "{task_uuid}", "title": "{title}", "description": "{details}",
+                                        "deadline": "{due_at}"}},
+                      "id": "путь к id задачи в ответе, если id выдаёт сервис (например data.id)",
+                      "link": "путь к ссылке на задачу в ответе (например data.url)"},
+           "close": {"http": {"method": "PATCH", "url": "https://api.example.com/tasks/{external_id}",
+                              "body": {"status": "done"}}},
+           "reopen": {"http": {…}}, "delete": {"http": {…}}}}
 
 Инструменты (tools) вызывает ассистент по просьбе пользователя («добавь в Todoist…»). События (on) отправляются сами:
 conversation — новый разговор (поля {title} {summary} {emoji} {started_at} {ended_at} {topics} {people} {tasks}),
-task — новая задача ({text} {due} {assignee} {source} {conversation}), memory — «запомни это» ({text}),
-day — итог дня ({day} {title} {summary} {mood}). Можно только tools, только on или оба.
+memory — «запомни это» ({text}), day — итог дня ({day} {title} {summary} {mood}).
+tasks — задачи в сервисе задач (трекер, Todoist, свой сервис). Сами не уходят: пользователь отправляет задачу
+кнопкой или включает автоотправку. Выполнил или смахнул задачу — Mnemo вызывает close, вернул — reopen, удалил —
+delete (нет delete — close). Поля задачи: {task_uuid} (постоянный id задачи Mnemo), {title} {text} {details}
+{due} {due_at} (ISO или null) {kind} {counterpart} {source} {conversation} {done} (true/false);
+в close/reopen/delete — {external_id}: id задачи в сервисе (из ответа create по пути "id"; без "id" — {task_uuid},
+если сервис принимает id отправителя). close, reopen и delete — по желанию, но close очень желателен.
+Можно только tools, только on, только tasks или вместе.
 
 Правила:
 - Используй настоящие публичные API сервиса, которые ты знаешь точно; не выдумывай адреса.
