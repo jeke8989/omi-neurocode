@@ -177,16 +177,6 @@ fun ConversationScreen(id: Long) {
                 }
                 ShareActions("conversation:${d.item.id}", d.item.title,
                     padding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp))
-                // кто участвовал: тап — карточка человека
-                val present = d.people.values.filter { !it.ignored && !it.transient }.sortedByDescending { it.isOwner }
-                if (present.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                        .padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        present.forEach { p ->
-                            Chip(personLabel(p), false, { voiceMenu = p }, leading = { Avatar(p, 24.dp) })
-                        }
-                    }
-                }
                 d.location?.let { loc ->
                     SpotMap(fmt.dayOf(d.item.startedAt), loc.lat, loc.lon, d.item.emoji, d.item.title, loc.track, loc.name)
                 }
@@ -272,8 +262,7 @@ fun ConversationScreen(id: Long) {
                         val key = "${s.personId}:${s.speaker}:${s.sure}"
                         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
                             if (key != last) {
-                                Row(Modifier.padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
-                                    .tap({ if (s.id > 0) who = s }).padding(horizontal = 8.dp, vertical = 4.dp),
+                                Row(Modifier.padding(top = 6.dp).padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically) {
                                     if (byPerson) {
                                         Avatar(ref, 22.dp)
@@ -287,7 +276,7 @@ fun ConversationScreen(id: Long) {
                                 if (ref?.background == true) c.faint else c.ink,
                                 Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(18.dp))
                                     .background(if (mine) c.paper else c.raised)
-                                    .combinedClickable(onClick = {}, onLongClick = { if (s.id > 0) who = s })
+                                    .combinedClickable(onClick = {}, onLongClick = null)
                                     .padding(horizontal = 14.dp, vertical = 10.dp))
                         }
                         last = key

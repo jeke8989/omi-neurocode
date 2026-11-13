@@ -526,13 +526,14 @@ def _setting(conn, key: str, default: str = "1") -> str:
 
 
 def enabled(conn) -> bool:
-    """«Узнавать голоса» — главный выключатель: без него кусок просто расшифровывается."""
-    return _setting(conn, "voices.enabled") == "1"
+    """«Узнавать голоса» — главный выключатель: без него кусок просто расшифровывается.
+    Сначала — VOICES в .env (по умолчанию выключено), потом настройка в приложении."""
+    return config.VOICES and _setting(conn, "voices.enabled") == "1"
 
 
 def others_enabled(conn) -> bool:
     """«Запоминать голоса собеседников»: выключено — узнаём только пользователя и тех, кого он назвал."""
-    return _setting(conn, "voices.others") == "1"
+    return config.VOICES and _setting(conn, "voices.others") == "1"
 
 
 def has_owner(conn) -> bool:

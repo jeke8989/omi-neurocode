@@ -494,12 +494,10 @@ private fun TaskWho(t: TaskItem) {
         pid != null || legacyOwner -> stringResource(R.string.people_me)
         else -> return
     }
-    Row(Modifier.padding(top = 4.dp).then(if (pid != null) Modifier.quietTap { Nav.push(Route.Person(pid)) } else Modifier),
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null,
-            tint = if (pid != null) c.lens else c.graphite, modifier = Modifier.size(14.dp))
+    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (t.kind == "reminder") Icons.Bell else Icons.Person, null, tint = c.graphite, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
-        Txt(text, T.caption, if (pid != null) c.lens else c.graphite, maxLines = 1)
+        Txt(text, T.caption, c.graphite, maxLines = 1)
     }
 }
 

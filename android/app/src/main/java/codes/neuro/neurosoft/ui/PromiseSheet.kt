@@ -213,7 +213,7 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                             chevron = true, onClick = { choosing = !choosing })
                     }
                     if (choosing) {
-                        (inConversation + known).take(30).forEach { p ->
+                        (inConversation + known).filter { it.name != null }.take(30).forEach { p ->
                             item {
                                 ListRow(personLabel(p).properName(), subtitle = if (p in inConversation)
                                     stringResource(R.string.promise_was_there) else null,
@@ -234,11 +234,6 @@ fun PromiseSheet(t: TaskItem, onDismiss: () -> Unit, onSave: (PromiseEdit) -> Un
                                 personTouched = true
                             }, stringResource(R.string.intro_name_hint))
                         }
-                    }
-                    // голос без имени: как его зовут — запомнится и в «Людях»
-                    if (person != null && person?.name == null) {
-                        item { FieldRow(stringResource(R.string.promise_voice_name), voiceName, { voiceName = it },
-                            stringResource(R.string.intro_name_hint)) }
                     }
                 }
             }

@@ -379,13 +379,10 @@ def main():
         raise SystemExit(f"unknown STT_PROVIDER={config.STT_PROVIDER!r}; use one of {', '.join(PROVIDERS)}")
     stt = provider_cls()
     log.info("stt worker started, provider=%s, language=%s", stt.name, config.STT_LANGUAGE or "app")
-    voices.warm_up()
-    migrated = False
-    pruned = False
-    cleaned = False
-    samples_done = False
-    demixed = False
-    pitched = False
+    voices_on = config.VOICES  # голоса выключены — модель не грузим и разовые пересчёты голосов не запускаем
+    if voices_on:
+        voices.warm_up()
+    migrated = pruned = cleaned = samples_done = demixed = pitched = not voices_on
     last_requeue = 0.0
     last_consolidate = time.monotonic()
     while True:
@@ -406,7 +403,7 @@ def main():
                             log.exception("voices: model migration failed")
                             migrated = True
                     try:
-                        if voices.enroll_owner(conn):
+                        if voices_on and voices.enroll_owner(conn):
                             log.info("voices: owner voice updated from button questions")
                     except Exception:  # noqa: BLE001
                         log.exception("voices: owner enrollment failed")
@@ -452,7 +449,7 @@ def main():
                                 log.info("voices: %d voices that never talked with the owner moved to background", n)
                         except Exception:  # noqa: BLE001
                             log.exception("voices: background prune failed")
-                    if time.monotonic() - last_consolidate > 3600:
+                    if voices_on and time.monotonic() - last_consolidate > 3600:
                         last_consolidate = time.monotonic()
                         try:
                             res = voices.dedupe(conn)

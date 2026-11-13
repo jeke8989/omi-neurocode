@@ -135,6 +135,10 @@ BUILTIN_TOOLS = [
         "(подходит несколько событий или людей, неясен период). Не спрашивай то, что можно найти инструментами.",
         {"question": {"type": "string", "description": "вопрос, при возможности с 2–4 вариантами"}}, ["question"]),
 ]
+# «Люди по голосу» — только когда голоса включены (VOICES в .env)
+VOICE_TOOLS = {"people", "person_conversations"}
+if not config.VOICES:
+    BUILTIN_TOOLS = [t for t in BUILTIN_TOOLS if t["function"]["name"] not in VOICE_TOOLS]
 
 # Календарь телефона — только когда подключён; изменения — только если пользователь разрешил
 CALENDAR_READ = [

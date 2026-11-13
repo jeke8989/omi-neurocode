@@ -140,19 +140,6 @@ fun EventScreen(id: Long, day: String) {
                 e.summary?.let { s ->
                     item(key = "summary") { Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) { Txt(s, T.body) } }
                 }
-                val people = e.people.filter { !it.isOwner }
-                if (people.isNotEmpty()) {
-                    item(key = "people-title") { SectionTitle(stringResource(R.string.event_people)) }
-                    item(key = "people") {
-                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            people.forEach { p ->
-                                Chip(personLabel(p), false, { Nav.push(Route.Person(p.id)) },
-                                    leading = { Avatar(p, 26.dp) })
-                            }
-                        }
-                    }
-                }
                 if (e.topics.isNotEmpty()) {
                     item(key = "topics") {
                         Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),

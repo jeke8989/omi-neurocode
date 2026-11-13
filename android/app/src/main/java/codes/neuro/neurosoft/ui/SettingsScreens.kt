@@ -159,8 +159,6 @@ fun SettingsScreen() {
         }
 
         Group(stringResource(R.string.settings_people_diary)) {
-            item { ListRow(stringResource(R.string.voices_title), icon = Icons.People, chevron = true,
-                onClick = { Nav.push(Route.VoicesSettings) }) }
             item { ListRow(stringResource(R.string.diary_and_photos), icon = Icons.Pin, chevron = true,
                 onClick = { Nav.push(Route.DiarySettings) }) }
         }

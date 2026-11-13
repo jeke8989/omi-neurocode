@@ -117,7 +117,7 @@ fun IntroFlow(onboarding: Boolean, onFinish: () -> Unit) {
             goals = if (g in goals) goals - g else goals + g
         }, onNext = {
             send()
-            page = 1
+            onFinish()  // шаг «голос» убран вместе с узнаванием голосов
         })
         else -> VoicePage(name.trim(), done = voiceStatus == "done" && !onboarding, onVoice = { from, to -> send(from, to) },
             onFinish = onFinish)
@@ -143,7 +143,7 @@ private fun AboutPage(
                 goalTexts.forEach { g -> Chip(g, g in goals, { onGoal(g) }) }
             }
         }
-        PrimaryButton(stringResource(R.string.intro_next), onNext, Modifier.fillMaxWidth().padding(16.dp),
+        PrimaryButton(stringResource(R.string.intro_done), onNext, Modifier.fillMaxWidth().padding(16.dp),
             enabled = name.isNotBlank())
     }
 }

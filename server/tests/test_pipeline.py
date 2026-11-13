@@ -24,6 +24,7 @@ os.environ.update({
     "LLM_MODEL": "",
     "TZ": "Europe/Moscow",
     "SPEAKER_BACKEND": "spectral",
+    "VOICES": "1",  # голоса на сервере выключены, но код проверяем: вернуть можно одной строкой в .env
     "SPEAKER_MIN_NEW_SEC": "2",  # синтетические диалоги короткие; в жизни — 8 с
     "VOICE_DIR": tempfile.mkdtemp(prefix="neuro-voices-"),
     # все тесты идут с шифрованием данных в базе (как на сервере)

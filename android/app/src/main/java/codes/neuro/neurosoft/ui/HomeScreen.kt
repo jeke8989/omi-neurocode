@@ -53,8 +53,8 @@ import java.time.LocalDate
 
 @Composable
 fun HomeScreen() {
-    // главное — обещания; день — лента событий; люди — кого узнаём по голосу
-    val pager = rememberPagerState(initialPage = HomeState.page.value.coerceIn(0, 2)) { 3 }
+    // главное — обещания; день — лента событий («Люди» по голосам убраны: голоса выключены)
+    val pager = rememberPagerState(initialPage = HomeState.page.value.coerceIn(0, 1)) { 2 }
     val scope = rememberCoroutineScope()
     var calendar by remember { mutableStateOf(false) }
     LaunchedEffect(pager.currentPage) { HomeState.page.value = pager.currentPage }
@@ -62,18 +62,17 @@ fun HomeScreen() {
     Column(Modifier.fillMaxSize()) {
         HomeTopBar(onCalendar = { calendar = true })
         TextTabs(
-            listOf(stringResource(R.string.tab_promises), stringResource(R.string.tab_day), stringResource(R.string.tab_people)),
+            listOf(stringResource(R.string.tab_promises), stringResource(R.string.tab_day)),
             pager.currentPage,
         ) { scope.launch { pager.animateScrollToPage(it) } }
         // страницу меняют и снаружи (уведомление «Обещания», ссылка на задачу в чате)
         LaunchedEffect(HomeState.page.value) {
-            if (pager.currentPage != HomeState.page.value) pager.scrollToPage(HomeState.page.value.coerceIn(0, 2))
+            if (pager.currentPage != HomeState.page.value) pager.scrollToPage(HomeState.page.value.coerceIn(0, 1))
         }
         HorizontalPager(pager, Modifier.weight(1f)) { page ->
             when (page) {
                 0 -> TasksTab()
-                1 -> HomeTab()
-                else -> PeopleTab()
+                else -> HomeTab()
             }
         }
         BottomAskBar()

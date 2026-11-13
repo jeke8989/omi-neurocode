@@ -79,6 +79,11 @@ COMMAND_WINDOW_SEC = env_int("COMMAND_WINDOW_SEC", 20)    # одиночное �
 EVENT_SETTLE_SEC = env_int("EVENT_SETTLE_SEC", 60)        # ждать, пока звук вокруг нажатия дойдёт и расшифруется
 KEEP_AUDIO_DAYS = env_int("KEEP_AUDIO_DAYS", 3)
 
+# --- Голоса (кто говорит) ---
+# Узнавание голосов выключено (решение владельца 2026-11-13): сервер не считает отпечатки голосов, приложение не
+# показывает «Людей». Код остаётся: вернуть — VOICES=1 в .env.
+VOICES = env_bool("VOICES", False)
+
 # --- Голосовой вопрос по кнопке ---
 ASK_MAX_SEC = env_float("ASK_MAX_SEC", 15.0)           # максимум длины вопроса, если он заканчивается по паузе
 ASK_PRESS_MAX_SEC = env_float("ASK_PRESS_MAX_SEC", 125.0)  # вопрос до второго нажатия: страховка, если не нажали
