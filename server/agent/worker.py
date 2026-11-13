@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -398,6 +399,23 @@ def sync_task_integrations(conn):
     task_sync.reconcile(conn)
 
 
+TASK_SYNC_SEC = 5
+
+
+def task_sync_loop():
+    """Задачи в сервисах — своим потоком: итоги разговоров идут минутами (запросы к ИИ), а отправка новой
+    задачи и закрытие выполненной не должны их ждать (было: задача уходила в SmartDesk через 3–4 минуты)."""
+    while True:
+        try:
+            with db.connect() as conn:
+                while True:
+                    task_sync.reconcile(conn)
+                    time.sleep(TASK_SYNC_SEC)
+        except Exception:  # noqa: BLE001
+            log.exception("task sync loop error, retrying in 10s")
+            time.sleep(10)
+
+
 def _old_sync_task_integrations(conn):  # pragma: no cover — прежняя автоотправка, оставлена до проверки
     """Новые задачи -> только вебхуки, которые пользователь сам подписал на событие «задача» (n8n, Make…)."""
     rows = conn.execute("SELECT id, manifest, settings, installed_at FROM extensions WHERE enabled").fetchall()
@@ -446,6 +464,7 @@ def main():
              config.AUTO_EXPORT, notion_ready(), github_ready())
     last_cleanup = 0.0
     last_owner_check = 0.0
+    threading.Thread(target=task_sync_loop, name="task-sync", daemon=True).start()
     while True:
         try:
             with db.connect() as conn:
@@ -463,8 +482,7 @@ def main():
                     quick_tasks(conn)
                     summarize_conversations(conn)
                     process_events(conn)
-                    export_tasks(conn)
-                    sync_task_integrations(conn)
+                    export_tasks(conn)  # задачи в сервисах (SmartDesk…) — в потоке task_sync_loop
                     try:
                         people.capitalize_names_once(conn)  # имена — с большой буквы (один раз для старых)
                     except Exception:  # noqa: BLE001

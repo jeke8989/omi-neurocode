@@ -230,3 +230,23 @@ def test_agent_tool_sends_task(conn, svc):  # noqa: F811
     assert out.startswith("Не отправлено: укажите интеграцию")  # их две — нужно назвать
     out = agent_core.run_builtin(conn, "send_task", {"id": tid, "integration": "smartdesk"}, None)
     assert out == "Отправлено в SmartDesk: https://app.smart-desk.app/t/1"
+
+
+def test_sync_runs_in_own_loop_not_after_summaries(monkeypatch):
+    """Регрессия: автоотправка ждала итогов разговоров (3–4 минуты). Теперь — свой поток каждые несколько секунд."""
+    import threading
+    from agent import worker
+    calls = []
+
+    def fake_reconcile(conn):
+        calls.append(1)
+        if len(calls) >= 2:
+            raise SystemExit  # останавливаем поток после второго круга
+    monkeypatch.setattr(worker.task_sync, "reconcile", fake_reconcile)
+    monkeypatch.setattr(worker, "TASK_SYNC_SEC", 0.01)
+    th = threading.Thread(target=worker.task_sync_loop, daemon=True)
+    th.start()
+    th.join(timeout=10)
+    assert len(calls) == 2 and not th.is_alive()
+    src = open(worker.__file__, encoding="utf-8").read()
+    assert "sync_task_integrations(conn)\n" not in src.split("def main():", 1)[1]  # в главном цикле её больше нет
