@@ -71,6 +71,8 @@
     <string name="cd_settings">Ayarlar</string>
     <string name="cd_task_done">Tamamlandı</string>
     <string name="cd_task_open">Tamamlandı olarak işaretle</string>
+    <string name="cd_task_sync_error">%1$s: gönderilemedi veya güncellenemedi</string>
+    <string name="cd_task_synced">%1$s hizmetine gönderildi</string>
     <string name="cd_voice_input">Sesle söyle</string>
     <string name="charging">Şarj oluyor</string>
     <string name="chat_about">Konu: %1$s</string>

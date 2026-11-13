@@ -12,6 +12,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
@@ -33,6 +34,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
@@ -605,7 +607,26 @@ fun PromiseRow(t: TaskItem, onOpen: () -> Unit, onToggle: () -> Unit) {
                 }
             }
         }
+        if (t.exports.isNotEmpty()) SyncIcons(t.exports)
         Icon(Icons.Chevron, null, tint = c.faint, modifier = Modifier.padding(top = 12.dp).size(16.dp))
+    }
+}
+
+/** Задача отправлена в сторонний сервис (SmartDesk…) — его значок; не дошла или не обновилась там — красная точка. */
+@Composable
+private fun SyncIcons(exports: List<codes.neuro.neurosoft.net.TaskExport>) {
+    val c = Mn.c
+    Row(Modifier.padding(start = 8.dp, end = 2.dp, top = 11.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        exports.forEach { e ->
+            val bad = !e.ok || e.error != null
+            val name = e.name ?: e.ext
+            val said = stringResource(if (bad) R.string.cd_task_sync_error else R.string.cd_task_synced, name)
+            Box(Modifier.semantics { contentDescription = said }) {
+                if (e.icon != null) Txt(e.icon, T.caption, c.ink, maxLines = 1)
+                else Icon(Icons.Link, null, tint = c.graphite, modifier = Modifier.size(16.dp))
+                if (bad) Box(Modifier.align(Alignment.TopEnd).size(7.dp).clip(CircleShape).background(c.red))
+            }
+        }
     }
 }
 

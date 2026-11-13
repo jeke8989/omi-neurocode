@@ -71,6 +71,8 @@
     <string name="cd_settings">Ajustes</string>
     <string name="cd_task_done">Hecha</string>
     <string name="cd_task_open">Marcar como hecha</string>
+    <string name="cd_task_sync_error">%1$s: no se pudo enviar ni actualizar</string>
+    <string name="cd_task_synced">Enviada a %1$s</string>
     <string name="cd_voice_input">Dictar</string>
     <string name="charging">Cargando</string>
     <string name="chat_about">Sobre: %1$s</string>

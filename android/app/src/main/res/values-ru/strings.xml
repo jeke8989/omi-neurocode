@@ -71,6 +71,8 @@
     <string name="cd_settings">Настройки</string>
     <string name="cd_task_done">Выполнено</string>
     <string name="cd_task_open">Отметить выполненной</string>
+    <string name="cd_task_sync_error">%1$s: не получилось отправить или обновить</string>
+    <string name="cd_task_synced">Отправлено в %1$s</string>
     <string name="cd_voice_input">Сказать голосом</string>
     <string name="charging">Заряжается</string>
     <string name="chat_about">Об этом: %1$s</string>
