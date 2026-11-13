@@ -13,6 +13,8 @@ import codes.neuro.neurosoft.net.Graph
 import codes.neuro.neurosoft.net.PeopleInfo
 import codes.neuro.neurosoft.net.TaskItem
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -77,6 +79,8 @@ object Repo {
     val removedTasks = Cached { Api.tasks("dismissed").take(60) }
     val diary = Cached { Api.diary() }
     val features = Cached { Api.features() }
+    /** Интеграции: экран открывается сразу с прошлым списком, свежий подгружается фоном. */
+    val extensions = Cached { Api.extensions() }
     /** Куда можно отправлять задачи (SmartDesk, GitHub…). */
     val taskSinks = Cached { Api.taskSinks() }
     val chat = Cached<ChatState> { Api.chat() }
@@ -95,8 +99,9 @@ object Repo {
     @Synchronized
     fun events(day: String): Cached<DayEvents> = eventsByDay.getOrPut(day) { Cached { Api.events(day) } }
 
-    suspend fun refreshAll(day: String) {
-        days.refresh()
+    /** Полоска дней и лента дня — параллельно: лента не ждёт полоску. */
+    suspend fun refreshAll(day: String) = coroutineScope {
+        launch { days.refresh() }
         events(day).refresh()
     }
 }

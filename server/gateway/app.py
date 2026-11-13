@@ -22,6 +22,8 @@ from pathlib import Path
 import anyio
 import psycopg
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
@@ -2344,4 +2346,7 @@ app = Starlette(
         WebSocketRoute("/ws/ask", ws_ask),
     ],
     lifespan=lifespan,
+    # ответы API сжимаем: лента дня и обещания — 50–100 КБ JSON, по мобильной сети это секунды.
+    # Звук и картинки Starlette не сжимает (уже сжаты), WebSocket не затрагивается.
+    middleware=[Middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)],
 )

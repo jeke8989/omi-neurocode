@@ -55,7 +55,7 @@ private fun ExtIcon(e: Extension) = EmojiTile(e.icon ?: "🧩", 40.dp)
 
 @Composable
 fun ExtensionsScreen() {
-    var state by remember { mutableStateOf<Res<Pair<List<Extension>, List<Extension>>>>(Res(loading = true)) }
+    val state by Repo.extensions.state.collectAsState()
     var manifestUrl by remember { mutableStateOf("") }
     var byLink by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
@@ -63,11 +63,7 @@ fun ExtensionsScreen() {
     val scope = rememberCoroutineScope()
     fun reload() {
         scope.launch {
-            state = try {
-                Res(Api.extensions())
-            } catch (e: Exception) {
-                Res(error = e)
-            }
+            Repo.extensions.refresh()
         }
     }
     LaunchedEffect(Unit) { reload() }
@@ -89,12 +85,13 @@ fun ExtensionsScreen() {
     SettingsPage(stringResource(R.string.integrations)) {
         note?.let { Txt(it, T.caption, c.red, Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) }
         val data = state.data
+        // «Сервисы» (Notion по входу) грузятся сразу, не дожидаясь списка интеграций
+        ConnectorsGroup { note = it }
         when {
             data == null && state.error != null -> ErrorBlock(state.error, { reload() })
             data == null -> LoadingBlock()
             else -> {
                 val (mine, available) = data
-                ConnectorsGroup { note = it }
                 // «Подключено» — только то, что реально работает; остальное — «Нужно настроить» с тем, чего не хватает
                 val (working, unfinished) = mine.partition { it.ready && it.enabled }
                 if (working.isNotEmpty()) {

@@ -35,6 +35,9 @@ object Connectors {
     /** Меняется после входа и при возвращении в приложение — экраны перечитывают статус. */
     val version = mutableIntStateOf(0)
 
+    /** Последний список сервисов: экран интеграций показывает его сразу, свежий подгружается фоном. */
+    var cache: List<Connector>? = null
+
     /** Ссылка на вход -> браузер. Ошибку (нет связи, сервис отказал) возвращает текстом. */
     suspend fun connect(context: Context, id: String): String? = try {
         val url = Api.connectorStart(id)
@@ -80,14 +83,14 @@ fun ConnectorReturnEffect() {
 /** Блок «Сервисы» на экране интеграций. */
 @Composable
 fun ConnectorsGroup(onError: (String?) -> Unit) {
-    var items by remember { mutableStateOf<List<Connector>?>(null) }
+    var items by remember { mutableStateOf(Connectors.cache) }
     var busy by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val version = Connectors.version.intValue
     LaunchedEffect(version) {
         items = try {
-            Api.connectors()
+            Api.connectors().also { Connectors.cache = it }
         } catch (_: Exception) {
             items
         }
